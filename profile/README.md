@@ -18,10 +18,10 @@
 
 ## Starting Point
 
-- **Cognitive load**: 사람이 버거워지는 순간은 데이터가 많을 때가 아니라 맥락을 다시 조립해야 할 때입니다.
-- **Synthesis, not summary**: 요약은 길이를 줄이고, 종합은 증거, 맥락, 리스크, 선택지를 판단 가능한 구조로 만듭니다.
-- **Context into judgment**: 같은 말과 기록도 상황이 바뀌면 뜻이 달라집니다. 목적, 제약, 이해관계, 시간 압박을 함께 봅니다.
-- **Judgment into action**: 좋은 구조는 읽고 끝나지 않습니다. 결정할 것, 확인할 가정, 다음 행동, 위임과 기록으로 이어져야 합니다.
+- **Cognitive load**: 사람이 버거워지는 순간은 데이터가 많을 때가 아니라 맥락을 다시 조립해야 할 때입니다. 요청은 메일에, 근거는 첨부파일에, 결정은 회의록에, 기한은 일정에 흩어져 있으면 판단이 늦어집니다.
+- **Context into judgment**: 같은 말과 기록도 상황이 바뀌면 뜻이 달라집니다. 목적은 고객 요청 처리인지 장애 원인 확인인지 정하고, 제약은 권한·예산·보안·기한처럼 선택을 제한하는 조건으로 따로 봅니다. 이해관계는 고객, 담당자, 승인자, 운영자 중 누가 영향을 받는지 연결하는 일입니다.
+- **Synthesis, not summary**: 요약은 길이를 줄이고, 종합은 판단 구조를 만듭니다. 증거는 원문 메일, 회의록 문장, 로그, 첨부파일, VOC처럼 판단을 뒷받침하는 출처입니다. 맥락은 누가, 언제, 왜, 어떤 기준으로 남긴 기록인지 설명합니다. 리스크는 누락된 정보, 반례, 권한 충돌, 일정 지연처럼 결정을 틀리게 만들 수 있는 조건입니다. 선택지는 승인, 보류, 추가 확인, 위임, 일정 변경처럼 지금 실제로 고를 수 있는 행동입니다.
+- **Judgment into action**: 좋은 구조는 읽고 끝나지 않습니다. 결정할 것은 지금 사람이 선택해야 하는 승인 여부, 우선순위, 대응 범위입니다. 확인할 가정은 고객 영향, 장애 원인, 비용 추정처럼 틀리면 결론이 바뀌는 전제입니다. 다음 행동은 담당자, 기한, 산출물, 남길 기록까지 붙은 실행 단위입니다.
 
 ## DIKW as Checkpoints
 
@@ -31,10 +31,12 @@ DIKW is useful as a set of questions, not as an automatic pyramid. Our working f
   <img src="./assets/dikw-checkpoints.svg" alt="DIKW checkpoints: records, contextualization, judgment points, action connection" width="760">
 </p>
 
-1. **기업 자료**: 문서, 메일, 로그, VOC, 일정은 아직 증거로 해석되기 전의 기록입니다.
-2. **맥락화**: 누가, 언제, 어디서, 어떤 목적과 기준으로 남긴 것인지 확인합니다.
-3. **판단 포인트**: 원인, 패턴, 예외, 제약, 절차를 연결해 오늘 판단할 일을 드러냅니다.
-4. **실행 연결**: 선택, 확인할 가정, 다음 행동, 위임과 기록으로 이어지게 합니다.
+1. **기업 자료**: 메일 요청, 회의록 문장, 로그 오류, VOC, 일정 변경처럼 아직 서로 연결되지 않은 기록입니다.
+2. **맥락화**: 작성자, 시점, 프로젝트, 고객, 권한, 의사결정 기준을 붙여 기록이 무엇을 뜻하는지 보이게 합니다.
+3. **판단 포인트**: 반복되는 패턴, 예외, 원인 후보, 제약, 담당 절차를 묶어 오늘 무엇을 판단해야 하는지 드러냅니다.
+4. **실행 연결**: 승인, 보류, 위임, 추가 확인처럼 가능한 선택을 비교하고 다음 담당자와 기한으로 연결합니다.
+
+Ackoff (1989)는 data, information, knowledge, wisdom을 구분했지만, 이 구분을 자료가 자동으로 올라가는 피라미드로 쓰지는 않습니다. Baskarada와 Koronios (2013)는 DIKW 용어의 정의 합의가 충분하지 않다고 보았고, Frické (2009)는 선형 위계의 논리적 취약성을 지적했습니다. Brienza et al. (2018)의 지혜 관련 추론 연구처럼, 이곳에서는 지혜를 맥락 밖의 정답이 아니라 구체적인 상황 안에서 드러나는 판단 과정으로 다룹니다.
 
 ## Current Focus
 
@@ -44,6 +46,15 @@ DIKW is useful as a set of questions, not as an automatic pyramid. Our working f
 - **Agentic workflows**: 반복 탐색은 줄이고 근거 확인과 사람의 판단은 남기는 작업 흐름
 
 Naruon is a product experiment under Contextual Wisdom Lab. It explores this problem in the email workflow; it is not the organization name.
+
+## References
+
+아래 자료는 원문 또는 PDF 본문을 확인한 자료입니다. 초록이나 서지 페이지만 확인한 자료는 본문 근거로 쓰지 않았습니다.
+
+- Ackoff, R. L. (1989). From data to wisdom. *Journal of Applied Systems Analysis, 16*(1), 3-9. https://faculty.ung.edu/kmelton/documents/datawisdom.pdf
+- Baskarada, S., & Koronios, A. (2013). Data, information, knowledge, wisdom (DIKW): A semiotic theoretical and empirical exploration of the hierarchy and its quality dimension. *Australasian Journal of Information Systems, 18*(1). https://doi.org/10.3127/ajis.v18i1.748
+- Frické, M. (2009). The knowledge pyramid: A critique of the DIKW hierarchy. *Journal of Information Science, 35*(2), 131-142. https://doi.org/10.1177/0165551508094050
+- Brienza, J. P., Kung, F. Y. H., Santos, H. C., Bobocel, D. R., & Grossmann, I. (2018). Wisdom, bias, and balance: Toward a process-sensitive measurement of wisdom-related cognition. *Journal of Personality and Social Psychology, 115*(6), 1093-1126. https://doi.org/10.1037/pspp0000171
 
 ## Founder
 
