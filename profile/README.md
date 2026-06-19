@@ -1,12 +1,12 @@
 <p align="center">
-  <img src="./assets/context-wisdom-lab-logo.svg" alt="ContextWisdomLab logo" width="720">
+  <img src="./assets/context-wisdom-lab-logo.svg" alt="Contextual Wisdom Lab logo" width="720">
 </p>
 
-# ContextWisdomLab
+# Contextual Wisdom Lab
 
 **맥락과 지혜 연구실**은 흩어진 기업 자료를 판단 가능한 구조로 바꾸는 AI 의사결정 지원 시스템을 연구하고 만듭니다.
 
-정보가 부족해서 어려운 것이 아니라, 판단해야 할 맥락이 흩어져 있어서 어렵습니다. ContextWisdomLab은 문서, 메일, 로그, 회의록, VOC, 일정처럼 분산된 자료를 연결해 사람이 덜 소모되고 조직이 더 원활하게 움직이는 구조를 설계합니다.
+정보가 부족해서 어려운 것이 아니라, 판단해야 할 맥락이 흩어져 있어서 어렵습니다. Contextual Wisdom Lab은 문서, 메일, 로그, 회의록, VOC, 일정처럼 분산된 자료를 연결해 사람이 덜 소모되고 조직이 더 원활하게 움직이는 구조를 설계합니다.
 
 [Homepage](https://contextwisdomlab.github.io/) · [GitHub](https://github.com/ContextWisdomLab)
 
@@ -33,7 +33,7 @@
 
 ## Current Focus
 
-ContextWisdomLab is starting from one practical question:
+Contextual Wisdom Lab is starting from one practical question:
 
 > How can LLM systems turn scattered enterprise material into lower-cognitive-load decisions?
 
