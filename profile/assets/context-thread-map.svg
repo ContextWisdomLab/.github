@@ -31,7 +31,7 @@
     <path d="M326 362 H402"/>
     <path d="M326 392 H374"/>
   </g>
-  <path d="M145 451 C214 345 248 280 363 274 C497 266 508 156 612 118" fill="none" stroke="url(#thread)" stroke-width="18" stroke-linecap="round"/>
+  <path d="M145 451 L250 316 L365 274 L500 207 L612 118" fill="none" stroke="url(#thread)" stroke-width="18" stroke-linecap="round" stroke-linejoin="round"/>
   <g filter="url(#shadow)">
     <circle cx="145" cy="451" r="26" fill="#16263d"/>
     <circle cx="250" cy="316" r="24" fill="#287375"/>
