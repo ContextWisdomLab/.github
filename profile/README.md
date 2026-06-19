@@ -46,6 +46,14 @@ Naruon is the product experiment that starts in email. An inbox is not just a me
 - **맥락 종합**: 보낸 사람, 프로젝트, 관계, 타임라인, 근거를 연결합니다.
 - **판단과 실행**: 대기 작업, 일정 충돌, 답장, 위임, 확인 요청으로 이어갑니다.
 
+## Forked Projects
+
+These repositories started from external upstream projects and are tracked separately from lab-originated work.
+
+- **argos**: Fork of [vibemafiaclub/argos](https://github.com/vibemafiaclub/argos). Claude Code·Codex 팀의 토큰, 스킬, 세션 사용 패턴을 분석하는 애널리틱스입니다.
+- **vooster**: Fork of [vibemafiaclub/vooster](https://github.com/vibemafiaclub/vooster). 사람과 AI가 함께 제품 행동과 유스케이스를 관리하는 vspec 도구입니다.
+- **vooster-v2-mvp**: Fork of [vibemafiaclub/vooster-v2-mvp](https://github.com/vibemafiaclub/vooster-v2-mvp). goals, features, specs 구조로 제품 행동 명세를 다루는 TypeScript CLI MVP입니다.
+
 ## Current Focus
 
 - **Context systems**: 관계, 출처, 기준, 리스크를 함께 보존하는 지식 구조
