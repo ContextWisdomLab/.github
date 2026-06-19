@@ -8,6 +8,8 @@
 
 정보가 부족해서 어려운 것이 아니라, 판단해야 할 맥락이 흩어져 있어서 어렵습니다. ContextWisdomLab은 문서, 메일, 로그, 회의록, VOC, 일정처럼 분산된 자료를 연결해 사람이 덜 소모되고 조직이 더 원활하게 움직이는 구조를 설계합니다.
 
+[Homepage](https://contextwisdomlab.github.io/) · [GitHub](https://github.com/ContextWisdomLab)
+
 ## What We Build
 
 - **Context systems**: 관계, 출처, 기준, 리스크를 함께 보존하는 지식 구조
