@@ -106,6 +106,9 @@ jobs:
             git -C "$TRUSTED_WORKSPACE" fetch --no-tags --depth=1 origin "$PR_BASE_SHA"
             git -C "$TRUSTED_WORKSPACE" cat-file -e "$PR_BASE_SHA^{commit}"
           fi
+          if git -C "$TRUSTED_WORKSPACE" cat-file -e "$PR_HEAD_SHA:opencode.jsonc" 2>/dev/null; then
+            git -C "$TRUSTED_WORKSPACE" show "$PR_HEAD_SHA:opencode.jsonc" > "$TRUSTED_WORKSPACE/opencode.jsonc"
+          fi
           # Fetching the expected head SHA directly avoids false failures when
           # refs/pull/<n>/head has already advanced before this queued run starts.
           if git -C "$TRUSTED_WORKSPACE" fetch --no-tags --depth=1 origin "$PR_HEAD_SHA"; then
