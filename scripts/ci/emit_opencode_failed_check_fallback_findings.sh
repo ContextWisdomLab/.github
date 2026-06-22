@@ -90,6 +90,7 @@ pr_changes_trusted_strix_inputs() {
 	set +e
 	git -C "${REPO_ROOT%/}" diff --quiet "$diff_range" -- \
 		.github/workflows/strix.yml \
+		opencode.jsonc \
 		scripts/ci/strix_quick_gate.sh \
 		scripts/ci/test_strix_quick_gate.sh \
 		requirements-strix-ci.txt

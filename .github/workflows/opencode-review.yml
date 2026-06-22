@@ -2393,6 +2393,7 @@ jobs:
               set +e
               git -C "$repo_root" diff --quiet "${PR_BASE_SHA}...${PR_HEAD_SHA}" -- \
                 .github/workflows/strix.yml \
+                opencode.jsonc \
                 scripts/ci/strix_quick_gate.sh \
                 scripts/ci/test_strix_quick_gate.sh \
                 requirements-strix-ci.txt
@@ -2623,6 +2624,46 @@ jobs:
 
             build_billing_lock_body "$failed_checks_file" "$evidence_file" "$body_file"
             create_pull_review "COMMENT" "$(cat "$body_file")"
+            return 0
+          }
+
+          self_modifying_strix_base_failure() {
+            local evidence_file="$1"
+            local diff_status
+
+            grep -Fq "Self-test Strix gate script" "$evidence_file" || return 1
+            grep -Fq "opencode.jsonc: No such file or directory" "$evidence_file" || return 1
+            if [ -z "${PR_BASE_SHA:-}" ] || [ -z "${PR_HEAD_SHA:-}" ]; then
+              return 1
+            fi
+            if ! git rev-parse --verify "${PR_BASE_SHA}^{commit}" >/dev/null 2>&1 ||
+              ! git rev-parse --verify "${PR_HEAD_SHA}^{commit}" >/dev/null 2>&1; then
+              return 1
+            fi
+
+            set +e
+            git diff --quiet "${PR_BASE_SHA}...${PR_HEAD_SHA}" -- \
+              .github/workflows/opencode-review.yml \
+              .github/workflows/strix.yml \
+              opencode.jsonc \
+              scripts/ci/strix_quick_gate.sh \
+              scripts/ci/test_strix_quick_gate.sh \
+              requirements-strix-ci.txt
+            diff_status=$?
+            set -e
+
+            [ "$diff_status" -eq 1 ]
+          }
+
+          leave_review_unchanged_for_self_modifying_strix_if_present() {
+            local evidence_file="$1"
+
+            if ! self_modifying_strix_base_failure "$evidence_file"; then
+              return 1
+            fi
+
+            # ponytail: self-modifying trusted workflows need same-head manual evidence until base catches up.
+            echo "::error::Strix failed in a trusted-base pull_request_target self-test that could not see this PR's OpenCode/Strix config changes. Leaving the PR review unchanged; rerun same-head workflow_dispatch Strix evidence or merge the trusted workflow update before approval."
             return 0
           }
 
@@ -3165,6 +3206,11 @@ jobs:
                 printf "Failed GitHub Check evidence could not be collected for current head \`%s\`.\n" "$HEAD_SHA" >"$failed_check_evidence_file"
               fi
 
+              if leave_review_unchanged_for_self_modifying_strix_if_present "$failed_check_evidence_file"; then
+                echo "::endgroup::"
+                exit 1
+              fi
+
               if comment_for_billing_lock_if_present "$failed_checks_file" "$failed_check_evidence_file" "$failed_check_review_body_file"; then
                 echo "::endgroup::"
                 exit 0
@@ -3340,6 +3386,10 @@ jobs:
                 if ! collect_failed_check_evidence_or_note "$failed_check_evidence_file"; then
                   printf "Failed GitHub Check evidence could not be collected for current head \`%s\`.\n" "$HEAD_SHA" >"$failed_check_evidence_file"
                 fi
+                if leave_review_unchanged_for_self_modifying_strix_if_present "$failed_check_evidence_file"; then
+                  echo "::endgroup::"
+                  exit 1
+                fi
                 if comment_for_billing_lock_if_present "$failed_checks_file" "$failed_check_evidence_file" "$failed_check_review_body_file"; then
                   echo "::endgroup::"
                   exit 0
@@ -3407,6 +3457,10 @@ jobs:
                 if ! collect_failed_check_evidence_or_note "$failed_check_evidence_file"; then
                   printf "Failed GitHub Check evidence could not be collected for current head \`%s\`.\n" "$HEAD_SHA" >"$failed_check_evidence_file"
                 fi
+                if leave_review_unchanged_for_self_modifying_strix_if_present "$failed_check_evidence_file"; then
+                  echo "::endgroup::"
+                  exit 1
+                fi
                 if comment_for_billing_lock_if_present "$failed_checks_file" "$failed_check_evidence_file" "$failed_check_review_body_file"; then
                   echo "::endgroup::"
                   exit 0
@@ -3438,6 +3492,10 @@ jobs:
                 failed_check_evidence_file="$(mktemp)"
                 if ! collect_failed_check_evidence_or_note "$failed_check_evidence_file"; then
                   printf "Failed GitHub Check evidence could not be collected for current head \`%s\`.\n" "$HEAD_SHA" >"$failed_check_evidence_file"
+                fi
+                if leave_review_unchanged_for_self_modifying_strix_if_present "$failed_check_evidence_file"; then
+                  echo "::endgroup::"
+                  exit 1
                 fi
                 if comment_for_billing_lock_if_present "$failed_checks_file" "$failed_check_evidence_file" "$failed_check_review_body_file"; then
                   echo "::endgroup::"
