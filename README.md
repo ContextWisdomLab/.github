@@ -6,6 +6,8 @@ The public GitHub organization profile lives in [profile/README.md](profile/READ
 
 Homepage: https://contextualwisdomlab.github.io/
 
+PR governance live audit: [PR_GOVERNANCE_AUDIT.md](PR_GOVERNANCE_AUDIT.md).
+
 ## PR review and merge policy
 
 OpenCode judges PRs; GitHub Actions performs mechanical updates and merges.
