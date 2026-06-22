@@ -714,6 +714,9 @@ jobs:
           runtime support, or domain terminology when a search source is available. Note
           any unavailable or inapplicable MCP source in the review summary so the review is not just local diff
           inspection. Also inspect changed files and focused hunks directly when MCP evidence is insufficient.
+          OpenCode runtime tools are enabled: bash, task, webfetch, websearch, and lsp. Use bash for direct
+          verification commands, task for focused subreviews when risk warrants it, webfetch/websearch for
+          current external facts, and lsp for symbol-aware code intelligence when the language server is available.
           Do not claim repository docs, images, or reference assets are unavailable, missing, or absent unless the changed docs repository tree evidence proves it.
           If an external MCP source is unavailable, state that as a source limitation, not as a repository fact.
           Structural exploration is mandatory for every PR, including dependency-only, lockfile-only,
@@ -773,6 +776,9 @@ jobs:
           concepts, standards, runtime support, or domain terminology when a search source is available. If one is unavailable or not
           applicable to the diff, say so briefly in the review summary. Inspect changed files/focused hunks
           directly when MCP evidence is not enough.
+          OpenCode runtime tools are enabled: bash, task, webfetch, websearch, and lsp. Use bash for direct
+          verification commands, task for focused subreviews when risk warrants it, webfetch/websearch for
+          current external facts, and lsp for symbol-aware code intelligence when the language server is available.
           Do not claim repository docs, images, or reference assets are unavailable, missing, or absent unless the changed docs repository tree evidence proves it.
           If an external MCP source is unavailable, state that as a source limitation, not as a repository fact.
           Structural exploration is mandatory for every PR, including dependency-only, lockfile-only,
