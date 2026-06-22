@@ -71,7 +71,9 @@ STRUCTURAL_FAILURE_PATTERNS = (
 )
 
 CHANGED_FILE_EVIDENCE_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9_])(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.@+-]+"
+    r"(?<![A-Za-z0-9_])(?:[A-Za-z0-9_.-]+/)+(?:[A-Za-z0-9_.@+-]+\."
+    r"(?:py|js|jsx|ts|tsx|mjs|cjs|sh|bash|yml|yaml|json|jsonc|toml|lock|md|txt|css|scss|html|sql|go|rs|java|kt|swift|rb|php|cs|xml|ini|cfg)"
+    r"|Dockerfile|Makefile|README|LICENSE|AGENTS\.md)(?![A-Za-z0-9_])"
     r"|(?<![A-Za-z0-9_])[A-Za-z0-9_.-]+\."
     r"(?:py|js|jsx|ts|tsx|mjs|cjs|sh|bash|yml|yaml|json|jsonc|toml|lock|md|txt|css|scss|html|sql|go|rs|java|kt|swift|rb|php|cs|xml|ini|cfg)"
     r"(?![A-Za-z0-9_])"
@@ -366,5 +368,5 @@ def main(argv: list[str]) -> int:
     return 4
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main(sys.argv))

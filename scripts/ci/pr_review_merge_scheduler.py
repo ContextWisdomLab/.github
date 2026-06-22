@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+"""Inspect PR review state and drive centralized OpenCode merge automation."""
+
 from __future__ import annotations
 
 import argparse
@@ -70,12 +72,15 @@ query($owner: String!, $name: String!, $pageSize: Int!, $cursor: String) {
 
 @dataclass
 class Decision:
+    """Scheduler decision for a single pull request."""
+
     pr: int
     action: str
     reason: str
 
 
 def run(args: list[str], *, stdin: str | None = None) -> str:
+    """Run a command and return stdout, raising with stderr on failure."""
     process = subprocess.run(args, input=stdin, capture_output=True, text=True)
     if process.returncode != 0:
         raise RuntimeError(
@@ -85,6 +90,7 @@ def run(args: list[str], *, stdin: str | None = None) -> str:
 
 
 def split_repo(repo: str) -> tuple[str, str]:
+    """Split an owner/name repository string into owner and repository name."""
     try:
         owner, name = repo.split("/", 1)
     except ValueError as exc:
@@ -95,6 +101,7 @@ def split_repo(repo: str) -> tuple[str, str]:
 
 
 def gh_graphql(query: str, **fields: str | int) -> dict[str, Any]:
+    """Run a GitHub GraphQL query through gh and decode the JSON response."""
     cmd = ["gh", "api", "graphql", "-F", "query=@-"]
     for key, value in fields.items():
         flag = "-F" if isinstance(value, int) else "-f"
@@ -103,6 +110,7 @@ def gh_graphql(query: str, **fields: str | int) -> dict[str, Any]:
 
 
 def fetch_open_prs(repo: str, max_prs: int) -> list[dict[str, Any]]:
+    """Fetch open pull requests from GitHub, paginating up to max_prs."""
     owner, name = split_repo(repo)
     prs: list[dict[str, Any]] = []
     cursor: str | None = None
@@ -127,12 +135,14 @@ def fetch_open_prs(repo: str, max_prs: int) -> list[dict[str, Any]]:
 
 
 def context_nodes(pr: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return status rollup context nodes for a pull request payload."""
     rollup = pr.get("statusCheckRollup") or {}
     contexts = rollup.get("contexts") or {}
     return contexts.get("nodes") or []
 
 
 def is_opencode_context(node: dict[str, Any]) -> bool:
+    """Return whether a check or status context belongs to OpenCode Review."""
     if node.get("__typename") == "CheckRun":
         workflow = (
             ((node.get("checkSuite") or {}).get("workflowRun") or {}).get("workflow")
@@ -143,6 +153,7 @@ def is_opencode_context(node: dict[str, Any]) -> bool:
 
 
 def opencode_in_progress(pr: dict[str, Any]) -> bool:
+    """Return whether any OpenCode review status for the PR is still running."""
     for node in context_nodes(pr):
         if not is_opencode_context(node):
             continue
@@ -153,19 +164,23 @@ def opencode_in_progress(pr: dict[str, Any]) -> bool:
 
 
 def unresolved_thread_count(pr: dict[str, Any]) -> int:
+    """Count active, non-outdated unresolved review threads on a PR."""
     threads = ((pr.get("reviewThreads") or {}).get("nodes") or [])
     return sum(1 for thread in threads if not thread.get("isResolved") and not thread.get("isOutdated"))
 
 
 def review_author_login(review: dict[str, Any]) -> str:
+    """Return a normalized review author login."""
     return ((review.get("author") or {}).get("login") or "").lower()
 
 
 def is_opencode_review(review: dict[str, Any]) -> bool:
+    """Return whether a review was authored by the OpenCode agent."""
     return review_author_login(review) == "opencode-agent"
 
 
 def current_head_review_state(pr: dict[str, Any], state: str) -> bool:
+    """Return whether OpenCode left a target review state on the current head."""
     head = pr.get("headRefOid")
     for review in reversed((pr.get("reviews") or {}).get("nodes") or []):
         if not is_opencode_review(review):
@@ -179,6 +194,7 @@ def current_head_review_state(pr: dict[str, Any], state: str) -> bool:
 
 
 def latest_opencode_review(pr: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the newest OpenCode review from the PR review list."""
     for review in reversed((pr.get("reviews") or {}).get("nodes") or []):
         if is_opencode_review(review):
             return review
@@ -186,19 +202,23 @@ def latest_opencode_review(pr: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def latest_opencode_approved(pr: dict[str, Any]) -> bool:
+    """Return whether the newest OpenCode review is an approval."""
     review = latest_opencode_review(pr)
     return bool(review and (review.get("state") or "").upper() == "APPROVED")
 
 
 def has_current_head_approval(pr: dict[str, Any]) -> bool:
+    """Return whether OpenCode approved the exact current head commit."""
     return current_head_review_state(pr, "APPROVED")
 
 
 def has_current_head_changes_requested(pr: dict[str, Any]) -> bool:
+    """Return whether OpenCode requested changes on the exact current head."""
     return current_head_review_state(pr, "CHANGES_REQUESTED")
 
 
 def failed_status_checks(pr: dict[str, Any]) -> list[str]:
+    """Return failing check or status context names from the PR rollup."""
     failed: list[str] = []
     for node in context_nodes(pr):
         if node.get("__typename") == "CheckRun":
@@ -213,6 +233,7 @@ def failed_status_checks(pr: dict[str, Any]) -> list[str]:
 
 
 def enable_auto_merge(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
+    """Enable merge-commit auto-merge for a PR at its current head."""
     number = str(pr["number"])
     head = pr["headRefOid"]
     if dry_run:
@@ -221,6 +242,7 @@ def enable_auto_merge(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
 
 
 def update_branch(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
+    """Ask GitHub to update a PR branch, guarded by the observed head SHA."""
     number = str(pr["number"])
     head = pr["headRefOid"]
     if dry_run:
@@ -239,6 +261,7 @@ def update_branch(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
 
 
 def dispatch_opencode_review(repo: str, workflow: str, pr: dict[str, Any], *, dry_run: bool) -> None:
+    """Dispatch the OpenCode Review workflow for the PR head."""
     if dry_run:
         return
     run(
@@ -276,6 +299,7 @@ def inspect_pr(
     workflow: str,
     base_branch: str,
 ) -> Decision:
+    """Decide and optionally act on one pull request's merge-readiness state."""
     number = pr["number"]
     head_repo = (pr.get("headRepository") or {}).get("nameWithOwner")
     base_ref = pr.get("baseRefName")
@@ -332,6 +356,7 @@ def print_summary(
     base_branch: str,
     project_flow: str,
 ) -> None:
+    """Print human-readable and machine-readable scheduler decisions."""
     counts: dict[str, int] = {}
     for decision in decisions:
         counts[decision.action] = counts.get(decision.action, 0) + 1
@@ -351,6 +376,7 @@ def print_summary(
 
 
 def self_test() -> None:
+    """Exercise scheduler invariants without GitHub network access."""
     sample = {
         "number": 1,
         "headRefOid": "abc",
@@ -450,6 +476,7 @@ def self_test() -> None:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    """Parse scheduler CLI arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--base-branch", default=os.environ.get("DEFAULT_BRANCH", ""))
@@ -465,6 +492,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str]) -> int:
+    """Run the scheduler CLI."""
     args = parse_args(argv)
     if args.self_test:
         self_test()
@@ -498,7 +526,7 @@ def main(argv: list[str]) -> int:
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     try:
         raise SystemExit(main(sys.argv[1:]))
     except RuntimeError as exc:

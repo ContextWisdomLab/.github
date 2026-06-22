@@ -52,6 +52,9 @@ jobs:
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
 
+      - name: Install Python coverage measurement tools
+        run: python3 -m pip install --disable-pip-version-check -r requirements-opencode-review-ci.txt
+
       - name: Measure test and docstring coverage at 100 percent
         id: measure
         env:
