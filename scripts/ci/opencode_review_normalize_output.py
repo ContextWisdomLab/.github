@@ -250,11 +250,6 @@ def main(argv: list[str]) -> int:
             continue
 
         normalized_json = json.dumps(control, separators=(",", ":"), ensure_ascii=False)
-        normalized_json = (
-            normalized_json.replace("<", r"\u003c")
-            .replace(">", r"\u003e")
-            .replace("&", r"\u0026")
-        )
         output_file.write_text(
             "\n".join(
                 [
