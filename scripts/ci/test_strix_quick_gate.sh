@@ -364,6 +364,8 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" "failed-check-evidence.md" "opencode review copies full failed-check evidence into the isolated workspace"
 	assert_file_contains "$workflow_file" "Checkout trusted review workflow" "opencode review executes trusted workflow scripts from the base checkout"
 	assert_file_contains "$workflow_file" "Checkout trusted review workflow for manual PR review" "opencode review checks out explicit base SHA for manual PR review reruns"
+	assert_file_contains "$workflow_file" "pr_head_ref:" "opencode workflow_dispatch accepts scheduler-provided PR head branch"
+	assert_file_contains "$workflow_file" 'github.event.inputs.pr_head_ref' "opencode review uses scheduler-provided PR head branch before falling back to PR lookup"
 	assert_file_contains "$workflow_file" 'ref: ${{ github.event.inputs.pr_head_sha }}' "opencode manual review checks out the PR head workflow scripts for same-head gate validation"
 	assert_file_contains "$workflow_file" "Materialize pull request head for OpenCode review data" "opencode review materializes PR-head source as read-only review data"
 	assert_file_contains "$workflow_file" 'git worktree add --detach "$OPENCODE_SOURCE_WORKDIR" "$PR_HEAD_SHA"' "opencode review materializes the PR head without actions/checkout credentials"

@@ -17,6 +17,10 @@ on:
         description: Pull request base SHA
         required: true
         type: string
+      pr_head_ref:
+        description: Pull request head branch
+        required: false
+        type: string
       pr_head_sha:
         description: Pull request head SHA
         required: true
@@ -258,7 +262,7 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
           PR_BASE_REF: ${{ github.event.pull_request.base.ref || github.event.inputs.pr_base_ref }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
-          PR_HEAD_REF: ${{ github.event.pull_request.head.ref || '' }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref || github.event.inputs.pr_head_ref || '' }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
           OPENCODE_SOURCE_WORKDIR: ${{ runner.temp }}/opencode-pr-head
         run: |
