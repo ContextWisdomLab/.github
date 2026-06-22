@@ -140,6 +140,10 @@ assert_strix_workflow_pr_trigger_hardened() {
 	if [[ "$pr_head_fetch_block" != *"gh auth setup-git"* ]]; then
 		record_failure "strix workflow configures git credentials in PR head fetch step"
 	fi
+	case "$pr_head_fetch_block" in
+		*'fetch --no-tags --depth=1 origin "$PR_HEAD_SHA"'*'show "$PR_HEAD_SHA:opencode.jsonc" > "$TRUSTED_WORKSPACE/opencode.jsonc"'*) ;;
+		*) record_failure "strix workflow materializes PR-head OpenCode config only after fetching the PR head commit" ;;
+	esac
 	assert_file_contains "$workflow_file" "for pr_head_fetch_attempt in 1 2 3 4 5 6" "strix workflow retries stale PR head ref propagation"
 	assert_file_contains "$workflow_file" "PR head ref did not resolve to expected commit" "strix workflow fails closed when PR head ref remains stale"
 	assert_file_contains "$workflow_file" "sleep 10" "strix workflow waits between stale PR head ref retries"
