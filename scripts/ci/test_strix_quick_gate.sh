@@ -192,6 +192,7 @@ assert_strix_workflow_pr_trigger_hardened() {
 	assert_file_not_contains "$GATE_SCRIPT" 'root.rglob("*.log")' "strix gate avoids recursive pathlib glob traversal for report logs"
 	assert_file_contains "$GATE_SCRIPT" "has_strix_report_failure_signal" "strix gate fails closed on warning-class Strix report artifacts"
 	assert_file_not_contains "$workflow_file" "ignore::UserWarning" "strix workflow must not blanket-suppress all UserWarning output"
+	assert_file_contains "$GATE_SCRIPT" "vulnerability_file_reports_generic_github_actions_workflow_insecurity" "strix gate fact-checks generic GitHub Actions workflow security reports before accepting whole-file claims"
 	assert_file_not_contains "$workflow_file" "vertex_ai/* | vertex_ai_beta/*" "strix workflow must not accept arbitrary Vertex models"
 	assert_file_contains "$workflow_file" "provider_mode=openai_direct" "strix workflow requires direct OpenAI GPT-5 credentials"
 	assert_file_contains "$workflow_file" "provider_mode=github_models" "strix workflow supports GitHub Models provider mode"
@@ -2527,6 +2528,56 @@ EOS
 			;;
 		esac
 		;;
+	generic-github-actions-workflow-fallback-success)
+		case "${STRIX_LLM:-}" in
+		vertex_ai/generic-actions-primary)
+			mkdir -p "$STRIX_REPORTS_DIR/fake-generic-actions/vulnerabilities"
+			cat >"$STRIX_REPORTS_DIR/fake-generic-actions/vulnerabilities/vuln-0001.md" <<'EOS'
+# Insecure Configurations in GitHub Actions Workflows
+
+**Severity:** CRITICAL
+**Target:** local_code: /workspace/strix-pr-scope.fake
+**Endpoint:** CI/CD Pipeline
+**CWE:** CWE-732
+
+## Description
+
+/workspace/strix-pr-scope.fake/.github/workflows/strix.yml
+
+## Technical Analysis
+
+The GitHub Actions configuration contains several security weaknesses:
+1. Secrets are written to temporary files without proper access controls
+2. API keys are passed through environment variables without adequate masking
+3. Excessive permissions granted to workflows
+4. Insufficient input validation for workflow parameters
+
+## Code Analysis
+
+**Location 1:** `.github/workflows/strix.yml` (lines 1-300)
+  ```
+  Full file content
+  ```
+
+  **Suggested Fix:**
+```diff
+- Current content
++ Secured version
+```
+EOS
+			echo "Penetration test failed: generic GitHub Actions workflow finding"
+			exit 1
+			;;
+		vertex_ai/fallback-one)
+			echo "scan ok after generic GitHub Actions workflow false positive"
+			exit 0
+			;;
+		*)
+			echo "Error: generic GitHub Actions workflow fallback path unexpected (${STRIX_LLM:-})" >&2
+			exit 37
+			;;
+		esac
+		;;
 	vertex-primary-existing-endpoint-nonrecoverable|multi-source-dirs-existing-endpoint)
 		case "${STRIX_LLM:-}" in
 		vertex_ai/existing-endpoint-primary|vertex_ai/multi-dir-primary)
@@ -3774,6 +3825,39 @@ config: |
       }
     }
   }
+EOS
+	elif [ "$scenario" = "generic-github-actions-workflow-fallback-success" ]; then
+		mkdir -p "$repo_root_dir/.github/workflows"
+		cat >"$repo_root_dir/.github/workflows/strix.yml" <<'EOS'
+name: Strix Security Scan
+
+permissions:
+  actions: read
+  contents: read
+  models: read
+
+jobs:
+  strix:
+    steps:
+      - name: Fetch pull request head for trusted scan
+        run: |
+          if ! [[ "$PR_HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            exit 1
+          fi
+          if [ -n "$PR_BASE_SHA" ] && ! [[ "$PR_BASE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            exit 1
+          fi
+      - name: Gate Strix secrets
+        run: |
+          echo '::error::STRIX_LLM must select GitHub Models openai/gpt-5 or newer, direct OpenAI GPT-5.4 or newer, or an approved organization Vertex AI model.'
+      - name: Mask LLM API key
+        run: |
+          sanitized="$(printf '%s' "$LLM_API_KEY" | tr -d '\r\n')"
+          echo "::add-mask::${sanitized}"
+      - name: Prepare LLM API key input file
+        run: |
+          umask 077
+          printf '%s' "$sanitized" > "$RUNNER_TEMP/llm_api_key.txt"
 EOS
 	elif [ "$scenario" = "pr-large-scope-full-set" ]; then
 		mkdir -p "$repo_root_dir/backend/large-scope"
@@ -7408,6 +7492,27 @@ run_gate_case "opencode-documented-env-api-key-fallback-success" \
 	"0" \
 	"pull_request" \
 	".github/workflows/opencode-review.yml"
+
+run_gate_case "generic-github-actions-workflow-fallback-success" \
+	"vertex_ai/generic-actions-primary" \
+	"vertex_ai/fallback-one vertex_ai/fallback-two" \
+	"0" \
+	"scan ok after generic GitHub Actions workflow false positive" \
+	"2" \
+	"vertex_ai/generic-actions-primary|vertex_ai/fallback-one" \
+	"<unset>|<unset>" \
+	"vertex_ai" \
+	"__DEFAULT__" \
+	"" \
+	"0" \
+	"CRITICAL" \
+	"0" \
+	"" \
+	"" \
+	"1200" \
+	"0" \
+	"pull_request" \
+	".github/workflows/strix.yml"
 
 run_gate_case "vertex-primary-existing-endpoint-nonrecoverable" \
 	"vertex_ai/existing-endpoint-primary" \

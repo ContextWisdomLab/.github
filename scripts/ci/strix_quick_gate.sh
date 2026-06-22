@@ -3148,6 +3148,102 @@ vulnerability_file_reports_documented_opencode_env_api_key_reference() {
 	return 1
 }
 
+github_actions_workflow_source_candidates() {
+	local resolved_scan_target=""
+	resolved_scan_target="$(resolve_current_target_path "$TARGET_PATH" 2>/dev/null || true)"
+
+	if [ -n "$resolved_scan_target" ]; then
+		printf '%s\n' "$resolved_scan_target/.github/workflows/strix.yml"
+	fi
+	if pull_request_head_blob_required || [ "$TARGET_PATH_IS_INTERNAL_PR_SCOPE" -eq 1 ]; then
+		return 0
+	fi
+	printf '%s\n' "$REPO_ROOT/.github/workflows/strix.yml"
+}
+
+source_file_refutes_generic_github_actions_workflow_insecurity() {
+	local source_file="$1"
+	python3 - "$source_file" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+permissions_block = re.search(r"(?ms)^permissions:\n(?:(?:[ \t]+[A-Za-z-]+:[ \t]+read[ \t]*\n)+)", text)
+if not permissions_block:
+    raise SystemExit(1)
+permissions_text = permissions_block.group(0)
+required_permissions = {"actions", "contents", "models"}
+observed_permissions = set(re.findall(r"^[ \t]+([A-Za-z-]+):[ \t]+read[ \t]*$", permissions_text, re.MULTILINE))
+if not required_permissions.issubset(observed_permissions):
+    raise SystemExit(1)
+if re.search(
+    r"(?m)^[ \t]*(?:write-all|(?:actions|contents|models|pull-requests|issues|checks|deployments):[ \t]+write)\b",
+    text,
+):
+    raise SystemExit(1)
+
+counterevidence = [
+    'echo "::add-mask::${sanitized}"',
+    "umask 077",
+    '[[ "$PR_HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]',
+    '[[ "$PR_BASE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]',
+    "STRIX_LLM must select GitHub Models openai/gpt-5 or newer",
+]
+if not all(needle in text for needle in counterevidence):
+    raise SystemExit(1)
+
+raise SystemExit(0)
+PY
+}
+
+vulnerability_file_reports_generic_github_actions_workflow_insecurity() {
+	local vuln_file="$1"
+	if [ ! -f "$vuln_file" ] || [ -L "$vuln_file" ]; then
+		return 1
+	fi
+	if ! grep -Fq "Insecure Configurations in GitHub Actions Workflows" "$vuln_file"; then
+		return 1
+	fi
+	if ! grep -Fq ".github/workflows/strix.yml" "$vuln_file"; then
+		return 1
+	fi
+	if ! grep -Fq "Full file content" "$vuln_file"; then
+		return 1
+	fi
+	if ! grep -Fq "Current content" "$vuln_file" || ! grep -Fq "Secured version" "$vuln_file"; then
+		return 1
+	fi
+	if ! grep -Fq "Secrets are written to temporary files without proper access controls" "$vuln_file"; then
+		return 1
+	fi
+	if ! grep -Fq "API keys are passed through environment variables without adequate masking" "$vuln_file"; then
+		return 1
+	fi
+	if ! grep -Fq "Excessive permissions granted to workflows" "$vuln_file"; then
+		return 1
+	fi
+	if ! grep -Fq "Insufficient input validation for workflow parameters" "$vuln_file"; then
+		return 1
+	fi
+
+	local source_file
+	while IFS= read -r source_file; do
+		if [ -z "$source_file" ]; then
+			continue
+		fi
+		if [ ! -f "$source_file" ] || [ -L "$source_file" ]; then
+			continue
+		fi
+		if source_file_refutes_generic_github_actions_workflow_insecurity "$source_file"; then
+			echo "Detected Strix report making a generic GitHub Actions workflow security claim contradicted by the scanned workflow; treating as retryable model inconsistency." >&2
+			return 0
+		fi
+	done < <(github_actions_workflow_source_candidates)
+
+	return 1
+}
+
 vulnerability_file_is_retryable_model_inconsistency() {
 	local vuln_file="$1"
 	if vulnerability_file_has_absent_endpoint_finding "$vuln_file"; then
@@ -3157,6 +3253,9 @@ vulnerability_file_is_retryable_model_inconsistency() {
 		return 0
 	fi
 	if vulnerability_file_reports_documented_opencode_env_api_key_reference "$vuln_file"; then
+		return 0
+	fi
+	if vulnerability_file_reports_generic_github_actions_workflow_insecurity "$vuln_file"; then
 		return 0
 	fi
 	return 1
