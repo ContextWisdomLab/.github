@@ -292,6 +292,23 @@ def print_summary(
 
 
 def self_test() -> None:
+    assert split_repo("owner/name") == ("owner", "name")
+    assert split_repo("owner/name/extra") == ("owner", "name/extra")
+    try:
+        split_repo("owner")
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
+    try:
+        split_repo("/name")
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
+    try:
+        split_repo("owner/")
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
     sample = {
         "number": 1,
         "headRefOid": "abc",
