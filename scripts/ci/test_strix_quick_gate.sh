@@ -3301,7 +3301,7 @@ EOS
 	pr-critical-changed-internal-dotdir-target)
 		mkdir -p "$STRIX_REPORTS_DIR/fake-pr-changed-internal-dotdir/vulnerabilities"
 		cat >"$STRIX_REPORTS_DIR/fake-pr-changed-internal-dotdir/vulnerabilities/vuln-0001.md" <<EOS
-**Severity:** HIGH
+**Severity:** CRITICAL
 **Target:** /workspace/$(basename -- "$target_path")/.github/workflows/opencode-review.yml
 EOS
 		echo "Penetration test failed: changed internal dot-directory target"
