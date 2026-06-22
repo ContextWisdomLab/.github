@@ -329,7 +329,7 @@ assert_strix_child_target_uses_constant_argument() {
 
 assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	local workflow_file="$REPO_ROOT/.github/workflows/opencode-review.yml"
-	local opencode_config="$REPO_ROOT/opencode.jsonc"
+	local opencode_config="$workflow_file"
 
 	assert_file_contains "$workflow_file" "pull_request_target:" "opencode review workflow runs on the trusted PR trigger so merge-conflict PRs still get the standard review surface"
 	assert_file_contains "$workflow_file" "pull_request:" "opencode review workflow publishes a PR-associated required check while trusted review side effects stay on pull_request_target"
@@ -603,8 +603,8 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" "run_failed_check_diagnosis" "opencode approval gate reruns OpenCode diagnosis when checks fail after the initial review"
 	assert_file_contains "$workflow_file" "OpenCode action outcomes were primary=" "opencode approval gate records invalid model outcome details"
 	assert_file_contains "$workflow_file" "OpenCode model attempts did not produce a usable control block" "opencode approval gate reports invalid model output as a review-governance blocker"
-	assert_file_contains "$workflow_file" "it will not approve without source-backed current-head review evidence" "opencode approval gate refuses to approve invalid model output when peer checks and human threads are clean"
-	assert_file_contains "$workflow_file" "no valid source-backed review output was available" "opencode model-failure fallback requests changes instead of approving invalid model output"
+	assert_file_contains "$workflow_file" "deterministic fallback approval did not apply" "opencode approval gate refuses to approve invalid model output when deterministic fallback criteria are not met"
+	assert_file_contains "$workflow_file" "Leaving the PR review unchanged because this is review tooling instability, not a source-code finding." "opencode model-failure path fails the check instead of inventing a source-code finding"
 	assert_file_contains "$workflow_file" "request_changes_for_merge_conflict_if_present" "opencode approval gate checks mergeability before approving model or fallback output"
 	assert_file_contains "$workflow_file" "Merge Conflict Guidance" "opencode approval gate emits explicit conflict guidance when mergeability is dirty"
 	assert_file_contains "$workflow_file" "flowchart LR" "opencode merge-conflict guidance includes a compact Mermaid graph"
@@ -644,7 +644,7 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$opencode_config" '"url": "https://mcp.deepwiki.com/mcp"' "opencode config points DeepWiki at the official remote MCP endpoint"
 	assert_file_contains "$opencode_config" '"@upstash/context7-mcp@3.1.0"' "opencode config pins the Context7 MCP package"
 	assert_file_contains "$opencode_config" '"@guhcostan/web-search-mcp@1.0.5"' "opencode config pins the web search MCP package"
-	assert_file_contains "$opencode_config" '"serve", "--mcp"' "opencode config launches CodeGraph in MCP mode"
+	assert_file_contains "$opencode_config" "serve --mcp" "opencode config launches CodeGraph in MCP mode"
 	assert_file_contains "$opencode_config" '"small_model": "github-models/deepseek/deepseek-v3-0324"' "opencode config uses a reachable DeepSeek V3 small model"
 	assert_file_contains "$opencode_config" '"openai/gpt-5"' "opencode config defines GitHub Models GPT-5 with full model id"
 	assert_file_contains "$opencode_config" '"deepseek/deepseek-r1-0528"' "opencode config defines DeepSeek R1 fallback"
