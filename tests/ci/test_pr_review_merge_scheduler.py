@@ -243,35 +243,35 @@ def test_inspect_pr():
     }
 
     draft_pr = {**base_pr, "isDraft": True}
-    assert pr_review_merge_scheduler.inspect_pr("owner/repo", draft_pr, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=True, workflow="wf", base_branch="main").action == "skip"
+    assert pr_review_merge_scheduler.inspect_pr("owner/repo", draft_pr, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=True, workflow="wf", base_branch="main", update_branches=False, security_workflow="sec").action == "skip"
 
-    assert pr_review_merge_scheduler.inspect_pr("owner/repo", base_pr, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=True, workflow="wf", base_branch="other").action == "skip"
+    assert pr_review_merge_scheduler.inspect_pr("owner/repo", base_pr, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=True, workflow="wf", base_branch="other", update_branches=False, security_workflow="sec").action == "skip"
 
     fork_pr = {**base_pr, "headRepository": {"nameWithOwner": "other/repo"}}
-    assert pr_review_merge_scheduler.inspect_pr("owner/repo", fork_pr, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=True, workflow="wf", base_branch="main").action == "skip"
+    assert pr_review_merge_scheduler.inspect_pr("owner/repo", fork_pr, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=True, workflow="wf", base_branch="main", update_branches=False, security_workflow="sec").action == "skip"
 
     threads_pr = {**base_pr, "reviewThreads": {"nodes": [{"isResolved": False, "isOutdated": False}]}}
-    assert pr_review_merge_scheduler.inspect_pr("owner/repo", threads_pr, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=True, workflow="wf", base_branch="main").action == "block"
+    assert pr_review_merge_scheduler.inspect_pr("owner/repo", threads_pr, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=True, workflow="wf", base_branch="main", update_branches=False, security_workflow="sec").action == "block"
 
     changes_req_pr = {**base_pr, "reviews": {"nodes": [{"author": {"login": "opencode-agent"}, "state": "CHANGES_REQUESTED", "commit": {"oid": "head-sha"}}]}}
-    assert pr_review_merge_scheduler.inspect_pr("owner/repo", changes_req_pr, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=True, workflow="wf", base_branch="main").action == "block"
+    assert pr_review_merge_scheduler.inspect_pr("owner/repo", changes_req_pr, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=True, workflow="wf", base_branch="main", update_branches=False, security_workflow="sec").action == "block"
 
     approved_pr_auto = {**base_pr, "reviews": {"nodes": [{"author": {"login": "opencode-agent"}, "state": "APPROVED", "commit": {"oid": "head-sha"}}]}, "autoMergeRequest": {"enabledAt": "yes"}}
-    assert pr_review_merge_scheduler.inspect_pr("owner/repo", approved_pr_auto, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=True, workflow="wf", base_branch="main").action == "wait"
+    assert pr_review_merge_scheduler.inspect_pr("owner/repo", approved_pr_auto, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=True, workflow="wf", base_branch="main", update_branches=False, security_workflow="sec").action == "wait"
 
     approved_pr = {**base_pr, "reviews": {"nodes": [{"author": {"login": "opencode-agent"}, "state": "APPROVED", "commit": {"oid": "head-sha"}}]}}
-    assert pr_review_merge_scheduler.inspect_pr("owner/repo", approved_pr, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=False, workflow="wf", base_branch="main").action == "wait"
+    assert pr_review_merge_scheduler.inspect_pr("owner/repo", approved_pr, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=False, workflow="wf", base_branch="main", update_branches=False, security_workflow="sec").action == "wait"
 
     with patch("scripts.ci.pr_review_merge_scheduler.enable_auto_merge") as mock_enable:
-        assert pr_review_merge_scheduler.inspect_pr("owner/repo", approved_pr, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=True, workflow="wf", base_branch="main").action == "auto_merge"
+        assert pr_review_merge_scheduler.inspect_pr("owner/repo", approved_pr, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=True, workflow="wf", base_branch="main", update_branches=False, security_workflow="sec").action == "auto_merge"
 
     in_prog_pr = {**base_pr, "statusCheckRollup": {"contexts": {"nodes": [{"__typename": "CheckRun", "name": "opencode-review", "status": "IN_PROGRESS"}]}}}
-    assert pr_review_merge_scheduler.inspect_pr("owner/repo", in_prog_pr, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=True, workflow="wf", base_branch="main").action == "wait"
+    assert pr_review_merge_scheduler.inspect_pr("owner/repo", in_prog_pr, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=True, workflow="wf", base_branch="main", update_branches=False, security_workflow="sec").action == "wait"
 
     with patch("scripts.ci.pr_review_merge_scheduler.dispatch_opencode_review") as mock_dispatch:
-        assert pr_review_merge_scheduler.inspect_pr("owner/repo", base_pr, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=True, workflow="wf", base_branch="main").action == "review_dispatch"
+        assert pr_review_merge_scheduler.inspect_pr("owner/repo", base_pr, dry_run=True, trigger_reviews=True, enable_auto_merge_flag=True, workflow="wf", base_branch="main", update_branches=False, security_workflow="sec").action == "security_dispatch"
 
-    assert pr_review_merge_scheduler.inspect_pr("owner/repo", base_pr, dry_run=True, trigger_reviews=False, enable_auto_merge_flag=True, workflow="wf", base_branch="main").action == "block"
+    assert pr_review_merge_scheduler.inspect_pr("owner/repo", base_pr, dry_run=True, trigger_reviews=False, enable_auto_merge_flag=True, workflow="wf", base_branch="main", update_branches=False, security_workflow="sec").action == "block"
 
 def test_print_summary():
     decisions = [
