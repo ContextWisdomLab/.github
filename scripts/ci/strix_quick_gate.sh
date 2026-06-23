@@ -2508,6 +2508,10 @@ is_rate_limit_error() {
 		return 0
 	fi
 
+	if grep -Fq 'Too many requests. For more on scraping GitHub' "$STRIX_LOG"; then
+		return 0
+	fi
+
 	if grep -Eq '"status"[[:space:]]*:[[:space:]]*"RESOURCE_EXHAUSTED"' "$STRIX_LOG"; then
 		return 0
 	fi
