@@ -18,7 +18,7 @@ OpenCode decides; GitHub Actions mutates.
 
 ## Live Repository Inventory
 
-Live generated: 2026-06-23 04:18 KST. PR #28 post-merge refresh: 2026-06-23 16:05 KST.
+Live generated: 2026-06-23 04:18 KST. PR #28 post-merge refresh: 2026-06-23 16:05 KST. PR #37 post-merge refresh: 2026-06-23 21:50 KST.
 
 | Repo | Flow | Default | Auto | Rulesets | Required checks | Stale dismissal | Merge queue | Workflows | Recent merged actor |
 |---|---:|---:|---:|---|---|---:|---:|---|---|
@@ -38,10 +38,10 @@ Live generated: 2026-06-23 04:18 KST. PR #28 post-merge refresh: 2026-06-23 16:0
 
 | Repo | Gap |
 |---|---|
-| `.github` | PR #28 is merged at `a025be1` after same-head manual Strix run `28007326148`, same-head OpenCode run `28008174977`, unresolved review threads `0`, and guarded merge against head `811446d`. Remaining open PRs #19-#27 and #29-#36 are still blocked by `CHANGES_REQUESTED` and/or `DIRTY`; the scheduler dry run inspected 17 PRs and made no mutation. |
+| `.github` | PR #37 is merged at `3c3695f` after current-head Strix run `28025893898`, current-head manual OpenCode run `28026724674`, unresolved review threads `0`, and guarded merge against head `8b25761`. Remaining open PRs #19-#27 and #29-#36 are still blocked by `CHANGES_REQUESTED` and/or `DIRTY`. |
 | `bandscope` | Required checks are repo-specific and broad; keep GitHub native auto-merge as the check interpreter. |
-| `clearfolio` | Auto-merge is off and the PR Review Merge Scheduler is missing. |
-| `codec-carver` | Latest merged sample #94 still used `opencode-agent`; replace the legacy scheduler with the central GitHub Actions path. |
+| `clearfolio` | Auto-merge is off. PR #13 adds the central PR Review Merge Scheduler and `opencode.jsonc`; current PR-target Strix still fails because base `strix.yml` does not copy PR-head `opencode.jsonc` into the trusted workspace. |
+| `codec-carver` | Latest merged sample #94 still used `opencode-agent`; PR #98 replaces the legacy scheduler with the central GitHub Actions path and is waiting on existing OpenCode/Strix checks. |
 | `contextual-orchestrator` | No matching rulesets or review workflows; either opt in deliberately or mark unmanaged. |
 | `naruon` | Canonical strict check source, but open PRs still need the updated contract observed through one full outdated -> update -> new-head review trace. |
 | `newsdom-api` | Ruleset-required checks must stay GitHub-interpreted; open queue is mostly review/check blocked. |
@@ -104,8 +104,8 @@ PR #36: block: merge conflict: DIRTY
 ## Rollout List
 
 1. Keep `naruon`, `.github`, `VibeSec`, `bandscope`, `newsdom-api`, `pg-erd-cloud`, and `scopeweave` on `PR Review Merge Scheduler`.
-2. Replace `codec-carver` legacy `Scheduled PR Review Merge` with `PR Review Merge Scheduler`.
-3. Add `PR Review Merge Scheduler` to `clearfolio` or explicitly mark it unmanaged; auto-merge is currently off.
+2. Merge `codec-carver` PR #98 to replace legacy `Scheduled PR Review Merge` with `PR Review Merge Scheduler`; current checks were still in progress at the 2026-06-23 22:13 KST snapshot.
+3. Resolve `clearfolio` PR #13's trusted-base Strix blocker, then merge it to add `PR Review Merge Scheduler`; auto-merge is currently off.
 4. Decide whether `contextual-orchestrator` should join the central PR governance surface; no matching workflows or rulesets were returned.
 5. Keep `pg-erd-cloud` autofix workflows repo-local; do not make autofix part of the central merge contract.
 
@@ -128,3 +128,6 @@ PR #36: block: merge conflict: DIRTY
 - Strix run `28022323798` caught that the first label repair changed normalizer parsing too narrowly: inline approval summaries in `test_strix_quick_gate.sh` no longer normalized. Label parsing now accepts inline verification labels while excluding the `Coverage:` suffix inside `Docstring coverage:`, preserving both inline transcript controls and appended evidence repair.
 - PR #37 same-head manual Strix run `28023392848` succeeded for head `07a6b76`, but the concurrently dispatched same-head manual OpenCode run `28023401894` spent its early lifetime waiting in `Prepare bounded OpenCode review evidence`. That exposed a scheduler-level resource issue: dispatching Strix and OpenCode together can turn OpenCode into a long poller whenever Strix is queued or slow. The scheduler now serializes the process: first dispatch Strix, then wait for a later scheduler pass to dispatch OpenCode after Strix evidence is complete.
 - The base-branch automatic OpenCode run `28025023007` still posted a current-head `CHANGES_REQUESTED` review before cancellation on head `1d05f52`, even though that automatic trigger is removed by this PR. The scheduler previously treated any current-head OpenCode `CHANGES_REQUESTED` as permanent. It now reads the latest OpenCode review on the current head, so a later same-head OpenCode approval can supersede an earlier false negative from the same reviewer.
+- `clearfolio` PR #13 and `codec-carver` PR #98 are opened as thin rollouts. They download `scripts/ci/pr_review_merge_scheduler.py` from `ContextualWisdomLab/.github@main`, run the script self-test, and then inspect their own PR queues. `codec-carver` PR #98 also deletes the legacy OpenCode app-token merge workflow.
+- `clearfolio` PR #13 first failed Strix run `28027843973` because `opencode.jsonc` was missing. Commit `38e9a82` added the central `opencode.jsonc`, but Strix run `28028155386` still failed in the same self-test because clearfolio's trusted-base `strix.yml` does not copy `PR_HEAD_SHA:opencode.jsonc` into the trusted workspace. This is the same self-modifying trusted-base class as `.github` PR #37; current PR-head changes cannot fix that PR-target run until the base workflow is updated or equivalent current-head manual evidence is used.
+- `codec-carver` PR #98 already has base `opencode.jsonc`; at the 2026-06-23 22:13 KST snapshot, Strix run `28027853413` and OpenCode runs `28027853784`/`28027853923` were still in progress.
