@@ -410,7 +410,7 @@ def inspect_pr(
         return Decision(
             number,
             "review_dispatch",
-            "current head has completed Strix evidence; same-head OpenCode dispatched",
+            "same-head Strix and OpenCode dispatched",
         )
 
     return Decision(number, "block", "current head has no OpenCode approval")
