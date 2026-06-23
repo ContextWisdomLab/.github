@@ -334,7 +334,7 @@ jobs:
           npx -y "$CODEGRAPH_PACKAGE" status
 
       - name: Prepare bounded OpenCode review evidence
-        timeout-minutes: 8
+        timeout-minutes: 40
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPOSITORY: ${{ github.repository }}
@@ -346,8 +346,8 @@ jobs:
           OPENCODE_EVIDENCE_FILE: ${{ runner.temp }}/opencode-review-evidence.md
           OPENCODE_FAILED_CHECK_EVIDENCE_FILE: ${{ runner.temp }}/opencode-failed-check-evidence.md
           COVERAGE_EVIDENCE_SUMMARY: ${{ needs.coverage-evidence.outputs.coverage_summary || 'Coverage evidence job did not run or did not publish coverage evidence.' }}
-          FAILED_CHECK_EVIDENCE_ATTEMPTS: "31"
-          FAILED_CHECK_EVIDENCE_SLEEP_SECONDS: "10"
+          FAILED_CHECK_EVIDENCE_ATTEMPTS: "75"
+          FAILED_CHECK_EVIDENCE_SLEEP_SECONDS: "30"
         run: |
           set -euo pipefail
 
@@ -428,16 +428,27 @@ jobs:
 
             while [ "$attempt" -le "$attempts" ]; do
               if scripts/ci/collect_failed_check_evidence.sh "$evidence_file"; then
-                if ! grep -Fq "No completed failed GitHub Checks were present" "$evidence_file"; then
-                  return 0
-                fi
                 if [ "$(current_peer_checks_still_running 2>/dev/null || printf 'false')" != "true" ]; then
                   return 0
                 fi
+                if ! grep -Fq "No completed failed GitHub Checks were present" "$evidence_file" &&
+                  ! grep -Fq "No active failed GitHub Checks remained after superseded checks were classified" "$evidence_file"; then
+                  printf 'Failed-check evidence attempt %s/%s found completed failed peer-check evidence while other peer checks are still running; retrying in %ss before model review.\n' "$attempt" "$attempts" "$sleep_seconds" >&2
+                else
+                  printf 'Failed-check evidence attempt %s/%s found no active completed peer-check failure while peer checks are still running; retrying in %ss before model review.\n' "$attempt" "$attempts" "$sleep_seconds" >&2
+                fi
+                if [ "$attempt" -lt "$attempts" ]; then
+                  sleep "$sleep_seconds"
+                fi
+                attempt=$((attempt + 1))
+                continue
               fi
 
               if [ "$attempt" -lt "$attempts" ]; then
-                printf 'Failed-check evidence attempt %s/%s found no completed peer-check failure while peer checks are still running; retrying in %ss.\n' "$attempt" "$attempts" "$sleep_seconds" >&2
+                if [ "$(current_peer_checks_still_running 2>/dev/null || printf 'false')" != "true" ]; then
+                  break
+                fi
+                printf 'Failed-check evidence attempt %s/%s could not collect evidence while peer checks are still running; retrying in %ss before model review.\n' "$attempt" "$attempts" "$sleep_seconds" >&2
                 sleep "$sleep_seconds"
               fi
               attempt=$((attempt + 1))
