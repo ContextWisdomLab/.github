@@ -152,6 +152,20 @@ def is_opencode_context(node: dict[str, Any]) -> bool:
     return node.get("context") == "opencode-review"
 
 
+def is_strix_context(node: dict[str, Any]) -> bool:
+    """Return whether a check or status context belongs to Strix evidence."""
+    if node.get("__typename") == "CheckRun":
+        workflow = (
+            ((node.get("checkSuite") or {}).get("workflowRun") or {}).get("workflow")
+            or {}
+        )
+        workflow_name = workflow.get("name")
+        return workflow_name in {"Strix Security Scan", "Strix"} or (
+            node.get("name") == "strix" and workflow_name is None
+        )
+    return (node.get("context") or "") in {"strix", "Strix Security Scan"}
+
+
 def opencode_in_progress(pr: dict[str, Any]) -> bool:
     """Return whether any OpenCode review status for the PR is still running."""
     for node in context_nodes(pr):
@@ -161,6 +175,21 @@ def opencode_in_progress(pr: dict[str, Any]) -> bool:
         if status and status not in {"COMPLETED", "SUCCESS", "FAILURE", "ERROR"}:
             return True
     return False
+
+
+def strix_evidence_state(pr: dict[str, Any]) -> str:
+    """Return missing, running, or complete for current-head Strix evidence."""
+    found = False
+    for node in context_nodes(pr):
+        if not is_strix_context(node):
+            continue
+        found = True
+        status = (node.get("status") or node.get("state") or "").upper()
+        if status in {"PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"}:
+            return "running"
+        if node.get("__typename") == "CheckRun" and status != "COMPLETED":
+            return "running"
+    return "complete" if found else "missing"
 
 
 def unresolved_thread_count(pr: dict[str, Any]) -> int:
@@ -368,12 +397,21 @@ def inspect_pr(
         return Decision(number, "wait", "OpenCode review is already in progress")
 
     if trigger_reviews:
-        dispatch_strix_evidence(repo, security_workflow, pr, dry_run=dry_run)
+        strix_state = strix_evidence_state(pr)
+        if strix_state == "missing":
+            dispatch_strix_evidence(repo, security_workflow, pr, dry_run=dry_run)
+            return Decision(
+                number,
+                "security_dispatch",
+                "current head has no completed Strix evidence; same-head Strix dispatched",
+            )
+        if strix_state == "running":
+            return Decision(number, "wait", "same-head Strix evidence is still running")
         dispatch_opencode_review(repo, workflow, pr, dry_run=dry_run)
         return Decision(
             number,
             "review_dispatch",
-            "current head has no OpenCode approval; same-head Strix and OpenCode dispatched",
+            "current head has completed Strix evidence; same-head OpenCode dispatched",
         )
 
     return Decision(number, "block", "current head has no OpenCode approval")
@@ -491,6 +529,27 @@ def self_test() -> None:
             "state": "APPROVED",
             "author": {"login": "opencode-agent"},
             "commit": {"oid": "old"},
+        }
+    ]
+    decision = inspect_pr(
+        "owner/repo",
+        sample,
+        dry_run=True,
+        trigger_reviews=True,
+        enable_auto_merge_flag=True,
+        update_branches=True,
+        workflow="OpenCode Review",
+        security_workflow="Strix Security Scan",
+        base_branch="main",
+    )
+    assert decision.action == "security_dispatch"
+    sample["statusCheckRollup"]["contexts"]["nodes"] = [
+        {
+            "__typename": "CheckRun",
+            "name": "strix",
+            "status": "COMPLETED",
+            "conclusion": "SUCCESS",
+            "checkSuite": {"workflowRun": {"workflow": {"name": "Strix Security Scan"}}},
         }
     ]
     decision = inspect_pr(

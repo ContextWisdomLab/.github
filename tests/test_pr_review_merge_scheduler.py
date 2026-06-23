@@ -32,6 +32,16 @@ def opencode_review(state="APPROVED", commit="head", login="opencode-agent"):
     return {"state": state, "author": {"login": login}, "commit": {"oid": commit}}
 
 
+def strix_check(status="COMPLETED", conclusion="SUCCESS", workflow="Strix Security Scan"):
+    return {
+        "__typename": "CheckRun",
+        "name": "strix",
+        "status": status,
+        "conclusion": conclusion,
+        "checkSuite": {"workflowRun": {"workflow": {"name": workflow}}},
+    }
+
+
 def inspect(pr, **overrides):
     kwargs = {
         "dry_run": True,
@@ -118,6 +128,11 @@ def test_context_review_and_check_helpers():
     )
     assert sched.is_opencode_context({"context": "opencode-review"})
     assert not sched.is_opencode_context({"context": "strix"})
+    assert sched.is_strix_context(strix_check())
+    assert sched.is_strix_context(strix_check(workflow="Strix"))
+    assert sched.is_strix_context({"context": "Strix Security Scan"})
+    assert sched.is_strix_context({"__typename": "CheckRun", "name": "strix", "checkSuite": {"workflowRun": {"workflow": None}}})
+    assert not sched.is_strix_context({"context": "lint"})
 
     running = make_pr(
         statusCheckRollup={"contexts": {"nodes": [{"__typename": "CheckRun", "name": "opencode-review", "status": "IN_PROGRESS"}]}}
@@ -129,6 +144,21 @@ def test_context_review_and_check_helpers():
     assert not sched.opencode_in_progress(complete)
     unrelated = make_pr(statusCheckRollup={"contexts": {"nodes": [{"context": "strix", "state": "PENDING"}]}})
     assert not sched.opencode_in_progress(unrelated)
+    assert sched.strix_evidence_state(make_pr()) == "missing"
+    assert sched.strix_evidence_state(unrelated) == "running"
+    mixed_contexts = make_pr(
+        statusCheckRollup={"contexts": {"nodes": [{"context": "lint", "state": "SUCCESS"}, strix_check()]}}
+    )
+    assert sched.strix_evidence_state(mixed_contexts) == "complete"
+    unknown_running = make_pr(
+        statusCheckRollup={"contexts": {"nodes": [strix_check(status="", conclusion="")]}}
+    )
+    assert sched.strix_evidence_state(unknown_running) == "running"
+    assert sched.strix_evidence_state(make_pr(statusCheckRollup={"contexts": {"nodes": [strix_check()]}})) == "complete"
+    assert (
+        sched.strix_evidence_state(make_pr(statusCheckRollup={"contexts": {"nodes": [strix_check(conclusion="FAILURE")]}}))
+        == "complete"
+    )
 
     threaded = make_pr(reviewThreads={"nodes": [{"isResolved": False}, {"isResolved": True}, {"isOutdated": True}]})
     assert sched.unresolved_thread_count(threaded) == 1
@@ -196,8 +226,8 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     dispatched = []
     monkeypatch.setattr(sched, "dispatch_strix_evidence", lambda repo, workflow, pr, dry_run: dispatched.append(workflow))
     monkeypatch.setattr(sched, "dispatch_opencode_review", lambda repo, workflow, pr, dry_run: dispatched.append(workflow))
-    assert inspect(stale_behind).action == "review_dispatch"
-    assert dispatched == ["Strix Security Scan", "OpenCode Review"]
+    assert inspect(stale_behind).action == "security_dispatch"
+    assert dispatched == ["Strix Security Scan"]
 
     behind = make_pr(mergeStateStatus="BEHIND", reviews={"nodes": [opencode_review("APPROVED", "head")]})
     assert inspect(behind, update_branches=False).reason == "current-head OpenCode review approved; branch update disabled"
@@ -234,7 +264,13 @@ def test_inspect_pr_handles_approved_reviews_and_dispatch(monkeypatch):
     dispatched = []
     monkeypatch.setattr(sched, "dispatch_strix_evidence", lambda repo, workflow, pr, dry_run: dispatched.append(workflow))
     monkeypatch.setattr(sched, "dispatch_opencode_review", lambda repo, workflow, pr, dry_run: dispatched.append(workflow))
-    assert inspect(make_pr()).action == "review_dispatch"
+    assert inspect(make_pr()).action == "security_dispatch"
+    assert dispatched == ["Strix Security Scan"]
+    assert (
+        inspect(make_pr(statusCheckRollup={"contexts": {"nodes": [strix_check(status="IN_PROGRESS", conclusion="")]}})).reason
+        == "same-head Strix evidence is still running"
+    )
+    assert inspect(make_pr(statusCheckRollup={"contexts": {"nodes": [strix_check()]}})).action == "review_dispatch"
     assert dispatched == ["Strix Security Scan", "OpenCode Review"]
     assert inspect(make_pr(), trigger_reviews=False).reason == "current head has no OpenCode approval"
 
