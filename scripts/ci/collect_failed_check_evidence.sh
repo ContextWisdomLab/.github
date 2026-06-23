@@ -201,20 +201,38 @@ trap cleanup EXIT
 
 manual_success_for_label() {
 	local label="$1"
+	local failed_run_id="${2:-}"
 	local key
+	local lower_label
+	local success_context
+	local success_url
+	local success_description
+	local success_run_id
 
 	key="${label##*/}"
 	key="$(printf '%s' "$key" | tr '[:upper:]' '[:lower:]')"
-	awk -F '\t' -v key="$key" '
-		tolower($1) == key {
-			print
-			found = 1
-			exit
-		}
-		END {
-			exit found ? 0 : 1
-		}
-	' "$manual_success_contexts"
+	lower_label="$(printf '%s' "$label" | tr '[:upper:]' '[:lower:]')"
+	case "$lower_label" in
+		"strix security scan/"*)
+			key="strix"
+			;;
+	esac
+
+	while IFS=$'\t' read -r success_context success_url success_description; do
+		if [ "$(printf '%s' "$success_context" | tr '[:upper:]' '[:lower:]')" != "$key" ]; then
+			continue
+		fi
+		success_run_id="$(printf '%s' "$success_url" | sed -n 's#.*/actions/runs/\([0-9][0-9]*\).*#\1#p')"
+		if [ -n "$failed_run_id" ] &&
+			[ -n "$success_run_id" ] &&
+			[ "$failed_run_id" -ge "$success_run_id" ]; then
+			continue
+		fi
+		printf '%s\t%s\t%s\n' "$success_context" "$success_url" "$success_description"
+		return 0
+	done <"$manual_success_contexts"
+
+	return 1
 }
 
 # shellcheck disable=SC2016
@@ -350,7 +368,7 @@ while IFS=$'\t' read -r kind label conclusion details_url run_id check_run_id; d
 done <"$workflow_run_contexts"
 
 while IFS=$'\t' read -r kind label conclusion details_url run_id check_run_id; do
-	if success_line="$(manual_success_for_label "$label")"; then
+	if success_line="$(manual_success_for_label "$label" "$run_id")"; then
 		IFS=$'\t' read -r success_context success_url success_description <<<"$success_line"
 		printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
 			"$kind" \

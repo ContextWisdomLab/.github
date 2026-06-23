@@ -3039,10 +3039,25 @@ jobs:
             local input_file="$1"
             local output_file="$2"
             local manual_strix_success_target
+            local manual_strix_success_run_id
+            local failed_strix_run_id
 
             manual_strix_success_target="$(current_head_manual_strix_success_status || true)"
             if [ -n "$manual_strix_success_target" ]; then
-              awk '$0 !~ /^- (Strix Security Scan\/strix|strix):/' "$input_file" >"$output_file"
+              manual_strix_success_run_id="$(printf '%s' "$manual_strix_success_target" | sed -n 's#.*/actions/runs/\([0-9][0-9]*\).*#\1#p')"
+              while IFS= read -r rollup_line; do
+                case "$rollup_line" in
+                  "- Strix Security Scan/"*|"- strix:"*)
+                    failed_strix_run_id="$(printf '%s' "$rollup_line" | sed -n 's#.*/actions/runs/\([0-9][0-9]*\).*#\1#p')"
+                    if [ -z "$failed_strix_run_id" ] ||
+                      [ -z "$manual_strix_success_run_id" ] ||
+                      [ "$failed_strix_run_id" -lt "$manual_strix_success_run_id" ]; then
+                      continue
+                    fi
+                    ;;
+                esac
+                printf '%s\n' "$rollup_line"
+              done <"$input_file" >"$output_file"
             else
               cat "$input_file" >"$output_file"
             fi

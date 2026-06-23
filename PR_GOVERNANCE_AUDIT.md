@@ -114,4 +114,5 @@ PR #36: block: merge conflict: DIRTY
 - `update-branch` `422/403` behavior still needs a safe fixture or a real blocked case before claiming standardized handling.
 - Required-check interpretation should stay delegated to GitHub native auto-merge until a repo needs immediate merge.
 - PR #28 proves the self-modifying trusted workflow bootstrap path after newer same-head evidence exists, but it does not prove update-branch behavior, stale approval dismissal after a head change, or cross-repository rollout.
-- PR #37 adds a bounded OpenCode approval publication timeout after a manual current-head OpenCode run reached the approval step and was observed waiting on peer checks instead of finishing promptly.
+- PR #37 adds a bounded OpenCode approval publication timeout after manual current-head OpenCode run `28011338113` reached the approval step and was observed waiting on peer checks instead of finishing promptly.
+- PR #37 current-head run `28012303665` proved 100% coverage/docstring evidence and OpenCode completion for head `184be63`; Strix run `28012303876` proved same-head manual Strix success. The run also exposed that cancelled PR-target helper check `Strix Security Scan/publish-manual-pr-evidence-status` must be superseded by the newer same-head manual `strix` status, not treated as a source finding.
