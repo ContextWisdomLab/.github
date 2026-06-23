@@ -221,6 +221,67 @@ M\tscripts/ci/example.py
     assert norm.valid_control(control(summary="No blockers were found."), **kwargs) is None
 
 
+def test_approval_repair_evidence_helpers_cover_edge_cases(tmp_path, monkeypatch):
+    assert norm.section_between_markers("## Other\nbody", "Changed files") == ""
+    assert norm.changed_files_from_evidence(
+        """\
+## Changed files
+
+
+# comment
+M\tscripts/ci/example.py
+M\tscripts/ci/example.py
+A\t[tree truncated after 5 paths]
+M\tnot a valid path
+A\t.github/workflows/opencode-review.yml
+M\ttests/test_opencode_review_normalize_output.py
+M\tscripts/ci/pr_review_merge_scheduler.py
+M\topencode.jsonc
+M\tREADME.md
+## Next
+"""
+    ) == [
+        "scripts/ci/example.py",
+        ".github/workflows/opencode-review.yml",
+        "tests/test_opencode_review_normalize_output.py",
+        "scripts/ci/pr_review_merge_scheduler.py",
+        "opencode.jsonc",
+        "README.md",
+    ]
+
+    summary = norm.build_approval_repair_summary(
+        "No blockers were found.",
+        """\
+## Coverage execution evidence
+- Result: PASS
+- Test coverage: 100%
+- Docstring coverage: 100%
+## Changed files
+M\tscripts/ci/example.py
+M\t.github/workflows/opencode-review.yml
+M\ttests/test_opencode_review_normalize_output.py
+M\tscripts/ci/pr_review_merge_scheduler.py
+M\topencode.jsonc
+M\tREADME.md
+""",
+    )
+    assert summary is not None
+    assert "and 1 more" in summary
+
+    evidence = tmp_path / "bounded-review-evidence.md"
+    evidence.write_text("placeholder", encoding="utf-8")
+    monkeypatch.setenv("OPENCODE_APPROVAL_REPAIR_EVIDENCE_FILE", str(evidence))
+    original_read_text = norm.Path.read_text
+
+    def raise_for_evidence(path, *args, **kwargs):
+        if path == evidence:
+            raise OSError("cannot read evidence")
+        return original_read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(norm.Path, "read_text", raise_for_evidence)
+    assert norm.repair_approval_summary("reason", "summary") == "summary"
+
+
 def test_iter_json_objects_extracts_raw_and_embedded_json():
     assert norm.iter_json_objects('{"a": 1}') == [{"a": 1}, {"a": 1}]
     assert norm.iter_json_objects('prefix {"b": 2} suffix') == [{"b": 2}]
