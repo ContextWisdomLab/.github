@@ -190,6 +190,65 @@ A\t.github/workflows/opencode-review.yml
     assert norm.mentions_full_coverage(repaired["reason"], repaired["summary"])
 
 
+def test_valid_control_repair_overrides_earlier_invalid_coverage_labels(tmp_path, monkeypatch):
+    evidence = tmp_path / "bounded-review-evidence.md"
+    evidence.write_text(
+        """\
+# OpenCode bounded PR review evidence
+
+## Coverage execution evidence
+
+# Coverage Evidence
+
+## Coverage Decision
+
+- Result: PASS
+- Test coverage: 100%
+- Docstring coverage: 100%
+
+## Changed files
+
+M\tscripts/ci/opencode_review_normalize_output.py
+M\ttests/test_opencode_review_normalize_output.py
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_APPROVAL_REPAIR_EVIDENCE_FILE", str(evidence))
+
+    repaired = norm.valid_control(
+        control(
+            reason="No blockers found in the PR changes.",
+            summary="""\
+Inspected the PR changes and found no actionable blockers.
+Verification posture: CodeGraph was available, but the model summarized too broadly.
+Linter/static: Not applicable.
+TDD/regression: Not applicable.
+Coverage: Not applicable.
+Docstring coverage: Not applicable.
+DAG: Not applicable.
+PoC/execution: Not applicable.
+DDD/domain: Not applicable.
+CDD/context: Not applicable.
+Similar issues: Not applicable.
+Claim/concept check: Not applicable.
+Standards search: Not applicable.
+Compatibility/convention: Not applicable.
+Breaking-change/backcompat: Not applicable.
+Performance: Not applicable.
+Design/UX: Not applicable.
+Security/privacy: Not applicable.
+""",
+        ),
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    )
+
+    assert repaired is not None
+    assert "scripts/ci/opencode_review_normalize_output.py" in repaired["summary"]
+    assert norm.mentions_full_coverage(repaired["reason"], repaired["summary"])
+
+
 def test_valid_control_does_not_repair_unsafe_or_unproven_approval(tmp_path, monkeypatch):
     evidence = tmp_path / "bounded-review-evidence.md"
     evidence.write_text(
