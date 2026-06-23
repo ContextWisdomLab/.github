@@ -2714,9 +2714,45 @@ jobs:
 
           leave_review_unchanged_for_self_modifying_strix_if_present() {
             local evidence_file="$1"
+            local manual_strix_run=""
+            local manual_strix_status=""
+            local manual_strix_conclusion=""
+            local manual_strix_url=""
+            local pending_checks_file=""
+            local pending_wait_status=0
 
             if ! self_modifying_strix_base_failure "$evidence_file"; then
               return 1
+            fi
+
+            if manual_strix_run="$(latest_current_head_manual_strix_run || true)" && [ -n "$manual_strix_run" ]; then
+              manual_strix_status="$(printf '%s\n' "$manual_strix_run" | awk -F '\t' '{print $1}')"
+              manual_strix_conclusion="$(printf '%s\n' "$manual_strix_run" | awk -F '\t' '{print $2}')"
+              manual_strix_url="$(printf '%s\n' "$manual_strix_run" | awk -F '\t' '{print $3}')"
+              if [ "$manual_strix_status" = "completed" ]; then
+                echo "Current-head manual workflow_dispatch Strix evidence completed with ${manual_strix_conclusion:-unknown}: ${manual_strix_url:-no-url}; not suppressing failed-check diagnosis."
+                return 1
+              fi
+
+              pending_checks_file="$(mktemp)"
+              set +e
+              wait_for_peer_github_checks "$pending_checks_file"
+              pending_wait_status=$?
+              set -e
+              rm -f "$pending_checks_file"
+
+              if manual_strix_run="$(latest_current_head_manual_strix_run || true)" && [ -n "$manual_strix_run" ]; then
+                manual_strix_status="$(printf '%s\n' "$manual_strix_run" | awk -F '\t' '{print $1}')"
+                manual_strix_conclusion="$(printf '%s\n' "$manual_strix_run" | awk -F '\t' '{print $2}')"
+                manual_strix_url="$(printf '%s\n' "$manual_strix_run" | awk -F '\t' '{print $3}')"
+                if [ "$manual_strix_status" = "completed" ]; then
+                  echo "Current-head manual workflow_dispatch Strix evidence completed with ${manual_strix_conclusion:-unknown}: ${manual_strix_url:-no-url}; not suppressing failed-check diagnosis."
+                  return 1
+                fi
+              fi
+
+              echo "::error::Strix failed in a trusted-base pull_request_target self-test, and same-head workflow_dispatch Strix evidence is still ${manual_strix_status:-pending} after waiting (wait status ${pending_wait_status}). Leaving the PR review unchanged until current-head Strix evidence completes."
+              return 0
             fi
 
             # ponytail: self-modifying trusted workflows need same-head manual evidence until base catches up.
@@ -2945,6 +2981,34 @@ jobs:
                 | select((.target_url // "") | test("/actions/runs/[0-9]+"))
                 | .target_url
               '
+          }
+
+          latest_current_head_manual_strix_run() {
+            local runs_json
+            runs_json="$(mktemp)"
+
+            if ! gh run list \
+              --repo "$GH_REPOSITORY" \
+              --workflow strix.yml \
+              --commit "$HEAD_SHA" \
+              --limit 200 \
+              --json databaseId,status,conclusion,url,event,headSha >"$runs_json"; then
+              rm -f "$runs_json"
+              return 1
+            fi
+
+            jq -r --arg head_sha "$HEAD_SHA" '
+              [
+                .[]
+                | select((.headSha // .head_sha // "") == $head_sha)
+                | select((.event // "") == "workflow_dispatch")
+              ]
+              | sort_by(.databaseId // .id // 0)
+              | last // empty
+              | [(.status // ""), (.conclusion // ""), (.url // .html_url // "")]
+              | @tsv
+            ' "$runs_json"
+            rm -f "$runs_json"
           }
 
           filter_superseded_strix_failures() {
