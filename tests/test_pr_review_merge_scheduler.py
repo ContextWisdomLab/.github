@@ -356,3 +356,15 @@ def test_main_keeps_scanning_after_action_error(monkeypatch, capsys):
     assert "PR #1: action_error: Command failed (1): gh pr merge 1; GraphQL: Resource not accessible by integration" in output
     assert "PR #2: wait: next PR still inspected" in output
     assert json.loads(output.strip().splitlines()[-1])["counts"] == {"action_error": 1, "wait": 1}
+
+def test_scrub_sensitive_data_and_run_error():
+    assert sched.scrub_sensitive_data("Authorization: Bearer mytoken123") == "Authorization: Bearer ***"
+    assert sched.scrub_sensitive_data("token mytoken123") == "token ***"
+    assert sched.scrub_sensitive_data("ghp_1234567890abcdef") == "***"
+    assert sched.scrub_sensitive_data("github_pat_11AAAAA_abcdefg") == "***"
+    assert sched.scrub_sensitive_data("No secrets here") == "No secrets here"
+    assert sched.scrub_sensitive_data("") == ""
+    assert sched.scrub_sensitive_data(None) is None
+
+    with pytest.raises(RuntimeError, match=r"Command failed \([12]\): ls \*\*\*"):
+        sched.run(["ls", "ghp_secret"], stdin=None)
