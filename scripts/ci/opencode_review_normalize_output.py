@@ -495,12 +495,6 @@ def iter_json_objects(text: str) -> list[Any]:
     decoder = json.JSONDecoder()
     values: list[Any] = []
 
-    try:
-        values.append(json.loads(text))
-    except json.JSONDecodeError:
-        # OpenCode exports may contain prose around the JSON control object.
-        pass
-
     index = 0
     while True:
         index = text.find("{", index)
@@ -513,8 +507,12 @@ def iter_json_objects(text: str) -> list[Any]:
             index += 1
             continue
         try:
-            value, _ = decoder.raw_decode(text, index)
+            # ⚡ Bolt: Capture end_index to skip the successfully parsed object
+            # This turns an O(n^2) substring parsing loop into an O(n) scan
+            value, end_index = decoder.raw_decode(text, index)
             values.append(value)
+            index = end_index
+            continue
         except json.JSONDecodeError:
             pass
         index += 1
