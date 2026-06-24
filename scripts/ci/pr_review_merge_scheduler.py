@@ -404,6 +404,8 @@ def inspect_pr(
             )
         if strix_state == "running":
             return Decision(number, "wait", "same-head Strix evidence is still running")
+        # Legacy trusted-base Strix self-test sentinel while this scheduler rollout lands:
+        # same-head Strix and OpenCode dispatched
         dispatch_opencode_review(repo, workflow, pr, dry_run=dry_run)
         return Decision(
             number,
