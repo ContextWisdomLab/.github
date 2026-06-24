@@ -513,8 +513,11 @@ def iter_json_objects(text: str) -> list[Any]:
             index += 1
             continue
         try:
-            value, _ = decoder.raw_decode(text, index)
+            value, new_index = decoder.raw_decode(text, index)
             values.append(value)
+            # ⚡ Bolt: Advance index to avoid O(N^2) redundant parsing of nested JSON blocks
+            index = new_index
+            continue
         except json.JSONDecodeError:
             pass
         index += 1
