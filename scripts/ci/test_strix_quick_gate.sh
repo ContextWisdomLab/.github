@@ -809,7 +809,7 @@ assert_pr_review_merge_scheduler_uses_github_actions_bot_token() {
 	assert_file_contains "$scheduler_file" "expected_head_sha={head}" "scheduler guards branch updates with the current PR head SHA"
 	assert_file_contains "$scheduler_file" "dispatch_strix_evidence" "scheduler dispatches same-head Strix evidence before OpenCode review"
 	assert_file_contains "$scheduler_file" "--security-workflow" "scheduler allows the canonical Strix workflow name to be configured"
-	assert_file_contains "$scheduler_file" "same-head Strix and OpenCode dispatched" "scheduler records review dispatch as a coupled security and review evidence action"
+	assert_file_contains "$scheduler_file" "same-head OpenCode dispatched" "scheduler records review dispatch after completed security evidence"
 	assert_file_contains "$workflow_file" "--review-workflow \"OpenCode Review\"" "scheduler dispatches the canonical OpenCode Review workflow"
 	assert_file_contains "$readme_file" "github-actions[bot]" "README documents that mechanical branch updates and merges are attributed to GitHub Actions bot"
 	assert_file_contains "$readme_file" "Scratch PoC files are not committed." "README documents PoC proof artifacts are scratch evidence, not committed changes"
