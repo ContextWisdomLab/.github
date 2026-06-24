@@ -231,6 +231,35 @@ A\t.github/workflows/opencode-review.yml
     assert norm.mentions_full_coverage(repaired["reason"], repaired["summary"])
 
 
+def test_valid_control_repairs_summary_from_invalid_utf8_evidence(tmp_path, monkeypatch):
+    evidence = tmp_path / "bounded-review-evidence.md"
+    evidence.write_bytes(
+        b"# OpenCode bounded PR review evidence\n\n"
+        b"\xea invalid byte from model transcript\n\n"
+        b"## Coverage execution evidence\n\n"
+        b"# Coverage Evidence\n\n"
+        b"## Coverage Decision\n\n"
+        b"- Result: PASS\n"
+        b"- Test coverage: 100%\n"
+        b"- Docstring coverage: 100%\n\n"
+        b"## Changed files\n\n"
+        b"M\tscripts/ci/opencode_review_normalize_output.py\n"
+    )
+    monkeypatch.setenv("OPENCODE_APPROVAL_REPAIR_EVIDENCE_FILE", str(evidence))
+
+    repaired = norm.valid_control(
+        control(reason="Current-head review completed.", summary="No blockers were found."),
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    )
+
+    assert repaired is not None
+    assert "scripts/ci/opencode_review_normalize_output.py" in repaired["summary"]
+    assert norm.mentions_verification_posture(repaired["reason"], repaired["summary"])
+    assert norm.mentions_full_coverage(repaired["reason"], repaired["summary"])
+
+
 def test_valid_control_repair_overrides_earlier_invalid_coverage_labels(tmp_path, monkeypatch):
     evidence = tmp_path / "bounded-review-evidence.md"
     evidence.write_text(

@@ -224,6 +224,14 @@ def approval_repair_evidence_file() -> Path | None:
     return None
 
 
+def read_text_lossy(path: Path) -> str | None:
+    """Read text while preserving progress across invalid UTF-8 bytes."""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+
+
 def section_between_markers(text: str, marker: str) -> str:
     """Return a markdown section body from a bounded evidence file."""
     marker_line = f"## {marker}"
@@ -314,9 +322,8 @@ def repair_approval_summary(reason: str, summary: str) -> str:
     evidence_file = approval_repair_evidence_file()
     if evidence_file is None:
         return summary
-    try:
-        evidence_text = evidence_file.read_text(encoding="utf-8")
-    except OSError:
+    evidence_text = read_text_lossy(evidence_file)
+    if evidence_text is None:
         return summary
 
     repaired_summary = build_approval_repair_summary(summary, evidence_text)
