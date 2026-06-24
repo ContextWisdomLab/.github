@@ -2444,9 +2444,20 @@ jobs:
             local strix_evidence_file
 
             if [ -x "${repo_root%/}/scripts/ci/emit_opencode_failed_check_fallback_findings.sh" ]; then
-              if "${repo_root%/}/scripts/ci/emit_opencode_failed_check_fallback_findings.sh" "$evidence_file" "$repo_root"; then
+              local helper_findings_file
+              helper_findings_file="$(mktemp)"
+              if "${repo_root%/}/scripts/ci/emit_opencode_failed_check_fallback_findings.sh" "$evidence_file" "$repo_root" >"$helper_findings_file"; then
+                if grep -Fq "No deterministic missing-string markers" "$helper_findings_file" ||
+                  ! grep -Eq '^### [0-9]+\. ' "$helper_findings_file"; then
+                  printf 'OpenCode failed-check fallback helper returned non-source-backed generic output; leaving the PR review unchanged for rerun.\n' >&2
+                  rm -f "$helper_findings_file"
+                  return 1
+                fi
+                cat "$helper_findings_file"
+                rm -f "$helper_findings_file"
                 return 0
               fi
+              rm -f "$helper_findings_file"
               printf 'OpenCode failed-check fallback helper did not produce source-backed findings; leaving the PR review unchanged for rerun.\n' >&2
               return 1
             fi
