@@ -165,18 +165,15 @@ def test_context_review_and_check_helpers():
     assert sched.review_author_login({}) == ""
     assert sched.review_author_login({"author": {"login": "OpenCode-Agent"}}) == "opencode-agent"
     assert sched.is_opencode_review(opencode_review())
+    assert sched.is_opencode_review(opencode_review(login="opencode-agent[bot]"))
     assert not sched.is_opencode_review(opencode_review(login="human"))
 
 
 def test_review_state_and_failed_checks():
     pr = make_pr(reviews={"nodes": [opencode_review("APPROVED", "old"), opencode_review("APPROVED", "head")]})
     assert sched.current_head_review_state(pr, "APPROVED")
-    assert sched.latest_opencode_review(pr)["commit"]["oid"] == "head"
-    assert sched.latest_opencode_approved(pr)
     assert sched.has_current_head_approval(pr)
     assert not sched.has_current_head_changes_requested(pr)
-    assert sched.latest_opencode_review(make_pr()) is None
-    assert not sched.latest_opencode_approved(make_pr())
     superseded = make_pr(
         reviews={
             "nodes": [
