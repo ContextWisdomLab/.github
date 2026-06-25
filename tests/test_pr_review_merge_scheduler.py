@@ -321,6 +321,33 @@ def test_review_state_and_failed_checks():
     assert sched.current_head_review_state(pr, "APPROVED")
     assert sched.has_current_head_approval(pr)
     assert not sched.has_current_head_changes_requested(pr)
+    exact_head = "a" * 40
+    stale_body_head = "b" * 40
+    body_sha_mismatch = make_pr(
+        headRefOid=exact_head,
+        reviews={
+            "nodes": [
+                {
+                    **opencode_review("APPROVED", exact_head),
+                    "body": f"## Gate evidence\n\n- Head SHA: `{stale_body_head}`",
+                }
+            ]
+        },
+    )
+    assert sched.review_body_head_sha(body_sha_mismatch["reviews"]["nodes"][0]) == stale_body_head
+    assert not sched.has_current_head_approval(body_sha_mismatch)
+    body_sha_match = make_pr(
+        headRefOid=exact_head,
+        reviews={
+            "nodes": [
+                {
+                    **opencode_review("APPROVED", exact_head),
+                    "body": f"## Gate evidence\n\n- Head SHA: `{exact_head.upper()}`",
+                }
+            ]
+        },
+    )
+    assert sched.has_current_head_approval(body_sha_match)
     stale_review = make_pr(
         reviews={
             "nodes": [
@@ -384,6 +411,21 @@ def test_review_state_and_failed_checks():
         }
     )
     assert sched.failed_status_checks(failed) == ["strix", "lint"]
+    action_required = make_pr(
+        statusCheckRollup={
+            "contexts": {
+                "nodes": [
+                    {"__typename": "CheckRun", "name": "opencode-review", "conclusion": "ACTION_REQUIRED"},
+                    {"context": "lint", "state": "SUCCESS"},
+                ]
+            }
+        }
+    )
+    assert sched.failed_status_checks(action_required) == []
+    assert sched.action_required_checks(action_required) == ["opencode-review"]
+    assert sched.workflow_action_required_reason(["a", "b", "c", "d", "e", "f"]).startswith(
+        "workflow action required: a, b, c, d, e, +1 more"
+    )
     manual_strix_supersedes_pr_target_failure = make_pr(
         statusCheckRollup={
             "contexts": {
@@ -441,6 +483,11 @@ def test_print_summary_writes_github_step_summary(monkeypatch, tmp_path, capsys)
             "disable_auto_merge",
             "auto-merge disabled; OpenCode review does not postdate the current head commit; wait for a fresh same-head OpenCode review",
         ),
+        sched.Decision(
+            10,
+            "wait",
+            "workflow action required: opencode-review; approve or unblock the GitHub Actions run before treating checks as failed or passed",
+        ),
     ]
 
     sched.print_summary(decisions, dry_run=True, base_branch="main", project_flow="github-flow")
@@ -450,13 +497,14 @@ def test_print_summary_writes_github_step_summary(monkeypatch, tmp_path, capsys)
     payload = json.loads(output.splitlines()[-1])
     assert payload["schema_version"] == "pr-review-merge-scheduler/v2"
     assert payload["base_branch"] == "main"
-    assert payload["counts"] == {"block": 1, "disable_auto_merge": 1, "update_branch": 1}
+    assert payload["counts"] == {"block": 1, "disable_auto_merge": 1, "update_branch": 1, "wait": 1}
     assert payload["dry_run"] is True
-    assert payload["inspected"] == 3
+    assert payload["inspected"] == 4
     assert payload["project_flow"] == "github-flow"
     assert payload["decisions"][0]["contract_decision"] == "WAIT"
     assert payload["decisions"][1]["contract_decision"] == "UPDATE_BRANCH"
     assert payload["decisions"][2]["contract_decision"] == "WAIT"
+    assert payload["decisions"][3]["contract_decision"] == "WAIT"
     assert payload["decisions"][0]["guidance"]["type"] == "merge_conflict_repair"
     assert payload["decisions"][0]["guidance"]["merge_state"] == "DIRTY"
     assert payload["decisions"][0]["guidance"]["base_ref"] == "main"
@@ -470,6 +518,8 @@ def test_print_summary_writes_github_step_summary(monkeypatch, tmp_path, capsys)
     assert payload["decisions"][1]["guidance"]["required_permission"] == "pull-requests: write"
     assert payload["decisions"][1]["guidance"]["head_guard"] == "expected_head_sha"
     assert payload["decisions"][2]["guidance"]["type"] == "unsafe_auto_merge_disabled"
+    assert payload["decisions"][3]["guidance"]["type"] == "workflow_action_required"
+    assert payload["decisions"][3]["guidance"]["checks"] == "opencode-review"
     summary = summary_path.read_text(encoding="utf-8")
     assert "## PR review merge scheduler" in summary
     assert "| #7 | block | merge conflict: DIRTY; base=main, head=feature\\|x; run" in summary
@@ -493,6 +543,9 @@ def test_print_summary_writes_github_step_summary(monkeypatch, tmp_path, capsys)
     assert "needs `pull-requests: write`" in summary
     assert "does not require the scheduler job to widen repository `contents` to write" in summary
     assert "github-actions[bot]" in summary
+    assert "### Workflow action required" in summary
+    assert "`ACTION_REQUIRED` means GitHub Actions is waiting for approval" in summary
+    assert "- PR #10: workflow action required: opencode-review" in summary
 
 
 def test_write_actions_summary_is_noop_without_summary_path(monkeypatch):
@@ -511,7 +564,21 @@ def test_summary_section_helpers_handle_empty_and_action_error_cases():
     wait_decisions = [sched.Decision(1, "wait", "nothing to do")]
     assert sched.conflict_repair_summary(wait_decisions) == []
     assert sched.update_branch_summary(wait_decisions) == []
+    assert sched.workflow_action_required_summary(wait_decisions) == []
     assert sched.action_error_summary(wait_decisions) == []
+
+    action_required_lines = sched.workflow_action_required_summary(
+        [
+            sched.Decision(
+                3,
+                "wait",
+                "workflow action required: opencode-review; approve or unblock the GitHub Actions run before treating checks as failed or passed",
+            )
+        ]
+    )
+    assert "### Workflow action required" in action_required_lines
+    assert "not a source-code failure" in "\n".join(action_required_lines)
+    assert "- PR #3: workflow action required: opencode-review" in "\n".join(action_required_lines)
 
     lines = sched.action_error_summary([sched.Decision(2, "action_error", "permission failed")])
     assert "### Action errors" in lines
@@ -581,6 +648,32 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert inspect(make_pr(reviews={"nodes": [opencode_review("CHANGES_REQUESTED", "head")]})).reason == (
         "current-head OpenCode review requested changes"
     )
+    action_required_pr = make_pr(
+        statusCheckRollup={
+            "contexts": {
+                "nodes": [{"__typename": "CheckRun", "name": "opencode-review", "conclusion": "ACTION_REQUIRED"}]
+            }
+        }
+    )
+    action_required_decision = inspect(action_required_pr)
+    assert action_required_decision.action == "wait"
+    assert action_required_decision.reason == (
+        "workflow action required: opencode-review; approve or unblock the GitHub Actions run before treating checks as failed or passed"
+    )
+    action_required_auto = inspect(
+        make_pr(
+            autoMergeRequest={"enabledAt": "now"},
+            statusCheckRollup={
+                "contexts": {
+                    "nodes": [
+                        {"__typename": "CheckRun", "name": "opencode-review", "conclusion": "ACTION_REQUIRED"}
+                    ]
+                }
+            },
+        )
+    )
+    assert action_required_auto.action == "disable_auto_merge"
+    assert "workflow action required: opencode-review" in action_required_auto.reason
     same_head_auto = make_pr(
         autoMergeRequest={"enabledAt": "now"},
         reviews={"nodes": [opencode_review("APPROVED", "head", submitted_at="2026-06-25T06:59:59Z")]},
@@ -617,6 +710,34 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     failed_decision = inspect(behind_failed)
     assert failed_decision.action == "block"
     assert failed_decision.reason == "failed check(s): strix"
+    assert called == []
+    mixed_failure_and_action_required = make_pr(
+        reviews={"nodes": [opencode_review("APPROVED", "head")]},
+        statusCheckRollup={
+            "contexts": {
+                "nodes": [
+                    {"__typename": "CheckRun", "name": "strix", "conclusion": "FAILURE"},
+                    {"__typename": "CheckRun", "name": "opencode-review", "conclusion": "ACTION_REQUIRED"},
+                ]
+            }
+        },
+    )
+    mixed_decision = inspect(mixed_failure_and_action_required)
+    assert mixed_decision.action == "block"
+    assert mixed_decision.reason == "failed check(s): strix"
+    called.clear()
+    behind_action_required = make_pr(
+        mergeStateStatus="BEHIND",
+        reviews={"nodes": [opencode_review("APPROVED", "head")]},
+        statusCheckRollup={
+            "contexts": {
+                "nodes": [{"__typename": "CheckRun", "name": "opencode-review", "conclusion": "ACTION_REQUIRED"}]
+            }
+        },
+    )
+    action_required_decision = inspect(behind_action_required)
+    assert action_required_decision.action == "wait"
+    assert "workflow action required: opencode-review" in action_required_decision.reason
     assert called == []
     behind_auto_merge_enabled = make_pr(
         mergeStateStatus="BEHIND",

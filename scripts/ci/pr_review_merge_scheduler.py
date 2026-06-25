@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -85,6 +86,9 @@ query($owner: String!, $name: String!, $pageSize: Int!, $cursor: String) {
 OPEN_PRS_PAGE_SIZE = 25
 DEFAULT_STALE_OPENCODE_MINUTES = 45
 RUNNING_CHECK_STATES = {"PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"}
+FAILED_CHECK_CONCLUSIONS = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "STARTUP_FAILURE"}
+ACTION_REQUIRED_CONCLUSIONS = {"ACTION_REQUIRED"}
+REVIEW_BODY_HEAD_SHA_RE = re.compile(r"Head SHA:\s*`([0-9a-fA-F]{40})`")
 REST_MERGEABLE_STATE_MAP = {
     "behind": "BEHIND",
     "blocked": "BLOCKED",
@@ -188,6 +192,21 @@ def decision_guidance(decision: Decision) -> dict[str, Any] | None:
                 "# rebase path: git rebase --continue",
                 "git push",
                 "# rebase path only: git push --force-with-lease",
+            ],
+        }
+    action_required = parse_workflow_action_required_reason(decision.reason)
+    if action_required:
+        return {
+            "type": "workflow_action_required",
+            "checks": action_required,
+            "summary": "A GitHub Actions run is waiting for workflow approval or a repository policy unblock; this is not a source-code failure by itself.",
+            "automation_limit": "The scheduler cannot safely reinterpret an ACTION_REQUIRED run as passed or failed, and should not publish a code-review finding from it.",
+            "next_required_evidence": [
+                "GitHub Actions run approval or repository policy unblock",
+                "current-head check rerun after the unblock",
+                "OpenCode approval on the exact current head",
+                "same-head Strix evidence",
+                "zero active unresolved review threads",
             ],
         }
     if decision.action == "update_branch":
@@ -363,7 +382,17 @@ def review_matches_current_head(review: dict[str, Any], pr: dict[str, Any]) -> b
     """Return whether a review is valid evidence for the current head commit."""
     head = pr.get("headRefOid")
     commit = (review.get("commit") or {}).get("oid")
-    return bool(head and commit == head)
+    if not head or commit != head:
+        return False
+    body_head = review_body_head_sha(review)
+    return body_head is None or body_head.lower() == head.lower()
+
+
+def review_body_head_sha(review: dict[str, Any]) -> str | None:
+    """Return the last explicit Head SHA from an OpenCode review body."""
+    body = review.get("body") or ""
+    matches = REVIEW_BODY_HEAD_SHA_RE.findall(body)
+    return matches[-1] if matches else None
 
 
 def running_check_state(node: dict[str, Any]) -> str:
@@ -471,7 +500,7 @@ def failed_status_checks(pr: dict[str, Any]) -> list[str]:
     for node in context_nodes(pr):
         if node.get("__typename") == "CheckRun":
             conclusion = (node.get("conclusion") or "").upper()
-            if conclusion in {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}:
+            if conclusion in FAILED_CHECK_CONCLUSIONS:
                 if is_strix_context(node) and "strix" in successful_status_contexts:
                     continue
                 failed.append(node.get("name") or "check-run")
@@ -480,6 +509,28 @@ def failed_status_checks(pr: dict[str, Any]) -> list[str]:
             if state in {"FAILURE", "ERROR"}:
                 failed.append(node.get("context") or "status-context")
     return failed
+
+
+def action_required_checks(pr: dict[str, Any]) -> list[str]:
+    """Return check-run names that need explicit GitHub Actions approval or unblocking."""
+    required: list[str] = []
+    for node in context_nodes(pr):
+        if node.get("__typename") != "CheckRun":
+            continue
+        conclusion = (node.get("conclusion") or "").upper()
+        if conclusion in ACTION_REQUIRED_CONCLUSIONS:
+            required.append(node.get("name") or "check-run")
+    return required
+
+
+def workflow_action_required_reason(checks: list[str]) -> str:
+    """Return a scheduler reason for ACTION_REQUIRED check runs."""
+    visible = checks[:5]
+    suffix = f", +{len(checks) - len(visible)} more" if len(checks) > len(visible) else ""
+    return (
+        f"workflow action required: {', '.join(visible)}{suffix}; "
+        "approve or unblock the GitHub Actions run before treating checks as failed or passed"
+    )
 
 
 def enable_auto_merge(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
@@ -677,6 +728,18 @@ def inspect_pr(
                 )
             return Decision(number, "block", f"failed check(s): {', '.join(failed_checks[:5])}")
 
+    workflow_action_required = action_required_checks(pr)
+    if workflow_action_required:
+        reason = workflow_action_required_reason(workflow_action_required)
+        if pr.get("autoMergeRequest"):
+            return disable_auto_merge_decision(
+                repo,
+                pr,
+                dry_run=dry_run,
+                reason=f"{reason}; wait for current-head checks to rerun before re-enabling auto-merge",
+            )
+        return Decision(number, "wait", reason)
+
     if merge_state == "BEHIND" and current_head_approved:
         if not update_branches:
             return Decision(number, "wait", "current-head OpenCode review approved; branch update disabled")
@@ -816,6 +879,7 @@ def write_actions_summary(
     )
     lines.extend(conflict_repair_summary(decisions))
     lines.extend(update_branch_summary(decisions))
+    lines.extend(workflow_action_required_summary(decisions))
     lines.extend(action_error_summary(decisions))
 
     with open(summary_path, "a", encoding="utf-8") as handle:
@@ -919,6 +983,38 @@ def action_error_summary(decisions: list[Decision]) -> list[str]:
         "These are scheduler or GitHub permission/runtime failures, not source-code review findings.",
     ]
     for decision in errors:
+        lines.append(f"- PR #{decision.pr}: {decision.reason}")
+    return lines
+
+
+def parse_workflow_action_required_reason(reason: str) -> str | None:
+    """Extract ACTION_REQUIRED check names from a scheduler reason."""
+    marker = "workflow action required:"
+    marker_start = reason.find(marker)
+    if marker_start < 0:
+        return None
+    tail = reason[marker_start + len(marker) :].strip()
+    checks = tail.split(";", 1)[0].strip()
+    return checks or None
+
+
+def workflow_action_required_summary(decisions: list[Decision]) -> list[str]:
+    """Return a GitHub Actions Summary section for ACTION_REQUIRED waits."""
+    waits = [
+        decision
+        for decision in decisions
+        if parse_workflow_action_required_reason(decision.reason)
+    ]
+    if not waits:
+        return []
+    lines = [
+        "",
+        "### Workflow action required",
+        "",
+        "`ACTION_REQUIRED` means GitHub Actions is waiting for approval or a repository policy unblock. It is not a source-code failure and should not be converted into an OpenCode finding.",
+        "Unblock or approve the run, then rerun the scheduler so it can read the new current-head check state.",
+    ]
+    for decision in waits:
         lines.append(f"- PR #{decision.pr}: {decision.reason}")
     return lines
 
