@@ -258,7 +258,7 @@ def failed_status_checks(pr: dict[str, Any]) -> list[str]:
         if node.get("__typename") == "CheckRun":
             conclusion = (node.get("conclusion") or "").upper()
             if conclusion in {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}:
-                if is_strix_context(node) and "strix" in successful_status_contexts:
+                if is_strix_context(node) and successful_status_contexts & {"strix", "Strix Security Scan"}:
                     continue
                 failed.append(node.get("name") or "check-run")
         else:

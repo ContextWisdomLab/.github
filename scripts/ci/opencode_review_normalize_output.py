@@ -158,7 +158,10 @@ def mentions_actual_changed_file(reason: str, summary: str) -> bool:
     if not changed_files:
         return mentions_changed_file_evidence(reason, summary)
     combined = f"{reason}\n{summary}"
-    return any(changed_file in combined for changed_file in changed_files)
+    return any(
+        re.search(r"(?<![/\w])" + re.escape(changed_file), combined)
+        for changed_file in changed_files
+    )
 
 
 def mentions_verification_posture(reason: str, summary: str) -> bool:
@@ -458,11 +461,11 @@ def iter_json_objects(text: str) -> list[Any]:
         if index == -1:
             break
         try:
-            value, _ = decoder.raw_decode(text, index)
+            value, end = decoder.raw_decode(text, index)
             values.append(value)
+            index = end
         except json.JSONDecodeError:
-            pass
-        index += 1
+            index += 1
 
     return values
 
