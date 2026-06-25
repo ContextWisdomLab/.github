@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import subprocess
 import sys
 from collections.abc import Sequence
@@ -506,10 +507,114 @@ def write_actions_summary(
         f"| #{decision.pr} | {markdown_cell(decision.action)} | {markdown_cell(decision.reason)} |"
         for decision in decisions
     )
+    lines.extend(conflict_repair_summary(decisions))
+    lines.extend(update_branch_summary(decisions))
+    lines.extend(action_error_summary(decisions))
 
     with open(summary_path, "a", encoding="utf-8") as handle:
         handle.write("\n".join(lines))
         handle.write("\n")
+
+
+def parse_conflict_reason(reason: str) -> tuple[str, str, str] | None:
+    """Extract merge state, base branch, and head branch from conflict guidance."""
+    prefix = "merge conflict: "
+    if not reason.startswith(prefix):
+        return None
+    state = reason[len(prefix) :].split(";", 1)[0].strip() or "UNKNOWN"
+    base_ref = "base"
+    head_ref = "head"
+    for segment in reason.split(";"):
+        segment = segment.strip()
+        if not segment.startswith("base="):
+            continue
+        branch_bits = segment.split(",")
+        for branch_bit in branch_bits:
+            key, _, value = branch_bit.strip().partition("=")
+            if key == "base" and value:
+                base_ref = value
+            if key == "head" and value:
+                head_ref = value
+        break
+    return state, base_ref, head_ref
+
+
+def conflict_repair_summary(decisions: list[Decision]) -> list[str]:
+    """Return a GitHub Actions Summary section with concrete conflict repair steps."""
+    conflicted = [(decision, parse_conflict_reason(decision.reason)) for decision in decisions]
+    conflicted = [(decision, parsed) for decision, parsed in conflicted if parsed is not None]
+    if not conflicted:
+        return []
+
+    lines = [
+        "",
+        "### Conflict repair",
+        "",
+        "GitHub cannot safely update `DIRTY` or `CONFLICTING` PR branches. Repair the PR branch, then push the same branch so OpenCode and required checks can run on the new head.",
+    ]
+    for decision, parsed in conflicted:
+        assert parsed is not None
+        state, base_ref, head_ref = parsed
+        base_remote = f"origin/{base_ref}"
+        lines.extend(
+            [
+                "",
+                f"PR #{decision.pr} is `{state}` against `{base_ref}` from `{head_ref}`:",
+                "",
+                "```bash",
+                f"gh pr checkout {decision.pr}",
+                f"git fetch origin {shlex.quote(base_ref)}",
+                "# choose merge or rebase",
+                f"git merge --no-ff {shlex.quote(base_remote)}",
+                f"# git rebase {shlex.quote(base_remote)}",
+                "git status --short",
+                "# resolve conflict markers in the PR branch",
+                "git add <resolved-files>",
+                "# run the focused checks for the changed area",
+                "git push",
+                "# if you chose rebase: git push --force-with-lease",
+                "```",
+            ]
+        )
+    return lines
+
+
+def update_branch_summary(decisions: list[Decision]) -> list[str]:
+    """Return a GitHub Actions Summary section explaining branch update mutations."""
+    updates = [decision for decision in decisions if decision.action == "update_branch"]
+    if not updates:
+        return []
+    pr_list = ", ".join(f"#{decision.pr}" for decision in updates)
+    return [
+        "",
+        "### Branch update requests",
+        "",
+        f"Requested `update-branch` for PR {pr_list} with the workflow `GITHUB_TOKEN`, guarded by the observed `expected_head_sha`.",
+        "This branch-update API path needs `pull-requests: write`; it does not require the scheduler job to widen repository `contents` to write.",
+        "When repository permissions allow the mutation, GitHub records the resulting branch update as `github-actions[bot]`.",
+        "The updated head is not merge evidence by itself. Wait for the new head to receive OpenCode approval, Strix evidence, required checks, and unresolved-thread checks before merge or auto-merge.",
+    ]
+
+
+def action_error_summary(decisions: list[Decision]) -> list[str]:
+    """Return a GitHub Actions Summary section for mutation failures."""
+    errors = [decision for decision in decisions if decision.action == "action_error"]
+    if not errors:
+        return []
+    lines = [
+        "",
+        "### Action errors",
+        "",
+        "These are scheduler or GitHub permission/runtime failures, not source-code review findings.",
+    ]
+    for decision in errors:
+        lines.append(f"- PR #{decision.pr}: {decision.reason}")
+    return lines
+
+
+def bounded_error_summary(text: str, *, limit: int = 500) -> str:
+    """Cap an action-error message without dropping the actionable prefix."""
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "..."
 
 
 def summarize_action_error(exc: RuntimeError) -> str:
@@ -517,7 +622,29 @@ def summarize_action_error(exc: RuntimeError) -> str:
     lines = [line.strip() for line in str(exc).splitlines() if line.strip()]
     if not lines:
         return "scheduler action failed without stderr"
-    return "; ".join(lines[:2])[:500]
+    summary = "; ".join(lines[:2])
+    lower_summary = summary.lower()
+    if "resource not accessible by integration" in lower_summary:
+        if "mergepullrequest" in lower_summary or "enablepullrequestautomerge" in lower_summary or "gh pr merge" in lower_summary:
+            summary = (
+                f"{summary}; scheduler GitHub token could not perform merge or auto-merge. "
+                "Merging through GitHub Actions needs an explicit repo policy exception for scheduler-job `contents: write`; otherwise leave auto-merge disabled and keep update-branch on the lower-privilege PR-write path."
+            )
+        elif "update-branch" in lower_summary:
+            summary = (
+                f"{summary}; scheduler GitHub token could not update the PR branch. "
+                "Give the scheduler job `pull-requests: write`, then rerun with the same expected-head guard; do not widen `contents` just for update-branch."
+            )
+        else:
+            summary = (
+                f"{summary}; scheduler GitHub token lacks a required repository mutation permission. "
+                "Fix the scheduler job permissions instead of posting a code-review finding."
+            )
+    if "expected_head_sha" in lower_summary and ("422" in lower_summary or "head" in lower_summary):
+        summary = (
+            f"{summary}; the PR head likely changed after inspection. Rerun the scheduler so it reads the new head before mutating."
+        )
+    return bounded_error_summary(summary)
 
 
 def self_test() -> None:

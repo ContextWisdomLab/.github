@@ -305,6 +305,18 @@ def test_print_summary_writes_github_step_summary(monkeypatch, tmp_path, capsys)
         "| #8 | update_branch | current-head OpenCode review approved; "
         "branch update requested with workflow GH_TOKEN (github-actions[bot] in GitHub Actions) |"
     ) in summary
+    assert "### Conflict repair" in summary
+    assert "PR #7 is `DIRTY` against `main` from `feature\\|x`:" not in summary
+    assert "PR #7 is `DIRTY` against `main` from `feature|x`:" in summary
+    assert "gh pr checkout 7" in summary
+    assert "git fetch origin main" in summary
+    assert "git merge --no-ff origin/main" in summary
+    assert "git push --force-with-lease" in summary
+    assert "### Branch update requests" in summary
+    assert "Requested `update-branch` for PR #8 with the workflow `GITHUB_TOKEN`" in summary
+    assert "needs `pull-requests: write`" in summary
+    assert "does not require the scheduler job to widen repository `contents` to write" in summary
+    assert "github-actions[bot]" in summary
 
 
 def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
@@ -462,5 +474,26 @@ def test_main_keeps_scanning_after_action_error(monkeypatch, capsys):
     assert seen == [1, 2]
     output = capsys.readouterr().out
     assert "PR #1: action_error: Command failed (1): gh pr merge 1; GraphQL: Resource not accessible by integration" in output
+    assert "scheduler GitHub token could not perform merge or auto-merge" in output
     assert "PR #2: wait: next PR still inspected" in output
     assert json.loads(output.strip().splitlines()[-1])["counts"] == {"action_error": 1, "wait": 1}
+
+
+def test_action_error_guidance_distinguishes_update_branch_from_merge():
+    update_error = sched.summarize_action_error(
+        RuntimeError(
+            "Command failed (1): gh api -X PUT repos/owner/repo/pulls/7/update-branch\n"
+            "HTTP 403: Resource not accessible by integration"
+        )
+    )
+    assert "pull-requests: write" in update_error
+    assert "do not widen `contents` just for update-branch" in update_error
+
+    merge_error = sched.summarize_action_error(
+        RuntimeError(
+            "Command failed (1): gh pr merge 7 --auto --merge\n"
+            "GraphQL: Resource not accessible by integration (mergePullRequest)"
+        )
+    )
+    assert "explicit repo policy exception" in merge_error
+    assert "contents: write" in merge_error

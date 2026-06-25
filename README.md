@@ -19,9 +19,14 @@ review is approved, no current-head failed check is present, and GitHub reports
 the PR as behind. After that update, the new head must pass OpenCode, Strix,
 required checks, and review-thread gates again before auto-merge or
 `--match-head-commit` merge can proceed.
-Branch updates and merges run through the workflow `GITHUB_TOKEN`, so GitHub
-records those mechanical mutations as `github-actions[bot]` rather than an
-OpenCode app token or a personal token.
+Branch updates run through the workflow `GITHUB_TOKEN`, so GitHub records those
+mechanical updates as `github-actions[bot]` rather than an OpenCode app token or
+a personal token. That path uses the pull-request branch update API and should
+only need `pull-requests: write`; it does not justify widening repository
+`contents` permission. Merge or auto-merge is a separate mutation. When a repo
+wants GitHub Actions to perform the merge itself, that repo needs an explicit
+scheduler-job `contents: write` policy exception and should expect Scorecard or
+token-permission policy review to notice it.
 That `update_branch` path is deliberately not used for `DIRTY` or
 `CONFLICTING` PRs: GitHub cannot synthesize a safe conflict resolution for the
 author, so the review must give the author a repair path instead of pretending
