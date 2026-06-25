@@ -159,7 +159,7 @@ def mentions_actual_changed_file(reason: str, summary: str) -> bool:
         return mentions_changed_file_evidence(reason, summary)
     combined = f"{reason}\n{summary}"
     return any(
-        re.search(r"(?<![/\w])" + re.escape(changed_file), combined)
+        re.search(r"(?<![/\w])" + re.escape(changed_file) + r"(?![/\w])", combined)
         for changed_file in changed_files
     )
 
