@@ -119,7 +119,7 @@ def decision_payload(
 ) -> dict[str, Any]:
     """Return the machine-readable scheduler decision contract."""
     return {
-        "schema_version": "pr-review-merge-scheduler/v1",
+        "schema_version": "pr-review-merge-scheduler/v2",
         "base_branch": base_branch,
         "dry_run": dry_run,
         "inspected": len(decisions),
@@ -1227,7 +1227,7 @@ def self_test() -> None:
         base_branch="main",
         project_flow="github-flow",
     )
-    assert payload["schema_version"] == "pr-review-merge-scheduler/v1"
+    assert payload["schema_version"] == "pr-review-merge-scheduler/v2"
     assert payload["decisions"][0]["contract_decision"] == "UPDATE_BRANCH"
     assert payload["decisions"][0]["guidance"]["actor"] == "github-actions[bot]"
     print("self-test passed")

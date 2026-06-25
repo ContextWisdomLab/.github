@@ -426,7 +426,7 @@ def test_print_summary_writes_github_step_summary(monkeypatch, tmp_path, capsys)
     output = capsys.readouterr().out
     assert "PR #7: block: merge conflict: DIRTY" in output
     payload = json.loads(output.splitlines()[-1])
-    assert payload["schema_version"] == "pr-review-merge-scheduler/v1"
+    assert payload["schema_version"] == "pr-review-merge-scheduler/v2"
     assert payload["base_branch"] == "main"
     assert payload["counts"] == {"block": 1, "disable_auto_merge": 1, "update_branch": 1}
     assert payload["dry_run"] is True
@@ -642,7 +642,7 @@ def test_print_summary_self_test_parse_args_and_main(monkeypatch, capsys):
     output = capsys.readouterr().out
     assert "PR #1: wait: ready" in output
     payload = json.loads(output.strip().splitlines()[-1])
-    assert payload["schema_version"] == "pr-review-merge-scheduler/v1"
+    assert payload["schema_version"] == "pr-review-merge-scheduler/v2"
     assert payload["counts"] == {"wait": 2}
     assert [decision["contract_decision"] for decision in payload["decisions"]] == ["WAIT", "WAIT"]
 
