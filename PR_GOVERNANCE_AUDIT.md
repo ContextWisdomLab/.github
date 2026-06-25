@@ -108,11 +108,11 @@ both separately; a change can improve one while harming the other.
 The checked-in scheduler already does the minimal central path:
 
 - skips draft, wrong-base, and fork/external-head PRs;
-- blocks `DIRTY` or `CONFLICTING`;
+- blocks `DIRTY` or `CONFLICTING` with repair guidance that names the base branch, head branch, merge/rebase direction, conflict-marker cleanup, focused checks, and same-branch push;
 - blocks unresolved review threads;
 - blocks current-head OpenCode `CHANGES_REQUESTED`;
 - blocks current-head failed check runs or status contexts before enabling auto-merge;
-- updates `BEHIND` only when OpenCode approved the exact current head, using `expected_head_sha`;
+- updates `BEHIND` only when OpenCode approved the exact current head, using `expected_head_sha` from the scheduler workflow `GITHUB_TOKEN` so the mechanical branch update is performed by `github-actions[bot]`;
 - enables native auto-merge only for current-head OpenCode approval;
 - dispatches same-head Strix evidence first when the current head has no completed Strix evidence;
 - waits while same-head Strix evidence is still running, so OpenCode is not started just to poll a peer check;

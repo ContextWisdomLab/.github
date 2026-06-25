@@ -338,6 +338,17 @@ def dispatch_strix_evidence(repo: str, workflow: str, pr: dict[str, Any], *, dry
     )
 
 
+def merge_conflict_guidance(pr: dict[str, Any], merge_state: str) -> str:
+    """Return actionable conflict repair guidance for a conflicting PR."""
+    base_ref = pr.get("baseRefName") or "base"
+    head_ref = pr.get("headRefName") or "head"
+    return (
+        f"merge conflict: {merge_state}; base={base_ref}, head={head_ref}; "
+        f"merge or rebase origin/{base_ref} into {head_ref}, resolve conflict markers, "
+        f"rerun focused checks, and push {head_ref}"
+    )
+
+
 def inspect_pr(
     repo: str,
     pr: dict[str, Any],
@@ -364,7 +375,7 @@ def inspect_pr(
 
     merge_state = (pr.get("mergeStateStatus") or "").upper()
     if merge_state in {"DIRTY", "CONFLICTING"}:
-        return Decision(number, "block", f"merge conflict: {merge_state}")
+        return Decision(number, "block", merge_conflict_guidance(pr, merge_state))
 
     unresolved = unresolved_thread_count(pr)
     if unresolved:
@@ -584,6 +595,21 @@ def self_test() -> None:
         base_branch="main",
     )
     assert decision.action == "update_branch"
+    sample["mergeStateStatus"] = "DIRTY"
+    decision = inspect_pr(
+        "owner/repo",
+        sample,
+        dry_run=True,
+        trigger_reviews=True,
+        enable_auto_merge_flag=True,
+        update_branches=True,
+        workflow="OpenCode Review",
+        security_workflow="Strix Security Scan",
+        base_branch="main",
+    )
+    assert decision.action == "block"
+    assert "merge or rebase origin/main into feature" in decision.reason
+    assert "resolve conflict markers" in decision.reason
     print("self-test passed")
 
 

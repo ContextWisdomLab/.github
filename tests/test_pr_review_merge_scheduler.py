@@ -256,7 +256,13 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert inspect(make_pr(isDraft=True)).action == "skip"
     assert inspect(make_pr(baseRefName="develop")).reason == "base branch is develop; expected main"
     assert inspect(make_pr(headRepository={"nameWithOwner": "fork/repo"})).action == "skip"
-    assert inspect(make_pr(mergeStateStatus="DIRTY")).reason == "merge conflict: DIRTY"
+    conflict = inspect(make_pr(mergeStateStatus="DIRTY"))
+    assert conflict.action == "block"
+    assert "merge conflict: DIRTY" in conflict.reason
+    assert "base=main, head=feature" in conflict.reason
+    assert "merge or rebase origin/main into feature" in conflict.reason
+    assert "resolve conflict markers" in conflict.reason
+    assert "rerun focused checks" in conflict.reason
     assert inspect(make_pr(reviewThreads={"nodes": [{"isResolved": False}]})).reason == "1 unresolved review thread(s)"
     assert inspect(make_pr(reviews={"nodes": [opencode_review("CHANGES_REQUESTED", "head")]})).reason == (
         "current-head OpenCode review requested changes"
