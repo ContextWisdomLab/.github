@@ -2594,6 +2594,15 @@ is_midstream_fallback_error() {
 # originated from an LLM provider rather than the target application.
 LLM_PROVIDER_ONLY_REGEX='(litellm|openai|anthropic|VertexAI|Vertex_ai|vertex\.ai|google\.cloud|GitHub Models|models\.github\.ai|github_models)'
 
+is_llm_token_limit_error() {
+	if grep -Eiq '(tokens_limit_reached|Request body too large|Max size:[[:space:]]*[0-9]+[[:space:]]+tokens|Error code:[[:space:]]*413|(^|[^0-9])413([^0-9]|$))' "$STRIX_LOG" &&
+		grep -Eiq "($LLM_PROVIDER_ONLY_REGEX|OpenAIException|openai\.APIStatusError)" "$STRIX_LOG"; then
+		return 0
+	fi
+
+	return 1
+}
+
 # Detect whether the strix log contains evidence of infrastructure-level
 # errors (timeout, rate-limit, transport failures) that indicate the scan
 # was interrupted or incomplete.  Used as a guard to prevent the
@@ -2608,6 +2617,10 @@ has_detected_infrastructure_error() {
 	fi
 
 	if is_rate_limit_error; then
+		return 0
+	fi
+
+	if is_llm_token_limit_error; then
 		return 0
 	fi
 
@@ -3289,6 +3302,10 @@ is_model_retryable_error() {
 	fi
 
 	if is_rate_limit_error; then
+		return 0
+	fi
+
+	if is_llm_token_limit_error; then
 		return 0
 	fi
 
