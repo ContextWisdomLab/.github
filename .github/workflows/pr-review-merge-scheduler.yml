@@ -91,7 +91,7 @@ on:
         default: "45"
 
 concurrency:
-  group: pr-review-merge-scheduler-${{ github.repository }}
+  group: central-pr-review-merge-scheduler-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
