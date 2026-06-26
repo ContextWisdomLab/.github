@@ -562,6 +562,8 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" 'if [ "${COVERAGE_EVIDENCE_RESULT:-skipped}" != "success" ]; then' "opencode approval rejects approvals when coverage-evidence did not pass"
 	assert_file_contains "$workflow_file" "needs.coverage-evidence.result == 'success'" "opencode model steps skip when coverage-evidence already failed"
 	assert_file_contains "$workflow_file" "--fail-under=100" "opencode coverage evidence requires 100 percent test/docstring coverage"
+	assert_file_contains "$workflow_file" "Python project dependencies (requirements.txt)" "opencode coverage evidence records repository Python dependency installation"
+	assert_file_contains "$workflow_file" "python3 -m pip install --disable-pip-version-check -r requirements.txt" "opencode coverage evidence installs repository Python requirements before pytest"
 	assert_file_contains "$workflow_file" "Coverage execution evidence" "opencode evidence exposes coverage measurement to the review model"
 	assert_file_contains "$workflow_file" "Coverage and Docstring coverage labels must cite Coverage execution evidence proving 100%" "opencode approval still requires 100 percent coverage evidence when coverage is applicable"
 	assert_file_contains "$workflow_file" "or explicitly cite Coverage execution evidence as not applicable because no supported source files or package manifests were found" "opencode approval permits only evidence-backed no-source coverage N/A"
