@@ -27,6 +27,10 @@ OpenCode decides; GitHub Actions mutates.
   scaffolding, not centralized execution. Reusable workflows (`workflow_call`)
   centralize implementation while a caller or required-workflow trigger supplies
   the target repository event and token context.
+- Thin callers must not define a matching scheduler concurrency group. GitHub
+  treats a caller workflow and its reusable callee as separate workflow scopes;
+  if both use the same group, the run fails before jobs start with a concurrency
+  deadlock. The central reusable workflow owns queue serialization.
 - Live organization state at the 2026-06-26 KST check: Actions are enabled for
   all repositories, all actions and reusable workflows are allowed, and the
   organization rulesets API returned no organization-level rulesets. That means
