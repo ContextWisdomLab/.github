@@ -1194,6 +1194,9 @@ EOF
 	assert_file_contains "$REPO_ROOT/.github/workflows/opencode-review.yml" "OPENCODE_CHANGED_FILES_FILE" "opencode workflow exports exact current-head changed files"
 	assert_file_contains "$REPO_ROOT/.github/workflows/opencode-review.yml" 'diff --name-only --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA" >"$OPENCODE_CHANGED_FILES_FILE"' "opencode workflow writes exact changed files for the normalizer"
 	assert_file_contains "$REPO_ROOT/.github/workflows/opencode-review.yml" "changed-files.txt" "opencode workflow copies exact changed-file evidence into the isolated review workspace"
+	assert_file_contains "$REPO_ROOT/.github/workflows/opencode-review.yml" 'A["text"]' "opencode prompt requires quoted Mermaid labels"
+	assert_file_contains "$REPO_ROOT/.github/workflows/opencode-review.yml" 'S%s["%s"]' "opencode generated Mermaid surface labels are quoted"
+	assert_file_contains "$REPO_ROOT/.github/workflows/opencode-review.yml" 'R%s["Review risk: %s"]' "opencode generated Mermaid risk labels are quoted"
 
 	cat >"$changed_files_file" <<'EOF'
 .github/workflows/opencode-review.yml
