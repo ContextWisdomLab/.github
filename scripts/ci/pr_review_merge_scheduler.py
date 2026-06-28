@@ -62,6 +62,7 @@ fragment SchedulerPullRequestFields on PullRequest {
           status
           conclusion
           startedAt
+          detailsUrl
           checkSuite {
             workflowRun {
               workflow { name }
@@ -107,6 +108,7 @@ RUNNING_CHECK_STATES = {"PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING
 FAILED_CHECK_CONCLUSIONS = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "STARTUP_FAILURE"}
 ACTION_REQUIRED_CONCLUSIONS = {"ACTION_REQUIRED"}
 REVIEW_BODY_HEAD_SHA_RE = re.compile(r"Head SHA:\s*`([0-9a-fA-F]{40})`")
+ACTIONS_JOB_DETAILS_URL_RE = re.compile(r"/actions/runs/\d+/job/(\d+)(?:[/?#]|$)")
 REST_MERGEABLE_STATE_MAP = {
     "behind": "BEHIND",
     "blocked": "BLOCKED",
@@ -457,6 +459,25 @@ def is_strix_context(node: dict[str, Any]) -> bool:
     return (node.get("context") or "") in {"strix", "Strix Security Scan"}
 
 
+def actions_job_id_from_details_url(value: str | None) -> str | None:
+    """Return a GitHub Actions job id from a check-run details URL."""
+    if not value:
+        return None
+    match = ACTIONS_JOB_DETAILS_URL_RE.search(value)
+    return match.group(1) if match else None
+
+
+def matching_actions_job_id(pr: dict[str, Any], predicate: Any) -> str | None:
+    """Return the latest matching check-run job id, if GitHub exposed one."""
+    for node in reversed(context_nodes(pr)):
+        if node.get("__typename") != "CheckRun" or not predicate(node):
+            continue
+        job_id = actions_job_id_from_details_url(node.get("detailsUrl"))
+        if job_id:
+            return job_id
+    return None
+
+
 def parse_github_datetime(value: str | None) -> datetime | None:
     """Parse a GitHub API timestamp into an aware UTC datetime."""
     if not value:
@@ -760,8 +781,20 @@ def require_github_actions_mutation_actor(action: str) -> None:
         )
 
 
+def rerun_actions_job(repo: str, job_id: str, *, dry_run: bool, action: str) -> None:
+    """Ask GitHub Actions to rerun an existing required-workflow job."""
+    if dry_run:
+        return
+    require_github_actions_mutation_actor(action)
+    run(["gh", "api", "-X", "POST", f"repos/{repo}/actions/jobs/{job_id}/rerun"])
+
+
 def dispatch_opencode_review(repo: str, workflow: str, pr: dict[str, Any], *, dry_run: bool) -> None:
     """Dispatch the OpenCode Review workflow for the PR head."""
+    job_id = matching_actions_job_id(pr, is_opencode_context)
+    if job_id:
+        rerun_actions_job(repo, job_id, dry_run=dry_run, action="rerun-opencode-review")
+        return
     if dry_run:
         return
     run(
@@ -788,6 +821,10 @@ def dispatch_opencode_review(repo: str, workflow: str, pr: dict[str, Any], *, dr
 
 def dispatch_strix_evidence(repo: str, workflow: str, pr: dict[str, Any], *, dry_run: bool) -> None:
     """Dispatch same-head Strix workflow evidence before OpenCode reviews."""
+    job_id = matching_actions_job_id(pr, is_strix_context)
+    if job_id:
+        rerun_actions_job(repo, job_id, dry_run=dry_run, action="rerun-strix-evidence")
+        return
     if dry_run:
         return
     run(

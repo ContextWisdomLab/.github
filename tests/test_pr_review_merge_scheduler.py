@@ -57,24 +57,30 @@ def opencode_review(
     }
 
 
-def strix_check(status="COMPLETED", conclusion="SUCCESS", workflow="Strix Security Scan"):
-    return {
+def strix_check(status="COMPLETED", conclusion="SUCCESS", workflow="Strix Security Scan", details_url=None):
+    value = {
         "__typename": "CheckRun",
         "name": "strix",
         "status": status,
         "conclusion": conclusion,
         "checkSuite": {"workflowRun": {"workflow": {"name": workflow}}},
     }
+    if details_url:
+        value["detailsUrl"] = details_url
+    return value
 
 
-def opencode_check(status="IN_PROGRESS", started_at=None):
-    return {
+def opencode_check(status="IN_PROGRESS", started_at=None, details_url=None):
+    value = {
         "__typename": "CheckRun",
         "name": "opencode-review",
         "status": status,
         "startedAt": started_at,
         "checkSuite": {"workflowRun": {"workflow": {"name": "OpenCode Review"}}},
     }
+    if details_url:
+        value["detailsUrl"] = details_url
+    return value
 
 
 def inspect(pr, **overrides):
@@ -259,6 +265,21 @@ def test_context_review_and_check_helpers():
     assert sched.is_strix_context({"context": "Strix Security Scan"})
     assert sched.is_strix_context({"__typename": "CheckRun", "name": "strix", "checkSuite": {"workflowRun": {"workflow": None}}})
     assert not sched.is_strix_context({"context": "lint"})
+    assert sched.actions_job_id_from_details_url(None) is None
+    assert sched.actions_job_id_from_details_url("https://github.com/owner/repo/actions/runs/123/job/456?pr=1") == "456"
+    assert sched.actions_job_id_from_details_url("https://github.com/owner/repo/actions/runs/123") is None
+    check_jobs = make_pr(
+        statusCheckRollup={
+            "contexts": {
+                "nodes": [
+                    opencode_check(details_url="https://github.com/owner/repo/actions/runs/1/job/11"),
+                    strix_check(details_url="https://github.com/owner/repo/actions/runs/2/job/22"),
+                ]
+            }
+        }
+    )
+    assert sched.matching_actions_job_id(check_jobs, sched.is_opencode_context) == "11"
+    assert sched.matching_actions_job_id(check_jobs, sched.is_strix_context) == "22"
 
     assert sched.parse_github_datetime(None) is None
     assert sched.parse_github_datetime("not-a-date") is None
@@ -481,6 +502,7 @@ def test_actions_call_gh_with_expected_arguments(monkeypatch):
     sched.update_branch("owner/repo", pr, dry_run=True)
     sched.dispatch_strix_evidence("owner/repo", "Strix Security Scan", pr, dry_run=True)
     sched.dispatch_opencode_review("owner/repo", "OpenCode Review", pr, dry_run=True)
+    sched.rerun_actions_job("owner/repo", "101", dry_run=True, action="rerun-opencode-review")
     assert calls == []
 
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
@@ -499,6 +521,24 @@ def test_actions_call_gh_with_expected_arguments(monkeypatch):
     assert calls[3][-1] == "expected_head_sha=head"
     assert calls[4][:5] == ["gh", "workflow", "run", "Strix Security Scan", "--repo"]
     assert calls[5][:5] == ["gh", "workflow", "run", "OpenCode Review", "--repo"]
+    calls.clear()
+
+    required_workflow_pr = make_pr(
+        statusCheckRollup={
+            "contexts": {
+                "nodes": [
+                    opencode_check(details_url="https://github.com/owner/repo/actions/runs/1/job/101"),
+                    strix_check(details_url="https://github.com/owner/repo/actions/runs/2/job/202"),
+                ]
+            }
+        }
+    )
+    sched.dispatch_opencode_review("owner/repo", "OpenCode Review", required_workflow_pr, dry_run=False)
+    sched.dispatch_strix_evidence("owner/repo", "Strix Security Scan", required_workflow_pr, dry_run=False)
+    assert calls == [
+        ["gh", "api", "-X", "POST", "repos/owner/repo/actions/jobs/101/rerun"],
+        ["gh", "api", "-X", "POST", "repos/owner/repo/actions/jobs/202/rerun"],
+    ]
 
 
 def test_mutations_refuse_local_credentials(monkeypatch):
@@ -510,6 +550,17 @@ def test_mutations_refuse_local_credentials(monkeypatch):
     for mutation in (sched.update_branch, sched.enable_auto_merge, sched.merge_pr, sched.disable_auto_merge):
         with pytest.raises(RuntimeError, match="refused outside GitHub Actions"):
             mutation("owner/repo", make_pr(), dry_run=False)
+    rerun_pr = make_pr(
+        statusCheckRollup={
+            "contexts": {
+                "nodes": [
+                    opencode_check(details_url="https://github.com/owner/repo/actions/runs/1/job/101"),
+                ]
+            }
+        }
+    )
+    with pytest.raises(RuntimeError, match="refused outside GitHub Actions"):
+        sched.dispatch_opencode_review("owner/repo", "OpenCode Review", rerun_pr, dry_run=False)
     assert calls == []
 
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
@@ -517,6 +568,8 @@ def test_mutations_refuse_local_credentials(monkeypatch):
     for mutation in (sched.update_branch, sched.enable_auto_merge, sched.merge_pr, sched.disable_auto_merge):
         with pytest.raises(RuntimeError, match="refused without GH_TOKEN"):
             mutation("owner/repo", make_pr(), dry_run=False)
+    with pytest.raises(RuntimeError, match="refused without GH_TOKEN"):
+        sched.dispatch_opencode_review("owner/repo", "OpenCode Review", rerun_pr, dry_run=False)
     assert calls == []
 
 
