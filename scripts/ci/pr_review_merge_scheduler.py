@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -405,13 +406,18 @@ def fetch_rest_mergeable_state(repo: str, number: int) -> str:
     return REST_MERGEABLE_STATE_MAP.get(raw_state.lower(), raw_state.upper())
 
 
+def _fetch_and_enrich(repo: str, pr: dict[str, Any]) -> None:
+    """Fetch REST mergeable state for a single PR and enrich the payload."""
+    try:
+        pr["restMergeableState"] = fetch_rest_mergeable_state(repo, int(pr["number"]))
+    except RuntimeError as exc:
+        pr["restMergeableStateError"] = bounded_error_summary(str(exc))
+
 def enrich_rest_mergeable_states(repo: str, prs: list[dict[str, Any]]) -> None:
     """Attach REST mergeability evidence to GraphQL pull request payloads."""
-    for pr in prs:
-        try:
-            pr["restMergeableState"] = fetch_rest_mergeable_state(repo, int(pr["number"]))
-        except RuntimeError as exc:
-            pr["restMergeableStateError"] = bounded_error_summary(str(exc))
+    # ⚡ Bolt: Execute I/O bound gh api subprocess calls concurrently instead of sequentially
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        list(executor.map(lambda pr: _fetch_and_enrich(repo, pr), prs))
 
 
 def effective_merge_state(pr: dict[str, Any]) -> str:
