@@ -7,3 +7,6 @@
 ## 2024-11-20 - JSON Decoding Performance - Index Advancement
 **Learning:** Even when avoiding string slicing using `json.JSONDecoder().raw_decode(text, index)`, failing to correctly advance the index by ignoring the returned `end` index (`value, _ = decoder.raw_decode(...)`) forces the search loop to repeatedly attempt to decode nested JSON structures (e.g., inner braces `{`) sequentially. This leads to massive O(N^2) time complexity and redundant parsing for large, deeply nested JSON objects.
 **Action:** Always capture and use the new end index returned by `raw_decode` (e.g., `value, next_idx = decoder.raw_decode(text, index)`) to jump over the completely parsed object and proceed efficiently.
+## 2024-06-28 - Whitespace Iteration Bottlenecks in Python
+**Learning:** Character-by-character whitespace iteration (e.g., `while next_index < len(text) and text[next_index] in " \t\r\n": next_index += 1`) inside loops becomes a severe O(N) bottleneck in pure Python when processing large text gaps, as each iteration triggers Python bytecode evaluation.
+**Action:** Use Python's pre-compiled C-based regex engine (e.g., `re.compile(r"[^ \t\r\n]").search(text, index)`) to instantly jump past unbounded whitespace sequences without Python-level loop overhead.
