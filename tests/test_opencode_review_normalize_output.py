@@ -111,6 +111,79 @@ def test_actual_changed_file_detection_prefers_current_head_file_list(tmp_path, 
     assert norm.mentions_actual_changed_file("scripts/ci/example.py", "")
 
 
+def test_changed_file_kind_contradictions_are_rejected(tmp_path, monkeypatch):
+    changed_files = tmp_path / "changed-files.txt"
+    changed_files.write_text(
+        "\n".join(
+            [
+                ".github/workflows/opencode-review.yml",
+                "scripts/ci/test_strix_quick_gate.sh",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_CHANGED_FILES_FILE", str(changed_files))
+
+    false_summary = (
+        FULL_SUMMARY.replace("scripts/ci/example.py", ".github/workflows/opencode-review.yml")
+        .replace(
+            "Linter/static: actionlint and bash -n passed.",
+            "Linter/static: Not applicable (no source files changed).",
+        )
+        .replace(
+            "TDD/regression: pytest covered the changed behavior.",
+            "TDD/regression: Not applicable (no test files changed).",
+        )
+        .replace(
+            "PoC/execution: local PoC executed successfully.",
+            "PoC/execution: Not applicable (no executable changes).",
+        )
+    )
+    approval = control(
+        reason="No blockers found after inspecting .github/workflows/opencode-review.yml.",
+        summary=false_summary,
+    )
+
+    assert norm.changed_file_is_source_like(".github/workflows/opencode-review.yml")
+    assert norm.changed_file_is_source_like("Dockerfile")
+    assert norm.changed_file_is_source_like("src/app.py")
+    assert not norm.changed_file_is_source_like("README.md")
+    assert norm.changed_file_is_test_like("scripts/ci/test_strix_quick_gate.sh")
+    assert norm.changed_file_is_test_like("tests/README.md")
+    assert norm.contradicts_changed_file_kinds(approval["reason"], approval["summary"])
+    assert norm.valid_control(
+        approval,
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    ) is None
+
+    path = tmp_path / "approval.json"
+    path.write_text(json.dumps(approval), encoding="utf-8")
+    assert norm.check_structural_approval(path) == 4
+
+    changed_files.write_text("scripts/deploy.sh\n", encoding="utf-8")
+    assert norm.contradicts_changed_file_kinds(
+        "Reviewed scripts/deploy.sh.",
+        "PoC/execution: Not applicable (no executable changes).",
+    )
+
+    changed_files.write_text("tests/README.md\n", encoding="utf-8")
+    assert norm.contradicts_changed_file_kinds(
+        "Reviewed tests/README.md.",
+        "TDD/regression: Not applicable (no tests changed).",
+    )
+
+    changed_files.write_text("scripts/deploy.sh\n", encoding="utf-8")
+    assert not norm.contradicts_changed_file_kinds(
+        "Reviewed scripts/deploy.sh.",
+        "PoC/execution: bash -n scripts/deploy.sh passed.",
+    )
+
+    monkeypatch.delenv("OPENCODE_CHANGED_FILES_FILE")
+    assert not norm.contradicts_changed_file_kinds(approval["reason"], approval["summary"])
+
+
 def test_label_and_full_coverage_detection():
     combined = FULL_SUMMARY.casefold()
     assert "100%" in norm.label_section(combined, "coverage:")
