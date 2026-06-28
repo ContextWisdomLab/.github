@@ -789,8 +789,56 @@ def rerun_actions_job(repo: str, job_id: str, *, dry_run: bool, action: str) -> 
     run(["gh", "api", "-X", "POST", f"repos/{repo}/actions/jobs/{job_id}/rerun"])
 
 
+def active_workflow_runs(repo: str) -> list[dict[str, Any]]:
+    """Return queued and in-progress workflow runs for a repository."""
+    runs: list[dict[str, Any]] = []
+    for status in ("queued", "in_progress"):
+        payload = json.loads(
+            run(["gh", "api", f"repos/{repo}/actions/runs", "-f", f"status={status}", "-F", "per_page=100"])
+        )
+        runs.extend(payload.get("workflow_runs") or [])
+    return runs
+
+
+def workflow_run_mentions_pr(run_data: dict[str, Any], pr_number: int) -> bool:
+    """Return whether a workflow run is attached to the pull request number."""
+    return any(pr.get("number") == pr_number for pr in run_data.get("pull_requests") or [])
+
+
+def stale_opencode_run_ids(repo: str, workflow: str, pr: dict[str, Any]) -> list[str]:
+    """Return active OpenCode run ids for older heads of the same pull request."""
+    head = str(pr.get("headRefOid") or "").lower()
+    number = int(pr["number"])
+    stale: list[str] = []
+    for run_data in active_workflow_runs(repo):
+        if run_data.get("name") != workflow:
+            continue
+        if str(run_data.get("head_sha") or "").lower() == head:
+            continue
+        if not workflow_run_mentions_pr(run_data, number):
+            continue
+        run_id = run_data.get("id")
+        if run_id:
+            stale.append(str(run_id))
+    return stale
+
+
+def cancel_stale_opencode_runs(repo: str, workflow: str, pr: dict[str, Any], *, dry_run: bool) -> list[str]:
+    """Force-cancel older OpenCode runs for the same PR before retrying current head."""
+    if dry_run:
+        return []
+    require_github_actions_mutation_actor("force-cancel-stale-opencode-review")
+    run_ids = stale_opencode_run_ids(repo, workflow, pr)
+    if not run_ids:
+        return []
+    for run_id in run_ids:
+        run(["gh", "api", "-X", "POST", f"repos/{repo}/actions/runs/{run_id}/force-cancel"])
+    return run_ids
+
+
 def dispatch_opencode_review(repo: str, workflow: str, pr: dict[str, Any], *, dry_run: bool) -> None:
     """Dispatch the OpenCode Review workflow for the PR head."""
+    cancel_stale_opencode_runs(repo, workflow, pr, dry_run=dry_run)
     job_id = matching_actions_job_id(pr, is_opencode_context)
     if job_id:
         rerun_actions_job(repo, job_id, dry_run=dry_run, action="rerun-opencode-review")
