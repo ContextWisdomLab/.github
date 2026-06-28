@@ -637,7 +637,9 @@ def iter_json_objects(text: str) -> list[Any]:
     values: list[Any] = []
 
     try:
-        values.append(json.loads(text))
+        # ⚡ Bolt: Fast path early return. If full string parse succeeds, skip O(N) scanning.
+        # Prevents redundant inner raw_decode calls which duplicated outputs.
+        return [json.loads(text)]
     except json.JSONDecodeError:
         # OpenCode exports may contain prose around the JSON control object.
         pass
