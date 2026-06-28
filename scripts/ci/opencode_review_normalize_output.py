@@ -110,6 +110,62 @@ APPROVAL_VERIFICATION_LABELS = (
     "security/privacy:",
 )
 
+SOURCE_LIKE_CHANGED_FILE_EXTENSIONS = frozenset(
+    {
+        ".bash",
+        ".cjs",
+        ".cfg",
+        ".cs",
+        ".css",
+        ".go",
+        ".html",
+        ".ini",
+        ".java",
+        ".js",
+        ".json",
+        ".jsonc",
+        ".jsx",
+        ".kt",
+        ".mjs",
+        ".php",
+        ".py",
+        ".rb",
+        ".rs",
+        ".scss",
+        ".sh",
+        ".sql",
+        ".swift",
+        ".toml",
+        ".ts",
+        ".tsx",
+        ".xml",
+        ".yaml",
+        ".yml",
+    }
+)
+
+SOURCE_KIND_FALSE_PHRASES = (
+    "no source file changed",
+    "no source files changed",
+    "no source code changed",
+    "no source changes",
+    "no supported source files",
+    "no source files or package manifests",
+)
+
+TEST_KIND_FALSE_PHRASES = (
+    "no test file changed",
+    "no test files changed",
+    "no tests changed",
+    "no test changes",
+)
+
+EXECUTABLE_KIND_FALSE_PHRASES = (
+    "no executable changes",
+    "no executable file changed",
+    "no executable files changed",
+)
+
 COVERAGE_FAILURE_PHRASES = (
     "not measured",
     "unmeasured",
@@ -187,6 +243,51 @@ def current_changed_files() -> set[str]:
         }
     except OSError:
         return set()
+
+
+def changed_file_is_source_like(path: str) -> bool:
+    """Return whether a changed path can affect executable or workflow behavior."""
+    normalized = path.replace("\\", "/")
+    name = normalized.rsplit("/", 1)[-1]
+    if normalized.startswith(".github/workflows/"):
+        return True
+    if name in {"Dockerfile", "Makefile"}:
+        return True
+    return Path(name).suffix.casefold() in SOURCE_LIKE_CHANGED_FILE_EXTENSIONS
+
+
+def changed_file_is_test_like(path: str) -> bool:
+    """Return whether a changed path is part of a test surface."""
+    normalized = path.replace("\\", "/").casefold()
+    name = normalized.rsplit("/", 1)[-1]
+    parts = normalized.split("/")
+    return (
+        any(part in {"test", "tests", "__tests__"} for part in parts)
+        or name.startswith("test_")
+        or name.startswith("test-")
+        or "_test." in name
+        or "-test." in name
+        or ".test." in name
+        or ".spec." in name
+    )
+
+
+def contradicts_changed_file_kinds(reason: str, summary: str) -> bool:
+    """Return whether approval prose denies changed file kinds that evidence lists."""
+    changed_files = current_changed_files()
+    if not changed_files:
+        return False
+
+    combined = f"{reason}\n{summary}".casefold()
+    has_source_like_change = any(changed_file_is_source_like(path) for path in changed_files)
+    has_test_like_change = any(changed_file_is_test_like(path) for path in changed_files)
+    if has_source_like_change and any(phrase in combined for phrase in SOURCE_KIND_FALSE_PHRASES):
+        return True
+    if has_source_like_change and any(phrase in combined for phrase in EXECUTABLE_KIND_FALSE_PHRASES):
+        return True
+    if has_test_like_change and any(phrase in combined for phrase in TEST_KIND_FALSE_PHRASES):
+        return True
+    return False
 
 
 def mentions_actual_changed_file(reason: str, summary: str) -> bool:
@@ -429,6 +530,12 @@ def check_structural_approval(control_file: Path) -> int:
     ):
         print("NO_CONCLUSION", file=sys.stderr)
         return 4
+    if value.get("result") == "APPROVE" and contradicts_changed_file_kinds(
+        str(value.get("reason", "")),
+        str(value.get("summary", "")),
+    ):
+        print("NO_CONCLUSION", file=sys.stderr)
+        return 4
     # Generic failed-check deflections are invalid for both approvals and request-changes.
     if contains_non_actionable_failed_check_review(value):
         print("NO_CONCLUSION", file=sys.stderr)
@@ -486,6 +593,8 @@ def valid_control(
         if not mentions_verification_posture(reason, summary):
             return None
         if not mentions_full_coverage(reason, summary):
+            return None
+        if contradicts_changed_file_kinds(reason, summary):
             return None
 
     required_finding_fields = (
