@@ -235,8 +235,6 @@ def test_rest_mergeable_state_helpers(monkeypatch):
     def raise_lookup_error(repo, number):
         raise RuntimeError("transient REST failure")
 
-    monkeypatch.setattr(sched, "fetch_rest_mergeable_state", raise_lookup_error)
-
     prs = [{"number": 9}]
     monkeypatch.setattr(sched, "fetch_rest_mergeable_state", raise_lookup_error)
     sched.enrich_rest_mergeable_states("owner/repo", prs)

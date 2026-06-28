@@ -409,6 +409,7 @@ def fetch_rest_mergeable_state(repo: str, number: int) -> str:
 def enrich_rest_mergeable_states(repo: str, prs: list[dict[str, Any]]) -> None:
     """Attach REST mergeability evidence to GraphQL pull request payloads."""
     def _fetch_state(pr: dict[str, Any]) -> None:
+        """Fetch REST mergeable state for a single PR, catching errors."""
         try:
             pr["restMergeableState"] = fetch_rest_mergeable_state(repo, int(pr["number"]))
         except RuntimeError as exc:
