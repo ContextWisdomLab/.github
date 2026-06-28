@@ -1,6 +1,6 @@
 # ContextualWisdomLab central required workflow rollout
 
-Updated: 2026-06-26 17:42 KST
+Updated: 2026-06-28 19:21 KST
 
 ## Decision
 
@@ -17,7 +17,7 @@ Use an organization repository ruleset instead of copying workflow files into ea
   - `.github/workflows/opencode-review.yml`
   - `.github/workflows/pr-review-merge-scheduler.yml`
 - Required workflow ref: `refs/heads/main`
-- Required workflow SHA: `807254a04efafd5f806e0f70cb067ecf050cfd11`
+- Required workflow SHA: `f826d99badf98dca0d3be1b135cb2eb2e904b383`
 - Required workflow trigger support: `pull_request_target`
 
 This keeps Strix security evidence, OpenCode review evidence, and merge/update automation sourced from the central `.github` repository. Target repositories do not need local copies of these workflows for the organization required workflow rule.
@@ -54,22 +54,22 @@ Do not centralize the scheduler by running a `.github` scheduled job against oth
 
 ## Scope
 
-The active ruleset targets the public, non-fork, non-archived repositories found by live GitHub inventory on 2026-06-26.
+The active ruleset targets the public, non-fork repositories found by live GitHub inventory on 2026-06-28.
 
-| Repository | Default branch | Flow | Open PRs | Auto-merge | Existing workflow footprint | Existing rules/protection summary |
+| Repository | Default branch | Flow | Open PRs | Default-branch workflow footprint | Local central-workflow copies | Rollout status |
 | --- | --- | --- | ---: | --- | --- | --- |
-| `ContextualWisdomLab/.github` | `main` | GitHub Flow | 25 | on | OpenCode, scheduler, Strix, Copilot | central required workflows, lock default branch |
-| `ContextualWisdomLab/ContextualWisdomLab.github.io` | `main` | GitHub Flow | 9 | on | OpenCode, scheduler, Strix, Pages, Copilot | central required workflows, lock default branch |
-| `ContextualWisdomLab/appguardrail` | `develop` | Git Flow | 0 | on | OpenCode, scheduler, Strix, CodeQL, release/security workflows | central required workflows, lock default branch, PR ruleset |
-| `ContextualWisdomLab/bandscope` | `develop` | Git Flow | 81 | on | many CI/security workflows, OpenCode, scheduler | central required workflows, lock default branch, classic branch protection |
-| `ContextualWisdomLab/clearfolio` | `main` | GitHub Flow | 18 | off | OpenCode, scheduler, Strix, CodeQL | central required workflows, PR ruleset |
-| `ContextualWisdomLab/codec-carver` | `main` | GitHub Flow | 11 | on | OpenCode, scheduler, Strix, Copilot | central required workflows, lock default branch |
-| `ContextualWisdomLab/contextual-orchestrator` | `main` | GitHub Flow | 0 | off | Security, Dependabot Updates | central required workflows |
-| `ContextualWisdomLab/hyosung-itx-slogan-brief` | `main` | GitHub Flow | 0 | off | OpenCode, scheduler, validation, Copilot | central required workflows, no-branch-delete ruleset |
-| `ContextualWisdomLab/naruon` | `develop` | Git Flow | 7 | on | CI, security scans, OpenCode, PR Governance, scheduler, Strix | central required workflows, lock default branch, PR ruleset, classic protection |
-| `ContextualWisdomLab/newsdom-api` | `develop` | Git Flow | 6 | on | CI/security/release/pages workflows, OpenCode, scheduler, Strix | central required workflows, lock default branch, mirror classic protection |
-| `ContextualWisdomLab/pg-erd-cloud` | `main` | GitHub Flow | 15 | on | CI/security, OpenCode, autofix/fix scheduler, scheduler, Strix | central required workflows, lock default branch |
-| `ContextualWisdomLab/scopeweave` | `develop` | Git Flow | 11 | on | security scans, OpenCode, scheduler, Strix, Pages | central required workflows, lock default branch |
+| `ContextualWisdomLab/.github` | `main` | GitHub Flow | 32 | OpenCode, scheduler, Strix | central source; keep | central source repo |
+| `ContextualWisdomLab/ContextualWisdomLab.github.io` | `main` | GitHub Flow | 15 | none | none | migrated; re-verify before final closure |
+| `ContextualWisdomLab/appguardrail` | `develop` | Git Flow | 0 | security | none | migrated; re-verify before final closure |
+| `ContextualWisdomLab/bandscope` | `develop` | Git Flow | 92 | OpenCode, scheduler, security | OpenCode, scheduler | rewrite local workflow contracts before removal |
+| `ContextualWisdomLab/clearfolio` | `main` | GitHub Flow | 26 | none | none | migrated; re-verify before final closure |
+| `ContextualWisdomLab/codec-carver` | `main` | GitHub Flow | 19 | OpenCode, scheduler, Strix | OpenCode, scheduler, Strix | quality uplift first: 100% test/docstring coverage is not yet proven |
+| `ContextualWisdomLab/contextual-orchestrator` | `main` | GitHub Flow | 0 | security | none | no local central copies observed; verify inherited checks on next PR |
+| `ContextualWisdomLab/hyosung-itx-slogan-brief` | `main` | GitHub Flow | 0 | validation | none | migrated; re-verify before final closure |
+| `ContextualWisdomLab/naruon` | `develop` | Git Flow | 19 | OpenCode, scheduler, Strix, Pages/deploy, security | OpenCode, scheduler, Strix | complex local review/process contract; inspect #745-era behavior before removal |
+| `ContextualWisdomLab/newsdom-api` | `develop` | Git Flow | 21 | OpenCode, scheduler, Strix, Pages/deploy, security | OpenCode, scheduler, Strix | rewrite local workflow/runtime-env tests before removal |
+| `ContextualWisdomLab/pg-erd-cloud` | `main` | GitHub Flow | 25 | OpenCode, scheduler, Strix, security, autofix/fix | OpenCode, scheduler, Strix | preserve/autonomize autofix contract before removing local governance copies |
+| `ContextualWisdomLab/scopeweave` | `develop` | Git Flow | 22 | OpenCode, scheduler, Strix, Pages/deploy, security | OpenCode, scheduler, Strix | rewrite docs/tests that treat local Strix/OpenCode files as the contract |
 
 ## Current policy
 
@@ -94,6 +94,9 @@ The active ruleset targets the public, non-fork, non-archived repositories found
 - `.github` PR `#79` merged the central scheduler `pull_request_target` path and PR-scoped `--pr-number` lookup.
 - `.github` PR `#79` second current-head proof passed coverage evidence in 10s, Strix in 8m33s, and OpenCode review in 8m57s on head `17c62f3809c57ca4b1a9a63e14f325c9f2a1acdb`.
 - Organization ruleset `18156473` now requires `.github/workflows/strix.yml`, `.github/workflows/opencode-review.yml`, and `.github/workflows/pr-review-merge-scheduler.yml` from `.github@main` SHA `807254a04efafd5f806e0f70cb067ecf050cfd11`.
+- `.github` PR `#85` installed target repository `requirements.txt` before Python coverage evidence, so central coverage measurement can run repo tests that require project dependencies.
+- `.github` PR `#88` hardened the OpenCode output normalizer so the Python normalizer is part of the trusted approval gate path.
+- On 2026-06-28 19:21 KST, ruleset `18156473` was re-pinned to `.github@main` SHA `f826d99badf98dca0d3be1b135cb2eb2e904b383` for all three required workflow paths.
 - `ContextualWisdomLab/naruon` reports inherited active ruleset `18156473` with all three required workflow paths, proving target-repository inheritance after the scheduler ruleset update.
 - `ContextualWisdomLab/ContextualWisdomLab.github.io` PR `#25` merged the thin central scheduler caller and repository-local bootstrap fixes. Its main Strix run `28217860369` passed.
 - The organization ruleset API reports the central required workflows ruleset as `active` and inherited by each public non-fork target repository.
@@ -107,7 +110,9 @@ The active ruleset targets the public, non-fork, non-archived repositories found
 
 ## Risks and follow-up
 
-- Existing open PRs may need a new push or base update before the newly required OpenCode check appears on their current head.
-- The central Strix workflow still defaults to GPT-5 and falls back to DeepSeek models. The PR `#77` central required run passed in 9m25s, but earlier runs have been slower. If runtime or rate limits continue, adjust Strix model routing separately.
-- Some repositories still have local Strix/OpenCode/scheduler workflows. Do not copy more workflows into repositories; instead, retire local copies after the organization ruleset proves the central required workflows stable on current heads.
-- Some repositories use classic branch protection while others use rulesets. The next rollout pass should normalize branch protection into rulesets without removing repository-specific required application checks.
+- Existing open PRs may need a new push or base update before the latest required workflow SHA appears on their current head.
+- The central OpenCode workflow now retries DeepSeek R1, DeepSeek V3, GPT-5, and a catalog fallback pool. Keep model/tooling failures out of PR comments unless there is a source-backed failed-check diagnosis.
+- Generated OpenCode review DAGs must use quoted Mermaid labels such as `A["text"]`; unquoted labels with spaces, punctuation, parentheses, or file counts can fail to render.
+- Some repositories still have local Strix/OpenCode/scheduler workflows. Do not copy more workflows into repositories; retire local copies only after repository tests and docs are rewritten to the central required-workflow contract.
+- Repositories with local autofix/update workflows, especially `pg-erd-cloud`, need an explicit central autofix contract before local workflows are removed.
+- Some repositories use classic branch protection while others use rulesets. Normalize branch protection into rulesets without removing repository-specific required application checks.
