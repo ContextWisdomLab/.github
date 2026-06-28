@@ -169,6 +169,7 @@ EXECUTABLE_KIND_FALSE_PHRASES = (
 COVERAGE_FAILURE_PHRASES = (
     "not measured",
     "unmeasured",
+    "partial",
     "not proven",
     "not applicable",
     "n/a",
@@ -341,7 +342,7 @@ def coverage_section_is_valid(section: str) -> bool:
         return True
     if any(phrase in section for phrase in COVERAGE_FAILURE_PHRASES):
         return False
-    return True
+    return "100%" in section
 
 
 def mentions_full_coverage(reason: str, summary: str) -> bool:
@@ -415,10 +416,8 @@ def evidence_coverage_mode(text: str) -> str | None:
     section = text.casefold()
     if "- result: pass" not in section:
         return None
-    if "- test coverage: measured" in section and "- docstring coverage: measured" in section:
-        return "measured"
     if "- test coverage: 100%" in section and "- docstring coverage: 100%" in section:
-        return "measured"
+        return "full"
     no_source = "no supported source files or package manifests" in section
     test_na = "- test coverage: not applicable" in section
     docstring_na = "- docstring coverage: not applicable" in section
@@ -448,8 +447,8 @@ def build_approval_repair_summary(summary: str, evidence_text: str) -> str | Non
             "because no supported source files or package manifests were found."
         )
     else:
-        coverage_line = "Coverage: coverage execution evidence reports measured test coverage percentages for the current head."
-        docstring_line = "Docstring coverage: coverage execution evidence reports measured docstring coverage percentages for the current head."
+        coverage_line = "Coverage: coverage execution evidence proves 100% test coverage for the current head."
+        docstring_line = "Docstring coverage: coverage execution evidence proves 100% docstring coverage for the current head."
 
     repair = f"""\
 
