@@ -1,6 +1,6 @@
 # ContextualWisdomLab central required workflow rollout
 
-Updated: 2026-06-28 19:21 KST
+Updated: 2026-06-28 20:09 KST
 
 ## Decision
 
@@ -17,7 +17,7 @@ Use an organization repository ruleset instead of copying workflow files into ea
   - `.github/workflows/opencode-review.yml`
   - `.github/workflows/pr-review-merge-scheduler.yml`
 - Required workflow ref: `refs/heads/main`
-- Required workflow SHA: `f826d99badf98dca0d3be1b135cb2eb2e904b383`
+- Required workflow SHA: `531482764986bf7da98c1317d59e6e51e7c61d02`
 - Required workflow trigger support: `pull_request_target`
 
 This keeps Strix security evidence, OpenCode review evidence, and merge/update automation sourced from the central `.github` repository. Target repositories do not need local copies of these workflows for the organization required workflow rule.
@@ -96,7 +96,9 @@ The active ruleset targets the public, non-fork repositories found by live GitHu
 - Organization ruleset `18156473` now requires `.github/workflows/strix.yml`, `.github/workflows/opencode-review.yml`, and `.github/workflows/pr-review-merge-scheduler.yml` from `.github@main` SHA `807254a04efafd5f806e0f70cb067ecf050cfd11`.
 - `.github` PR `#85` installed target repository `requirements.txt` before Python coverage evidence, so central coverage measurement can run repo tests that require project dependencies.
 - `.github` PR `#88` hardened the OpenCode output normalizer so the Python normalizer is part of the trusted approval gate path.
-- On 2026-06-28 19:21 KST, ruleset `18156473` was re-pinned to `.github@main` SHA `f826d99badf98dca0d3be1b135cb2eb2e904b383` for all three required workflow paths.
+- `.github` PR `#94` hardened the central OpenCode prompt and generated review DAG contract so Mermaid labels are quoted and render safely.
+- `.github` PR `#95` blocks OpenCode approvals that claim no source, test, or executable changes when exact changed-file evidence lists workflow, script, source, or test files.
+- On 2026-06-28 20:09 KST, ruleset `18156473` was re-pinned to `.github@main` SHA `531482764986bf7da98c1317d59e6e51e7c61d02` for all three required workflow paths.
 - `ContextualWisdomLab/naruon` reports inherited active ruleset `18156473` with all three required workflow paths, proving target-repository inheritance after the scheduler ruleset update.
 - `ContextualWisdomLab/ContextualWisdomLab.github.io` PR `#25` merged the thin central scheduler caller and repository-local bootstrap fixes. Its main Strix run `28217860369` passed.
 - The organization ruleset API reports the central required workflows ruleset as `active` and inherited by each public non-fork target repository.
@@ -113,6 +115,7 @@ The active ruleset targets the public, non-fork repositories found by live GitHu
 - Existing open PRs may need a new push or base update before the latest required workflow SHA appears on their current head.
 - The central OpenCode workflow now retries DeepSeek R1, DeepSeek V3, GPT-5, and a catalog fallback pool. Keep model/tooling failures out of PR comments unless there is a source-backed failed-check diagnosis.
 - Generated OpenCode review DAGs must use quoted Mermaid labels such as `A["text"]`; unquoted labels with spaces, punctuation, parentheses, or file counts can fail to render.
+- OpenCode approval summaries must not contradict exact changed-file evidence by saying no source, test, or executable files changed when workflow, script, source, or test files are present.
 - Some repositories still have local Strix/OpenCode/scheduler workflows. Do not copy more workflows into repositories; retire local copies only after repository tests and docs are rewritten to the central required-workflow contract.
 - Repositories with local autofix/update workflows, especially `pg-erd-cloud`, need an explicit central autofix contract before local workflows are removed.
 - Some repositories use classic branch protection while others use rulesets. Normalize branch protection into rulesets without removing repository-specific required application checks.
