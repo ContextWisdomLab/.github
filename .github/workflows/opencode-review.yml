@@ -131,11 +131,183 @@ jobs:
             git ls-files "$@" | awk 'NF { found=1 } END { exit found ? 0 : 1 }'
           }
 
+          tracked_python_projects_with_tests() {
+            git ls-files 'pyproject.toml' '*/pyproject.toml' \
+              | while IFS= read -r pyproject_file; do
+                  project_dir="$(dirname "$pyproject_file")"
+                  if [ "$project_dir" = "." ]; then
+                    project_dir="."
+                  fi
+                  if [ -d "${project_dir}/tests" ]; then
+                    printf '%s\n' "$project_dir"
+                  fi
+                done
+          }
+
           install_python_project_dependencies() {
             if [ -f requirements.txt ]; then
               run_and_capture "Python project dependencies (requirements.txt)" \
                 python3 -m pip install --disable-pip-version-check -r requirements.txt
             fi
+
+            while IFS= read -r project_dir; do
+              run_and_capture "Python project dependencies (${project_dir})" \
+                uv sync --project "$project_dir" --group dev
+            done < <(tracked_python_projects_with_tests)
+          }
+
+          run_python_test_coverage() {
+            local measured_projects=0
+            while IFS= read -r project_dir; do
+              measured_projects=1
+              run_and_capture "Python test coverage (${project_dir})" \
+                bash -c 'cd "$1" && uv run pytest tests --cov --cov-report=term-missing --cov-fail-under=100' bash "$project_dir"
+            done < <(tracked_python_projects_with_tests)
+
+            if [ "$measured_projects" -eq 0 ]; then
+              if python3 -c 'import coverage, pytest' >/dev/null 2>&1; then
+                run_and_capture "Python test coverage" python3 -m coverage run -m pytest
+                run_and_capture "Python coverage threshold" python3 -m coverage report --fail-under=100
+              elif python3 -c 'import pytest_cov' >/dev/null 2>&1; then
+                run_and_capture "Python pytest-cov coverage" python3 -m pytest --cov=. --cov-report=term-missing --cov-fail-under=100
+              else
+                append "### Python test coverage"
+                append ""
+                append "- Result: FAIL"
+                append "- Reason: Python files exist, but neither coverage.py+pytest nor pytest-cov is available to measure 100% coverage."
+                append ""
+                failures=$((failures + 1))
+              fi
+            fi
+          }
+
+          select_package_runner() {
+            if [ -f pnpm-lock.yaml ] && command -v pnpm >/dev/null 2>&1; then
+              printf '%s\n' "pnpm"
+            elif [ -f yarn.lock ] && command -v yarn >/dev/null 2>&1; then
+              printf '%s\n' "yarn"
+            elif command -v npm >/dev/null 2>&1; then
+              printf '%s\n' "npm"
+            fi
+          }
+
+          has_repository_docstring_script() {
+            [ -f package.json ] && jq -e '.scripts["check:python-docstrings"] // empty' package.json >/dev/null
+          }
+
+          install_package_dependencies() {
+            local package_runner="$1"
+            case "$package_runner" in
+              npm)
+                if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+                  run_and_capture "JavaScript/TypeScript dependencies (npm ci)" npm ci
+                else
+                  run_and_capture "JavaScript/TypeScript dependencies (npm install)" npm install
+                fi
+                ;;
+              pnpm)
+                run_and_capture "JavaScript/TypeScript dependencies (pnpm install)" pnpm install --frozen-lockfile
+                ;;
+              yarn)
+                run_and_capture "JavaScript/TypeScript dependencies (yarn install)" yarn install --immutable
+                ;;
+            esac
+          }
+
+          check_javascript_coverage_thresholds() {
+            local summary_list
+            local checker
+            summary_list="${RUNNER_TEMP}/javascript-coverage-summaries.txt"
+            checker="${RUNNER_TEMP}/check-javascript-coverage.py"
+            find . \
+              \( -path '*/coverage/coverage-summary.json' -o -path '*/coverage/coverage-final.json' \) \
+              -type f \
+              -not -path '*/node_modules/*' \
+              -print >"$summary_list"
+
+            if [ ! -s "$summary_list" ]; then
+              append "### JavaScript/TypeScript coverage threshold"
+              append ""
+              append "- Result: FAIL"
+              append "- Reason: JavaScript/TypeScript coverage ran, but no coverage summary files were produced."
+              append ""
+              failures=$((failures + 1))
+              return
+            fi
+
+            cat >"$checker" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          def pct(covered: int, total: int) -> float:
+              return 100.0 if total == 0 else round((covered / total) * 100, 2)
+
+
+          def summarize_final(data: dict) -> dict[str, float]:
+              totals = {
+                  "statements": [0, 0],
+                  "branches": [0, 0],
+                  "functions": [0, 0],
+                  "lines": [0, 0],
+              }
+              for file_data in data.values():
+                  statements = file_data.get("s") or {}
+                  totals["statements"][1] += len(statements)
+                  totals["statements"][0] += sum(1 for count in statements.values() if count > 0)
+
+                  functions = file_data.get("f") or {}
+                  totals["functions"][1] += len(functions)
+                  totals["functions"][0] += sum(1 for count in functions.values() if count > 0)
+
+                  branches = file_data.get("b") or {}
+                  for counts in branches.values():
+                      totals["branches"][1] += len(counts)
+                      totals["branches"][0] += sum(1 for count in counts if count > 0)
+
+                  line_counts: dict[int, int] = {}
+                  statement_map = file_data.get("statementMap") or {}
+                  for statement_id, location in statement_map.items():
+                      start = (location.get("start") or {}).get("line")
+                      if start is None:
+                          continue
+                      line_counts[start] = max(line_counts.get(start, 0), statements.get(statement_id, 0))
+                  totals["lines"][1] += len(line_counts)
+                  totals["lines"][0] += sum(1 for count in line_counts.values() if count > 0)
+
+              return {
+                  metric: pct(values[0], values[1])
+                  for metric, values in totals.items()
+              }
+
+
+          summary_list = Path(sys.argv[1])
+          failures: list[str] = []
+          for raw_path in summary_list.read_text(encoding="utf-8").splitlines():
+              summary_path = Path(raw_path)
+              data = json.loads(summary_path.read_text(encoding="utf-8"))
+              if summary_path.name == "coverage-summary.json":
+                  metric_totals = {
+                      metric: (data.get("total") or {}).get(metric, {}).get("pct")
+                      for metric in ("statements", "branches", "functions", "lines")
+                  }
+              else:
+                  metric_totals = summarize_final(data)
+              print(f"{summary_path}:")
+              for metric in ("statements", "branches", "functions", "lines"):
+                  metric_pct = metric_totals.get(metric)
+                  print(f"  {metric}: {metric_pct}%")
+                  if metric_pct != 100:
+                      failures.append(f"{summary_path} {metric}={metric_pct}%")
+
+          if failures:
+              print("Coverage below 100%:")
+              for failure in failures:
+                  print(f"- {failure}")
+              raise SystemExit(1)
+          PY
+
+            run_and_capture "JavaScript/TypeScript coverage threshold" python3 "$checker" "$summary_list"
           }
 
           append "# Coverage Evidence"
@@ -150,21 +322,15 @@ jobs:
           if has_tracked_files '*.py'; then
             measured_any=1
             install_python_project_dependencies
-            if python3 -c 'import coverage, pytest' >/dev/null 2>&1; then
-              run_and_capture "Python test coverage" python3 -m coverage run -m pytest
-              run_and_capture "Python coverage threshold" python3 -m coverage report --fail-under=100
-            elif python3 -c 'import pytest_cov' >/dev/null 2>&1; then
-              run_and_capture "Python pytest-cov coverage" python3 -m pytest --cov=. --cov-report=term-missing --cov-fail-under=100
-            else
-              append "### Python test coverage"
-              append ""
-              append "- Result: FAIL"
-              append "- Reason: Python files exist, but neither coverage.py+pytest nor pytest-cov is available to measure 100% coverage."
-              append ""
-              failures=$((failures + 1))
-            fi
+            run_python_test_coverage
 
-            if python3 -m interrogate --version >/dev/null 2>&1; then
+            if has_repository_docstring_script; then
+              append "### Python docstring coverage"
+              append ""
+              append "- Result: DEFERRED"
+              append "- Reason: package.json defines check:python-docstrings; repository-owned docstring coverage runs after package dependency setup."
+              append ""
+            elif python3 -m interrogate --version >/dev/null 2>&1; then
               run_and_capture "Python docstring coverage" python3 -m interrogate --fail-under=100 .
             else
               append "### Python docstring coverage"
@@ -178,14 +344,8 @@ jobs:
 
           if [ -f package.json ]; then
             measured_any=1
-            package_runner=""
-            if [ -f pnpm-lock.yaml ] && command -v pnpm >/dev/null 2>&1; then
-              package_runner="pnpm"
-            elif [ -f yarn.lock ] && command -v yarn >/dev/null 2>&1; then
-              package_runner="yarn"
-            elif command -v npm >/dev/null 2>&1; then
-              package_runner="npm"
-            fi
+            package_runner="$(select_package_runner)"
+            javascript_coverage_ran=0
 
             if [ -z "$package_runner" ]; then
               append "### JavaScript/TypeScript test coverage"
@@ -194,14 +354,37 @@ jobs:
               append "- Reason: package.json exists, but no supported package runner is available."
               append ""
               failures=$((failures + 1))
+            else
+              install_package_dependencies "$package_runner"
+            fi
+
+            if [ -n "$package_runner" ] && jq -e '.scripts["check:python-docstrings"] // empty' package.json >/dev/null; then
+              run_and_capture "Repository docstring coverage" "$package_runner" run check:python-docstrings
+            elif [ -n "$package_runner" ] && jq -e '.scripts["docstring:coverage"] // empty' package.json >/dev/null; then
+              run_and_capture "JavaScript/TypeScript docstring coverage" "$package_runner" run docstring:coverage
+            elif [ -n "$package_runner" ] && jq -e '.scripts["docs:coverage"] // empty' package.json >/dev/null; then
+              run_and_capture "JavaScript/TypeScript docstring coverage" "$package_runner" run docs:coverage
+            else
+              append "### JavaScript/TypeScript docstring coverage"
+              append ""
+              append "- Result: FAIL"
+              append "- Reason: package.json exists, but no check:python-docstrings, docstring:coverage, or docs:coverage script is defined to prove 100% docstring coverage."
+              append ""
+              failures=$((failures + 1))
+            fi
+
+            if [ -z "$package_runner" ]; then
+              :
             elif jq -e '.scripts.coverage // empty' package.json >/dev/null; then
               run_and_capture "JavaScript/TypeScript coverage script" "$package_runner" run coverage
+              javascript_coverage_ran=1
             elif jq -e '.scripts.test // empty' package.json >/dev/null; then
               case "$package_runner" in
                 npm) run_and_capture "JavaScript/TypeScript test coverage" npm test -- --coverage ;;
                 pnpm) run_and_capture "JavaScript/TypeScript test coverage" pnpm test -- --coverage ;;
                 yarn) run_and_capture "JavaScript/TypeScript test coverage" yarn test --coverage ;;
               esac
+              javascript_coverage_ran=1
             else
               append "### JavaScript/TypeScript test coverage"
               append ""
@@ -211,17 +394,8 @@ jobs:
               failures=$((failures + 1))
             fi
 
-            if [ -n "$package_runner" ] && jq -e '.scripts["docstring:coverage"] // empty' package.json >/dev/null; then
-              run_and_capture "JavaScript/TypeScript docstring coverage" "$package_runner" run docstring:coverage
-            elif [ -n "$package_runner" ] && jq -e '.scripts["docs:coverage"] // empty' package.json >/dev/null; then
-              run_and_capture "JavaScript/TypeScript docstring coverage" "$package_runner" run docs:coverage
-            else
-              append "### JavaScript/TypeScript docstring coverage"
-              append ""
-              append "- Result: FAIL"
-              append "- Reason: package.json exists, but no docstring:coverage or docs:coverage script is defined to prove 100% docstring coverage."
-              append ""
-              failures=$((failures + 1))
+            if [ "$javascript_coverage_ran" -eq 1 ]; then
+              check_javascript_coverage_thresholds
             fi
           fi
 
