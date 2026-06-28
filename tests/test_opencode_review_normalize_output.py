@@ -447,6 +447,74 @@ Security/privacy: Not applicable.
     assert norm.mentions_full_coverage(repaired["reason"], repaired["summary"])
 
 
+def test_valid_control_repair_drops_contradictory_changed_file_kind_claims(tmp_path, monkeypatch):
+    evidence = tmp_path / "bounded-review-evidence.md"
+    changed_files = tmp_path / "changed-files.txt"
+    evidence.write_text(
+        """\
+# OpenCode bounded PR review evidence
+
+## Coverage execution evidence
+
+# Coverage Evidence
+
+## Coverage Decision
+
+- Result: PASS
+- Test coverage: 100%
+- Docstring coverage: 100%
+
+## Changed files
+
+M\tapps/desktop/src/App.tsx
+M\tapps/desktop/src/App.test.tsx
+""",
+        encoding="utf-8",
+    )
+    changed_files.write_text(
+        "apps/desktop/src/App.tsx\napps/desktop/src/App.test.tsx\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_APPROVAL_REPAIR_EVIDENCE_FILE", str(evidence))
+    monkeypatch.setenv("OPENCODE_CHANGED_FILES_FILE", str(changed_files))
+
+    repaired = norm.valid_control(
+        control(
+            reason="No blocking issues found in the inspected files.",
+            summary="""\
+Inspected changes in PR #475. No blocking issues were found.
+Verification posture: CodeGraph was mentioned.
+Linter/static: Not applicable (no linter changes).
+TDD/regression: Not applicable (no test changes).
+Coverage: Not applicable (no coverage changes).
+Docstring coverage: Not applicable (no docstring changes).
+DAG: Not applicable (no DAG changes).
+PoC/execution: Not applicable (no executable changes).
+DDD/domain: Not applicable.
+CDD/context: Not applicable.
+Similar issues: Not applicable.
+Claim/concept check: Not applicable.
+Standards search: Not applicable.
+Compatibility/convention: Not applicable.
+Breaking-change/backcompat: Not applicable.
+Performance: Not applicable.
+Developer experience: Not applicable.
+User experience: Not applicable.
+Security/privacy: Not applicable.
+""",
+        ),
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    )
+
+    assert repaired is not None
+    assert "apps/desktop/src/App.tsx" in repaired["summary"]
+    assert "no executable changes" not in repaired["summary"]
+    assert "no test changes" not in repaired["summary"]
+    assert not norm.contradicts_changed_file_kinds(repaired["reason"], repaired["summary"])
+
+
 def test_valid_control_does_not_repair_unsafe_or_unproven_approval(tmp_path, monkeypatch):
     evidence = tmp_path / "bounded-review-evidence.md"
     evidence.write_text(

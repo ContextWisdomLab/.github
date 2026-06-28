@@ -491,6 +491,9 @@ def repair_approval_summary(reason: str, summary: str) -> str:
         return summary
 
     repaired_summary = build_approval_repair_summary(summary, evidence_text)
+    if repaired_summary and contradicts_changed_file_kinds(reason, repaired_summary):
+        # ponytail: drop model prose only when bounded evidence proves it denied changed file kinds.
+        repaired_summary = build_approval_repair_summary("", evidence_text)
     return repaired_summary or summary
 
 
