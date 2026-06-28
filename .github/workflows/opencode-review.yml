@@ -144,6 +144,29 @@ jobs:
                 done
           }
 
+          pyproject_has_dev_dependency_group() {
+            python3 - "$1" <<'PY'
+          import sys
+          import tomllib
+
+          with open(sys.argv[1], "rb") as fh:
+              data = tomllib.load(fh)
+          raise SystemExit(0 if "dev" in data.get("dependency-groups", {}) else 1)
+          PY
+          }
+
+          pyproject_has_dev_optional_extra() {
+            python3 - "$1" <<'PY'
+          import sys
+          import tomllib
+
+          with open(sys.argv[1], "rb") as fh:
+              data = tomllib.load(fh)
+          optional = data.get("project", {}).get("optional-dependencies", {})
+          raise SystemExit(0 if "dev" in optional else 1)
+          PY
+          }
+
           install_python_project_dependencies() {
             if [ -f requirements.txt ]; then
               run_and_capture "Python project dependencies (requirements.txt)" \
@@ -151,9 +174,13 @@ jobs:
             fi
 
             while IFS= read -r project_dir; do
-              if grep -Eq '^[[:space:]]*dev[[:space:]]*=' "${project_dir}/pyproject.toml"; then
+              pyproject_file="${project_dir}/pyproject.toml"
+              if pyproject_has_dev_dependency_group "$pyproject_file"; then
                 run_and_capture "Python project dependencies (${project_dir})" \
                   uv sync --project "$project_dir" --group dev
+              elif pyproject_has_dev_optional_extra "$pyproject_file"; then
+                run_and_capture "Python project dependencies (${project_dir})" \
+                  uv sync --project "$project_dir" --extra dev
               else
                 run_and_capture "Python project dependencies (${project_dir})" \
                   uv sync --project "$project_dir"
@@ -194,6 +221,18 @@ jobs:
             elif command -v npm >/dev/null 2>&1; then
               printf '%s\n' "npm"
             fi
+          }
+
+          run_python_docstring_coverage() {
+            local measured_projects=0
+            while IFS= read -r project_dir; do
+              if [ -f "${project_dir}/tests/test_docstrings.py" ]; then
+                measured_projects=1
+                run_and_capture "Python docstring coverage (${project_dir})" \
+                  bash -c 'cd "$1" && PYTHONPATH=. uv run pytest tests/test_docstrings.py' bash "$project_dir"
+              fi
+            done < <(tracked_python_projects_with_tests)
+            [ "$measured_projects" -eq 1 ]
           }
 
           has_repository_docstring_script() {
@@ -329,7 +368,9 @@ jobs:
             install_python_project_dependencies
             run_python_test_coverage
 
-            if has_repository_docstring_script; then
+            if run_python_docstring_coverage; then
+              :
+            elif has_repository_docstring_script; then
               append "### Python docstring coverage"
               append ""
               append "- Result: DEFERRED"
