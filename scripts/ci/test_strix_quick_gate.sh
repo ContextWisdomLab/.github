@@ -7330,7 +7330,7 @@ run_gate_case "github-models-primary-unavailable-fallback-success" \
 	"deepseek/deepseek-r1-0528 deepseek/deepseek-v3-0324" \
 	"1"
 
-run_gate_case "github-models-primary-denied-fallback-success" \
+run_gate_case_allow_provider_signal "github-models-primary-denied-fallback-success" \
 	"openai/gpt-5" \
 	"" \
 	"0" \
