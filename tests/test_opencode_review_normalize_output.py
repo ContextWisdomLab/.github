@@ -305,7 +305,11 @@ def test_valid_control_filters_shape_head_and_review_contract():
     assert norm.valid_control(dict(request, findings=["bad"]), **kwargs) is None
     assert norm.valid_control(dict(request, findings=[finding(line=True)]), **kwargs) is None
     assert norm.valid_control(dict(request, findings=[finding(line=0)]), **kwargs) is None
+    assert norm.valid_control(dict(request, findings=[finding(line="10")]), **kwargs) is None
     assert norm.valid_control(dict(request, findings=[finding(title="")]), **kwargs) is None
+    invalid_finding = finding()
+    invalid_finding.pop("severity")
+    assert norm.valid_control(dict(request, findings=[invalid_finding]), **kwargs) is None
     assert (
         norm.valid_control(
             dict(
