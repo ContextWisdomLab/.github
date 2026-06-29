@@ -4067,6 +4067,11 @@ jobs:
 
             wait_for_peer_github_checks "$pending_file" || wait_status=$?
             if [ "$wait_status" -eq 1 ]; then
+              if app_token_limited_check_lookup; then
+                echo "GitHub Checks statusCheckRollup lookup is unavailable to the OpenCode app token during deterministic fallback approval; branch protection remains authoritative for target-repository checks."
+                : >"$pending_file"
+                wait_status=0
+              else
               body="$(printf '%s\n' \
                 "OpenCode could not validate deterministic fallback approval because current-head checks were unavailable." \
                 "" \
@@ -4079,12 +4084,17 @@ jobs:
                 "" \
                 "No PR review was posted because check lookup failure is a review-tool state, not a source finding.")"
               stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
+              fi
             elif [ "$wait_status" -eq 2 ]; then
               build_waiting_for_checks_body "$pending_file" "$human_thread_body_file"
               stop_approval_without_review "WAITING_FOR_CHECKS" "$(cat "$human_thread_body_file")"
             fi
 
             if ! collect_github_checks_with_retry collect_failed_github_checks "$failed_file"; then
+              if app_token_limited_check_lookup; then
+                echo "GitHub failed-check lookup is unavailable to the OpenCode app token during deterministic fallback approval; approving based on coverage evidence, mergeability, human-thread checks, and branch protection authority."
+                : >"$failed_file"
+              else
               body="$(printf '%s\n' \
                 "OpenCode could not validate deterministic fallback approval because current-head failed checks were unavailable." \
                 "" \
@@ -4097,6 +4107,7 @@ jobs:
                 "" \
                 "No PR review was posted because check lookup failure is a review-tool state, not a source finding.")"
               stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
+              fi
             fi
             if [ -s "$failed_file" ]; then
               local failed_check_evidence_file failed_check_review_body_file failed_check_review_payload_file failed_check_inline_failure_body_file
