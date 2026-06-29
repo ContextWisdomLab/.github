@@ -665,14 +665,14 @@ def test_escapes_html_comment_breakout(tmp_path):
     control_block_start += len(control_block_marker)
     json_text = text[control_block_start:control_block_end]
 
-    assert "-->" not in json_text
-    assert "<" not in json_text
-    assert ">" not in json_text
-    assert "&" not in json_text
-    assert "\\u003c" in json_text
-    assert "\\u003e" in json_text
-    assert "\\u0026" in json_text
-    assert json.loads(json_text)["findings"][0]["problem"] == "--> injected string with < and > and &"
+    escaped_fragments = ("\\u003c", "\\u003e", "\\u0026")
+    raw_comment_breakout_fragments = ("-->", "<", ">", "&")
+
+    assert all(fragment in json_text for fragment in escaped_fragments)
+    assert all(fragment not in json_text for fragment in raw_comment_breakout_fragments)
+
+    parsed_control = json.loads(json_text)
+    assert parsed_control["findings"][0]["problem"] == "--> injected string with < and > and &"
 
 
 def test_main_normalizes_valid_output_and_reports_failures(tmp_path, capsys):
