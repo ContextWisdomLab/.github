@@ -191,12 +191,25 @@ def test_label_and_full_coverage_detection():
     assert norm.mentions_full_coverage("", FULL_SUMMARY)
     no_source_summary = FULL_SUMMARY.replace(
         "coverage execution evidence proves 100% test coverage",
-        "coverage execution evidence reports test coverage as not applicable because no supported source files or package manifests were found",
+        "coverage execution evidence reports test coverage as not applicable because no supported changed source files or package manifests were found",
     ).replace(
         "coverage execution evidence proves 100% docstring coverage",
-        "coverage execution evidence reports docstring coverage as not applicable because no supported source files or package manifests were found",
+        "coverage execution evidence reports docstring coverage as not applicable because no supported changed source files or package manifests were found",
     )
     assert norm.mentions_full_coverage("", no_source_summary)
+    suite_passed_summary = FULL_SUMMARY.replace(
+        "coverage execution evidence proves 100% test coverage",
+        "coverage execution evidence reports supported repository test suites passed",
+    ).replace(
+        "coverage execution evidence proves 100% docstring coverage",
+        "coverage execution evidence reports configured repository docstring gates passed or docstring coverage was advisory",
+    )
+    assert norm.mentions_full_coverage("", suite_passed_summary)
+    advisory_summary = FULL_SUMMARY.replace(
+        "coverage execution evidence proves 100% docstring coverage",
+        "coverage execution evidence reports docstring coverage was advisory",
+    )
+    assert norm.mentions_full_coverage("", advisory_summary)
     assert not norm.mentions_full_coverage("", "")
     assert not norm.mentions_full_coverage("", FULL_SUMMARY.replace("100%", "99%", 1))
     assert not norm.mentions_full_coverage("", FULL_SUMMARY.replace("100%", "not applicable", 1))
@@ -598,8 +611,8 @@ M\tREADME.md
         """\
 ## Coverage execution evidence
 - Result: PASS
-- Test coverage: not applicable (no supported source files or package manifests)
-- Docstring coverage: not applicable (no supported source files or package manifests)
+- Test coverage: not applicable (no supported changed source files or package manifests)
+- Docstring coverage: not applicable (no supported changed source files or package manifests)
 ## Changed files
 M\tscripts/ci/example.py
 """,
@@ -608,6 +621,22 @@ M\tscripts/ci/example.py
     assert "test coverage as not applicable" in no_source_summary
     assert "docstring coverage as not applicable" in no_source_summary
     assert norm.mentions_full_coverage("", no_source_summary)
+
+    suite_passed_summary = norm.build_approval_repair_summary(
+        "No blockers were found.",
+        """\
+## Coverage execution evidence
+- Result: PASS
+- Test evidence: supported repository test suites passed
+- Docstring evidence: configured repository docstring gates passed or docstring coverage was advisory
+## Changed files
+M\tscripts/ci/example.py
+""",
+    )
+    assert suite_passed_summary is not None
+    assert "supported repository test suites passed" in suite_passed_summary
+    assert "docstring coverage was advisory" in suite_passed_summary
+    assert norm.mentions_full_coverage("", suite_passed_summary)
 
     evidence = tmp_path / "bounded-review-evidence.md"
     evidence.write_text("placeholder", encoding="utf-8")
@@ -626,10 +655,56 @@ M\tscripts/ci/example.py
 def test_iter_json_objects_extracts_raw_and_embedded_json():
     assert norm.iter_json_objects('{"a": 1}') == [{"a": 1}, {"a": 1}]
     assert norm.iter_json_objects('prefix {"b": 2} suffix') == [{"b": 2}]
+    assert norm.iter_json_objects('prefix {"outer": {"inner": 1}} suffix') == [
+        {"outer": {"inner": 1}}
+    ]
     assert norm.iter_json_objects("prefix {  } suffix") == [{}]
     assert norm.iter_json_objects("prefix {not json}") == []
     assert norm.iter_json_objects('prefix {"bad": } suffix') == []
     assert norm.iter_json_objects("no json here") == []
+
+
+def test_escapes_html_comment_breakout(tmp_path):
+    output = tmp_path / "opencode.txt"
+    control_data = control(
+        result="REQUEST_CHANGES",
+        findings=[
+            {
+                "path": "test.py",
+                "line": 1,
+                "severity": "high",
+                "title": "Test finding",
+                "problem": "--> injected string with < and > and &",
+                "root_cause": "test",
+                "fix_direction": "test",
+                "regression_test_direction": "test",
+                "suggested_diff": "test",
+            }
+        ],
+    )
+    output.write_text("prefix\n" + json.dumps(control_data) + "\nsuffix", encoding="utf-8")
+    assert norm.main(["prog", "head", "run", "attempt", str(output)]) == 0
+    text = output.read_text(encoding="utf-8")
+
+    control_block_marker = "<!-- opencode-review-control-v1\n"
+    control_block_start = text.find(control_block_marker)
+    control_block_end = text.rfind("\n-->")
+    assert control_block_start != -1
+    assert control_block_end != -1
+    assert control_block_start < control_block_end
+
+    # Extract the JSON control block itself to ensure no unescaped `<, >, &` exists.
+    control_block_start += len(control_block_marker)
+    json_text = text[control_block_start:control_block_end]
+
+    escaped_fragments = ("\\u003c", "\\u003e", "\\u0026")
+    raw_comment_breakout_fragments = ("-->", "<", ">", "&")
+
+    assert all(fragment in json_text for fragment in escaped_fragments)
+    assert all(fragment not in json_text for fragment in raw_comment_breakout_fragments)
+
+    parsed_control = json.loads(json_text)
+    assert parsed_control["findings"][0]["problem"] == "--> injected string with < and > and &"
 
 
 def test_main_normalizes_valid_output_and_reports_failures(tmp_path, capsys):
@@ -657,6 +732,23 @@ def test_main_normalizes_valid_output_and_reports_failures(tmp_path, capsys):
     approval = tmp_path / "approval.json"
     approval.write_text(json.dumps(control()), encoding="utf-8")
     assert norm.main(["prog", "--check-structural-approval", str(approval)]) == 0
+
+    generic_failed_check = tmp_path / "generic-failed-check.json"
+    generic_failed_check.write_text(
+        json.dumps(
+            control(
+                result="REQUEST_CHANGES",
+                summary=(
+                    "No deterministic missing-string markers or Strix report locations "
+                    "were recognized."
+                ),
+                findings=[finding(problem="No deterministic missing-string markers were found.")],
+            )
+        ),
+        encoding="utf-8",
+    )
+    assert norm.main(["prog", "--check-structural-approval", str(generic_failed_check)]) == 4
+    assert "non-actionable failed-check deflection" in capsys.readouterr().err
 
 def test_main_normalizes_and_escapes_html_markers(tmp_path):
     output = tmp_path / "opencode.txt"
