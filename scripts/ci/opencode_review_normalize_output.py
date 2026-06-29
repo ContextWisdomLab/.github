@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 STRUCTURAL_FAILURE_PHRASES = (
     "structural exploration was not possible",
     "structural exploration not possible",
@@ -150,6 +149,8 @@ SOURCE_KIND_FALSE_PHRASES = (
     "no source code changed",
     "no source changes",
     "no supported source files",
+    "no supported changed source files",
+    "no supported changed source files or package manifests",
     "no source files or package manifests",
 )
 
@@ -169,13 +170,12 @@ EXECUTABLE_KIND_FALSE_PHRASES = (
 COVERAGE_FAILURE_PHRASES = (
     "not measured",
     "unmeasured",
+    "partial",
     "not proven",
-    "not applicable",
     "n/a",
     "skipped",
     "unavailable",
     "missing",
-    "partial",
     "unknown",
     "did not prove",
     "does not prove",
@@ -221,8 +221,13 @@ def control_review_text(value: dict[str, Any]) -> str:
 
 def contains_non_actionable_failed_check_review(value: dict[str, Any]) -> bool:
     """Return whether a review punts failed-check diagnosis back to the reader."""
+    return bool(non_actionable_failed_check_review_phrase(value))
+
+
+def non_actionable_failed_check_review_phrase(value: dict[str, Any]) -> str:
+    """Return the failed-check deflection phrase found in the review, if any."""
     combined = control_review_text(value).casefold()
-    return any(phrase in combined for phrase in NON_ACTIONABLE_FAILED_CHECK_REVIEW_PHRASES)
+    return next((phrase for phrase in NON_ACTIONABLE_FAILED_CHECK_REVIEW_PHRASES if phrase in combined), "")
 
 
 def mentions_changed_file_evidence(reason: str, summary: str) -> bool:
@@ -238,7 +243,9 @@ def current_changed_files() -> set[str]:
     try:
         return {
             line.strip()
-            for line in Path(changed_files_path).read_text(encoding="utf-8").splitlines()
+            for line in Path(changed_files_path)
+            .read_text(encoding="utf-8")
+            .splitlines()
             if line.strip()
         }
     except OSError:
@@ -302,16 +309,23 @@ def mentions_actual_changed_file(reason: str, summary: str) -> bool:
 def mentions_verification_posture(reason: str, summary: str) -> bool:
     """Return whether an approval records the concrete review surfaces checked."""
     combined = f"{reason}\n{summary}".casefold()
-    return all(label in combined for label in APPROVAL_VERIFICATION_LABELS) and "codegraph" in combined
+    return (
+        all(label in combined for label in APPROVAL_VERIFICATION_LABELS)
+        and "codegraph" in combined
+    )
 
 
 def label_section(text: str, label: str) -> str:
     """Return text after a verification label until the next known label."""
+
     def label_matches(candidate: str) -> list[re.Match[str]]:
         """Return exact verification-label matches without suffix collisions."""
         matches = []
         for match in re.finditer(re.escape(candidate), text):
-            if candidate == "coverage:" and text[max(0, match.start() - 10) : match.start()] == "docstring ":
+            if (
+                candidate == "coverage:"
+                and text[max(0, match.start() - 10) : match.start()] == "docstring "
+            ):
                 continue
             matches.append(match)
         return matches
@@ -337,11 +351,20 @@ def coverage_section_is_valid(section: str) -> bool:
         return False
     if (
         "not applicable" in section
-        and "no supported source files or package manifests" in section
+        and (
+            "no supported source files or package manifests" in section
+            or "no supported changed source files or package manifests" in section
+        )
     ):
         return True
     if any(phrase in section for phrase in COVERAGE_FAILURE_PHRASES):
         return False
+    if "supported repository test suites passed" in section:
+        return True
+    if "configured repository docstring gates passed" in section:
+        return True
+    if "docstring coverage was advisory" in section:
+        return True
     if "100%" in section:
         return True
     return False
@@ -420,7 +443,15 @@ def evidence_coverage_mode(text: str) -> str | None:
         return None
     if "- test coverage: 100%" in section and "- docstring coverage: 100%" in section:
         return "full"
-    no_source = "no supported source files or package manifests" in section
+    if (
+        "- test evidence: supported repository test suites passed" in section
+        and "- docstring evidence: configured repository docstring gates passed or docstring coverage was advisory" in section
+    ):
+        return "suite_passed"
+    no_source = (
+        "no supported source files or package manifests" in section
+        or "no supported changed source files or package manifests" in section
+    )
     test_na = "- test coverage: not applicable" in section
     docstring_na = "- docstring coverage: not applicable" in section
     if no_source and test_na and docstring_na:
@@ -442,15 +473,21 @@ def build_approval_repair_summary(summary: str, evidence_text: str) -> str | Non
     if coverage_mode == "not_applicable":
         coverage_line = (
             "Coverage: coverage execution evidence reports test coverage as not applicable "
-            "because no supported source files or package manifests were found."
+            "because no supported changed source files or package manifests were found."
         )
         docstring_line = (
             "Docstring coverage: coverage execution evidence reports docstring coverage as not applicable "
-            "because no supported source files or package manifests were found."
+            "because no supported changed source files or package manifests were found."
+        )
+    elif coverage_mode == "suite_passed":
+        coverage_line = "Coverage: coverage execution evidence reports supported repository test suites passed."
+        docstring_line = (
+            "Docstring coverage: coverage execution evidence reports configured repository docstring gates passed "
+            "or docstring coverage was advisory."
         )
     else:
-        coverage_line = "Coverage: coverage execution evidence proves 100% test coverage."
-        docstring_line = "Docstring coverage: coverage execution evidence proves 100% docstring coverage."
+        coverage_line = "Coverage: coverage execution evidence proves 100% test coverage for the current head."
+        docstring_line = "Docstring coverage: coverage execution evidence proves 100% docstring coverage for the current head."
 
     repair = f"""\
 
@@ -478,9 +515,11 @@ Security/privacy: workflow-token, review-gate, and repository-automation securit
 
 def repair_approval_summary(reason: str, summary: str) -> str:
     """Repair an APPROVE summary only from objective bounded evidence."""
-    if mentions_changed_file_evidence(reason, summary) and mentions_verification_posture(
-        reason, summary
-    ) and mentions_full_coverage(reason, summary):
+    if (
+        mentions_changed_file_evidence(reason, summary)
+        and mentions_verification_posture(reason, summary)
+        and mentions_full_coverage(reason, summary)
+    ):
         return summary
 
     evidence_file = approval_repair_evidence_file()
@@ -499,6 +538,11 @@ def repair_approval_summary(reason: str, summary: str) -> str:
 
 def check_structural_approval(control_file: Path) -> int:
     """Validate an already-normalized control block before publishing approval."""
+    def reject(reason: str) -> int:
+        """Reject approval with a stable no-conclusion reason."""
+        print(f"NO_CONCLUSION: {reason}", file=sys.stderr)
+        return 4
+
     try:
         value = json.loads(control_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -506,43 +550,37 @@ def check_structural_approval(control_file: Path) -> int:
         return 65
 
     if not isinstance(value, dict):
-        print("NO_CONCLUSION", file=sys.stderr)
-        return 4
+        return reject("control JSON is not an object")
 
     if value.get("result") == "APPROVE" and admits_missing_structural_review(
         str(value.get("reason", "")),
         str(value.get("summary", "")),
     ):
-        print("NO_CONCLUSION", file=sys.stderr)
-        return 4
-    if value.get("result") == "APPROVE" and not mentions_changed_file_evidence(
+        return reject("approval admits missing structural review")
+    if value.get("result") == "APPROVE" and not mentions_actual_changed_file(
         str(value.get("reason", "")),
         str(value.get("summary", "")),
     ):
-        print("NO_CONCLUSION", file=sys.stderr)
-        return 4
+        return reject("approval does not cite changed-file evidence")
     if value.get("result") == "APPROVE" and not mentions_verification_posture(
         str(value.get("reason", "")),
         str(value.get("summary", "")),
     ):
-        print("NO_CONCLUSION", file=sys.stderr)
-        return 4
+        return reject("approval does not include the required verification posture")
     if value.get("result") == "APPROVE" and not mentions_full_coverage(
         str(value.get("reason", "")),
         str(value.get("summary", "")),
     ):
-        print("NO_CONCLUSION", file=sys.stderr)
-        return 4
+        return reject("approval does not prove 100% coverage or an explicit no-source exception")
     if value.get("result") == "APPROVE" and contradicts_changed_file_kinds(
         str(value.get("reason", "")),
         str(value.get("summary", "")),
     ):
-        print("NO_CONCLUSION", file=sys.stderr)
-        return 4
+        return reject("approval contradicts changed file kinds")
     # Generic failed-check deflections are invalid for both approvals and request-changes.
-    if contains_non_actionable_failed_check_review(value):
-        print("NO_CONCLUSION", file=sys.stderr)
-        return 4
+    phrase = non_actionable_failed_check_review_phrase(value)
+    if phrase:
+        return reject(f"non-actionable failed-check deflection: {phrase}")
 
     return 0
 
