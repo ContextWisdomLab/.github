@@ -859,7 +859,9 @@ assert_opencode_review_posts_suggested_diffs_inline() {
 
 assert_pr_review_merge_scheduler_uses_github_actions_bot_token() {
 	local workflow_file="$REPO_ROOT/.github/workflows/pr-review-merge-scheduler.yml"
+	local fix_workflow_file="$REPO_ROOT/.github/workflows/pr-review-fix-scheduler.yml"
 	local scheduler_file="$REPO_ROOT/scripts/ci/pr_review_merge_scheduler.py"
+	local fix_scheduler_file="$REPO_ROOT/scripts/ci/pr_review_fix_scheduler.py"
 	local readme_file="$REPO_ROOT/README.md"
 
 	assert_file_contains "$workflow_file" 'workflow_call:' "scheduler can run as the central reusable workflow contract"
@@ -884,6 +886,14 @@ assert_pr_review_merge_scheduler_uses_github_actions_bot_token() {
 	assert_file_contains "$workflow_file" "--pr-number" "scheduler scopes required-workflow PR events to the current pull request"
 	assert_file_contains "$workflow_file" "--review-workflow \"OpenCode Review\"" "scheduler dispatches the canonical OpenCode Review workflow"
 	assert_file_contains "$readme_file" "github-actions[bot]" "README documents that mechanical branch updates and merges are attributed to GitHub Actions bot"
+	assert_file_contains "$fix_workflow_file" 'workflow_call:' "fix scheduler can run as the central reusable autofix-dispatch workflow"
+	assert_file_contains "$fix_workflow_file" 'repository: ContextualWisdomLab/.github' "fix scheduler checks out the canonical implementation instead of relying on repo-local scheduler code"
+	assert_file_contains "$fix_workflow_file" 'GH_TOKEN: ${{ github.token }}' "fix scheduler uses the caller repository workflow token for dispatch markers"
+	assert_file_contains "$fix_workflow_file" "python3 scripts/ci/pr_review_fix_scheduler.py --self-test" "fix scheduler self-tests the central dispatch contract before scanning"
+	assert_file_contains "$fix_scheduler_file" "current-head OpenCode requested changes" "fix scheduler dispatches only for current-head actionable review evidence"
+	assert_file_contains "$fix_scheduler_file" "recent autofix marker exists for this head" "fix scheduler avoids repeated autofix loops for the same head"
+	assert_file_contains "$fix_scheduler_file" "external PR head is not writable" "fix scheduler refuses external heads for bot autofix"
+	assert_file_contains "$readme_file" "PR Review Fix Scheduler" "README documents the central autofix scheduler contract"
 	assert_file_contains "$readme_file" "Scratch PoC files are not committed." "README documents PoC proof artifacts are scratch evidence, not committed changes"
 	assert_file_contains "$readme_file" "Failed GitHub Checks are not reviewed as URL lists." "README documents failed-check reviews require explanations, not URL-only bullets"
 }
