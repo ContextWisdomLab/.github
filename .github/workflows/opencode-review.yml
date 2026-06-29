@@ -4047,9 +4047,9 @@ jobs:
             failed_check_review_body_file="$(mktemp)"
             failed_check_review_payload_file="$(mktemp)"
             failed_check_inline_failure_body_file="$(mktemp)"
-            pending_checks_file=""
-            unresolved_human_threads_file=""
-            human_thread_review_body_file=""
+            pending_checks_file="$(mktemp)"
+            unresolved_human_threads_file="$(mktemp)"
+            human_thread_review_body_file="$(mktemp)"
             # shellcheck disable=SC2329
             cleanup_failed_outcome_files() {
               rm -f "$failed_checks_file" "$failed_check_evidence_file" "$failed_check_review_body_file" "$failed_check_review_payload_file" "$failed_check_inline_failure_body_file" "$pending_checks_file" "$unresolved_human_threads_file" "$human_thread_review_body_file"
