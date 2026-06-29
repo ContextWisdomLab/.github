@@ -150,6 +150,8 @@ SOURCE_KIND_FALSE_PHRASES = (
     "no source code changed",
     "no source changes",
     "no supported source files",
+    "no supported changed source files",
+    "no supported changed source files or package manifests",
     "no source files or package manifests",
 )
 
@@ -342,7 +344,10 @@ def coverage_section_is_valid(section: str) -> bool:
         return False
     if (
         "not applicable" in section
-        and "no supported source files or package manifests" in section
+        and (
+            "no supported source files or package manifests" in section
+            or "no supported changed source files or package manifests" in section
+        )
     ):
         return True
     if any(phrase in section for phrase in COVERAGE_FAILURE_PHRASES):
@@ -423,7 +428,10 @@ def evidence_coverage_mode(text: str) -> str | None:
         return None
     if "- test coverage: 100%" in section and "- docstring coverage: 100%" in section:
         return "full"
-    no_source = "no supported source files or package manifests" in section
+    no_source = (
+        "no supported source files or package manifests" in section
+        or "no supported changed source files or package manifests" in section
+    )
     test_na = "- test coverage: not applicable" in section
     docstring_na = "- docstring coverage: not applicable" in section
     if no_source and test_na and docstring_na:
@@ -445,11 +453,11 @@ def build_approval_repair_summary(summary: str, evidence_text: str) -> str | Non
     if coverage_mode == "not_applicable":
         coverage_line = (
             "Coverage: coverage execution evidence reports test coverage as not applicable "
-            "because no supported source files or package manifests were found."
+            "because no supported changed source files or package manifests were found."
         )
         docstring_line = (
             "Docstring coverage: coverage execution evidence reports docstring coverage as not applicable "
-            "because no supported source files or package manifests were found."
+            "because no supported changed source files or package manifests were found."
         )
     else:
         coverage_line = "Coverage: coverage execution evidence proves 100% test coverage for the current head."

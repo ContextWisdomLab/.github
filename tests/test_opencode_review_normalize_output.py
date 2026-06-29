@@ -191,10 +191,10 @@ def test_label_and_full_coverage_detection():
     assert norm.mentions_full_coverage("", FULL_SUMMARY)
     no_source_summary = FULL_SUMMARY.replace(
         "coverage execution evidence proves 100% test coverage",
-        "coverage execution evidence reports test coverage as not applicable because no supported source files or package manifests were found",
+        "coverage execution evidence reports test coverage as not applicable because no supported changed source files or package manifests were found",
     ).replace(
         "coverage execution evidence proves 100% docstring coverage",
-        "coverage execution evidence reports docstring coverage as not applicable because no supported source files or package manifests were found",
+        "coverage execution evidence reports docstring coverage as not applicable because no supported changed source files or package manifests were found",
     )
     assert norm.mentions_full_coverage("", no_source_summary)
     assert not norm.mentions_full_coverage("", "")
@@ -598,8 +598,8 @@ M\tREADME.md
         """\
 ## Coverage execution evidence
 - Result: PASS
-- Test coverage: not applicable (no supported source files or package manifests)
-- Docstring coverage: not applicable (no supported source files or package manifests)
+- Test coverage: not applicable (no supported changed source files or package manifests)
+- Docstring coverage: not applicable (no supported changed source files or package manifests)
 ## Changed files
 M\tscripts/ci/example.py
 """,

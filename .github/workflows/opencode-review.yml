@@ -131,6 +131,28 @@ jobs:
             git ls-files "$@" | awk 'NF { found=1 } END { exit found ? 0 : 1 }'
           }
 
+          changed_files_for_coverage() {
+            if git rev-parse --verify --quiet "$PR_BASE_SHA^{commit}" >/dev/null \
+              && git rev-parse --verify --quiet "$PR_HEAD_SHA^{commit}" >/dev/null; then
+              git diff --name-only --find-renames "$PR_BASE_SHA" "$PR_HEAD_SHA"
+            else
+              git ls-files
+            fi
+          }
+
+          has_changed_tracked_files() {
+            local changed_list tracked_list
+            changed_list="$(mktemp)"
+            tracked_list="$(mktemp)"
+            changed_files_for_coverage >"$changed_list"
+            git ls-files "$@" >"$tracked_list"
+            awk 'NR==FNR { changed[$0]=1; next } ($0 in changed) { found=1 } END { exit found ? 0 : 1 }' \
+              "$changed_list" "$tracked_list"
+            local rc=$?
+            rm -f "$changed_list" "$tracked_list"
+            return "$rc"
+          }
+
           tracked_python_projects_with_tests() {
             git ls-files 'pyproject.toml' '*/pyproject.toml' \
               | while IFS= read -r pyproject_file; do
@@ -367,7 +389,7 @@ jobs:
 
           measured_any=0
 
-          if has_tracked_files '*.py'; then
+          if has_changed_tracked_files '*.py'; then
             measured_any=1
             install_python_project_dependencies
             run_python_test_coverage
@@ -392,7 +414,7 @@ jobs:
             fi
           fi
 
-          if [ -f package.json ]; then
+          if [ -f package.json ] && has_changed_tracked_files 'package.json' '*.js' '*.jsx' '*.ts' '*.tsx'; then
             measured_any=1
             package_runner="$(select_package_runner)"
             javascript_coverage_ran=0
@@ -453,7 +475,7 @@ jobs:
             append "### Coverage measurement"
             append ""
             append "- Result: PASS"
-            append "- Reason: no supported source files or package manifests were found, so coverage measurement is not applicable for this head."
+            append "- Reason: no supported changed source files or package manifests were found, so coverage measurement is not applicable for this head."
             append ""
           fi
 
@@ -462,8 +484,8 @@ jobs:
           if [ "$failures" -eq 0 ]; then
             append "- Result: PASS"
             if [ "$measured_any" -eq 0 ]; then
-              append "- Test coverage: not applicable (no supported source files or package manifests)"
-              append "- Docstring coverage: not applicable (no supported source files or package manifests)"
+              append "- Test coverage: not applicable (no supported changed source files or package manifests)"
+              append "- Docstring coverage: not applicable (no supported changed source files or package manifests)"
             else
               append "- Test coverage: 100%"
               append "- Docstring coverage: 100%"
