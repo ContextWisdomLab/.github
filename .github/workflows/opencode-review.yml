@@ -4454,7 +4454,7 @@ jobs:
           GH_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
         run: |
           set -euo pipefail
-          gh workflow run pr-review-merge-scheduler.yml \
+          if ! gh workflow run pr-review-merge-scheduler.yml \
             --repo "$GH_REPOSITORY" \
             --ref main \
             -f dry_run=false \
@@ -4462,4 +4462,6 @@ jobs:
             -f trigger_reviews=false \
             -f enable_auto_merge=true \
             -f merge_mode=auto \
-            -f update_branches=true
+            -f update_branches=true; then
+            echo "::warning::Merge scheduler dispatch failed after approval; leaving OpenCode approval intact."
+          fi
