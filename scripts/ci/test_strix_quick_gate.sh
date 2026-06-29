@@ -883,6 +883,7 @@ assert_pr_review_merge_scheduler_uses_github_actions_bot_token() {
 	assert_file_contains "$workflow_file" 'pull_request_target:' "scheduler can run as an organization required workflow without repository-local copies"
 	assert_file_contains "$workflow_file" 'workflows: ["Required OpenCode Review"]' "scheduler reruns after required OpenCode Review completion so approvals can trigger merge/update actions"
 	assert_file_not_contains "$workflow_file" "github.event.pull_request.number == 240" "scheduler must not hard-code repository-specific PR bypasses"
+	assert_file_contains "$workflow_file" 'github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.ref || github.run_id' "scheduler scopes concurrency to the active PR before falling back to repository refs"
 	assert_file_contains "$workflow_file" 'cancel-in-progress: true' "scheduler cancels stale repository queue scans instead of accumulating merge/update attempts"
 	assert_file_contains "$workflow_file" 'github.event.workflow_run.pull_requests[0].number' "scheduler scopes OpenCode workflow_run events to the completed review PR"
 	assert_file_contains "$workflow_file" "github.event_name == 'pull_request_target' || inputs.trigger_reviews == true" "scheduler enables review dispatch by default for required-workflow PR events"
