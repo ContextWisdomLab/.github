@@ -141,7 +141,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || github.token }}
           REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
-          TARGET_WORKSPACE_SHA: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.sha || github.sha }}
+          TARGET_WORKSPACE_SHA: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.sha || github.event.inputs.pr_base_sha || github.sha }}
         run: |
           set -euo pipefail
           trusted_workspace="$RUNNER_TEMP/trusted-workspace"
