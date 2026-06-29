@@ -31,3 +31,18 @@ def test_central_review_workflows_are_reusable_for_thin_callers():
     assert "inputs.pr_head_sha || github.event.inputs.pr_head_sha" in strix
     assert "github.event_name == 'workflow_call'" in opencode
     assert "inputs.pr_number || github.event.inputs.pr_number" in opencode
+
+
+def test_afipc_queue_requires_central_required_workflow_evidence():
+    """Guard the aFIPC central required-workflow coverage gap."""
+    audit = Path("PR_GOVERNANCE_AUDIT.md").read_text(encoding="utf-8")
+    rollout = Path("docs/org-required-workflow-rollout.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "aFIPC" in audit
+    assert "aFIPC" in rollout
+    assert "PR #78" in audit
+    assert "PR `#78` lacks inherited OpenCode, Strix, and scheduler" in rollout
+    assert "zero approving reviews" in audit
+    assert "must not be merged until organization required-workflow evidence exists" in audit
