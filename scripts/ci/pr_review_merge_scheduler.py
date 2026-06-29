@@ -104,6 +104,7 @@ query($owner: String!, $name: String!, $number: Int!) {
 
 OPEN_PRS_PAGE_SIZE = 25
 DEFAULT_STALE_OPENCODE_MINUTES = 45
+OPENCODE_WORKFLOW_NAMES = {"OpenCode Review", "Required OpenCode Review"}
 RUNNING_CHECK_STATES = {"PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"}
 FAILED_CHECK_CONCLUSIONS = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "STARTUP_FAILURE"}
 ACTION_REQUIRED_CONCLUSIONS = {"ACTION_REQUIRED"}
@@ -441,7 +442,7 @@ def is_opencode_context(node: dict[str, Any]) -> bool:
             ((node.get("checkSuite") or {}).get("workflowRun") or {}).get("workflow")
             or {}
         )
-        return node.get("name") == "opencode-review" or workflow.get("name") == "OpenCode Review"
+        return node.get("name") == "opencode-review" or workflow.get("name") in OPENCODE_WORKFLOW_NAMES
     return node.get("context") == "opencode-review"
 
 
@@ -794,7 +795,19 @@ def active_workflow_runs(repo: str) -> list[dict[str, Any]]:
     runs: list[dict[str, Any]] = []
     for status in ("queued", "in_progress"):
         payload = json.loads(
-            run(["gh", "api", f"repos/{repo}/actions/runs", "-f", f"status={status}", "-F", "per_page=100"])
+            run(
+                [
+                    "gh",
+                    "api",
+                    "--method",
+                    "GET",
+                    f"repos/{repo}/actions/runs",
+                    "-f",
+                    f"status={status}",
+                    "-F",
+                    "per_page=100",
+                ]
+            )
         )
         runs.extend(payload.get("workflow_runs") or [])
     return runs
@@ -907,6 +920,17 @@ def merge_conflict_guidance(pr: dict[str, Any], merge_state: str) -> str:
         f"rerun focused checks, and push the same {head_ref} branch "
         "(use `git push --force-with-lease` only if rebased); "
         "do not retry update-branch until the conflict is repaired"
+    )
+
+
+def auto_merge_wait_reason(merge_state: str) -> str:
+    """Explain why an approved PR with auto-merge enabled is still waiting."""
+    if merge_state == "CLEAN":
+        return "current head is approved; auto-merge already enabled"
+    return (
+        "current head is approved and auto-merge is already enabled, "
+        f"but GitHub mergeability is {merge_state}; wait for required workflows, rulesets, "
+        "or branch freshness to clear, then rerun the scheduler if GitHub does not merge it"
     )
 
 
@@ -1043,7 +1067,7 @@ def inspect_pr(
 
     if current_head_approved:
         if pr.get("autoMergeRequest"):
-            return decide("wait", "current head is approved; auto-merge already enabled")
+            return decide("wait", auto_merge_wait_reason(merge_state))
         if not enable_auto_merge_flag:
             return decide("wait", "current head is approved; auto-merge disabled by scheduler inputs")
         if merge_mode == "disabled":
@@ -1814,7 +1838,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=os.environ.get("MERGE_MODE", "auto"),
     )
     parser.add_argument("--update-branches", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--review-workflow", default="OpenCode Review")
+    parser.add_argument("--review-workflow", default="Required OpenCode Review")
     parser.add_argument("--security-workflow", default="Strix Security Scan")
     parser.add_argument(
         "--stale-opencode-minutes",
