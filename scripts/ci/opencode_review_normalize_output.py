@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 STRUCTURAL_FAILURE_PHRASES = (
     "structural exploration was not possible",
     "structural exploration not possible",
@@ -244,7 +243,9 @@ def current_changed_files() -> set[str]:
     try:
         return {
             line.strip()
-            for line in Path(changed_files_path).read_text(encoding="utf-8").splitlines()
+            for line in Path(changed_files_path)
+            .read_text(encoding="utf-8")
+            .splitlines()
             if line.strip()
         }
     except OSError:
@@ -308,43 +309,49 @@ def mentions_actual_changed_file(reason: str, summary: str) -> bool:
 def mentions_verification_posture(reason: str, summary: str) -> bool:
     """Return whether an approval records the concrete review surfaces checked."""
     combined = f"{reason}\n{summary}".casefold()
-    return all(label in combined for label in APPROVAL_VERIFICATION_LABELS) and "codegraph" in combined
+    return (
+        all(label in combined for label in APPROVAL_VERIFICATION_LABELS)
+        and "codegraph" in combined
+    )
 
 
 def label_section(text: str, label: str) -> str:
     """Return text after a verification label until the next known label."""
-    # ⚡ Bolt: Use str.find instead of re.finditer for 10x faster label extraction
-    def find_label_starts(candidate: str) -> list[int]:
-        """Return exact verification-label start indices without suffix collisions."""
-        starts = []
-        idx = 0
+
+    def next_label_start(candidate: str, offset: int = 0) -> int:
+        """Return the next exact verification-label start, or -1 when absent."""
+        index = offset
         while True:
-            idx = text.find(candidate, idx)
-            if idx == -1:
-                break
-            if candidate == "coverage:" and text[max(0, idx - 10) : idx] == "docstring ":
-                idx += len(candidate)
+            index = text.find(candidate, index)
+            if index == -1:
+                return -1
+            if (
+                candidate == "coverage:"
+                and text[max(0, index - 10) : index] == "docstring "
+            ):
+                index += len(candidate)
                 continue
-            starts.append(idx)
-            idx += len(candidate)
-        return starts
+            return index
 
-    starts = find_label_starts(label)
-    if not starts:
+    label_start = -1
+    offset = 0
+    while True:
+        candidate_start = next_label_start(label, offset)
+        if candidate_start == -1:
+            break
+        label_start = candidate_start
+        offset = candidate_start + len(label)
+    if label_start == -1:
         return ""
-    start = starts[-1] + len(label)
 
-    next_starts = []
+    start = label_start + len(label)
+    end = len(text)
     for candidate in APPROVAL_VERIFICATION_LABELS:
         if candidate == label:
             continue
-
-        for candidate_start in find_label_starts(candidate):
-            if candidate_start >= start:
-                next_starts.append(candidate_start)
-                break
-
-    end = min(next_starts) if next_starts else len(text)
+        candidate_start = next_label_start(candidate, start)
+        if candidate_start != -1 and candidate_start < end:
+            end = candidate_start
     return text[start:end]
 
 
@@ -518,9 +525,11 @@ Security/privacy: workflow-token, review-gate, and repository-automation securit
 
 def repair_approval_summary(reason: str, summary: str) -> str:
     """Repair an APPROVE summary only from objective bounded evidence."""
-    if mentions_changed_file_evidence(reason, summary) and mentions_verification_posture(
-        reason, summary
-    ) and mentions_full_coverage(reason, summary):
+    if (
+        mentions_changed_file_evidence(reason, summary)
+        and mentions_verification_posture(reason, summary)
+        and mentions_full_coverage(reason, summary)
+    ):
         return summary
 
     evidence_file = approval_repair_evidence_file()

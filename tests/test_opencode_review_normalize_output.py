@@ -310,7 +310,11 @@ def test_valid_control_filters_shape_head_and_review_contract():
     assert norm.valid_control(dict(request, findings=["bad"]), **kwargs) is None
     assert norm.valid_control(dict(request, findings=[finding(line=True)]), **kwargs) is None
     assert norm.valid_control(dict(request, findings=[finding(line=0)]), **kwargs) is None
+    assert norm.valid_control(dict(request, findings=[finding(line="10")]), **kwargs) is None
     assert norm.valid_control(dict(request, findings=[finding(title="")]), **kwargs) is None
+    invalid_finding = finding()
+    invalid_finding.pop("severity")
+    assert norm.valid_control(dict(request, findings=[invalid_finding]), **kwargs) is None
     assert (
         norm.valid_control(
             dict(
@@ -660,10 +664,56 @@ M\tscripts/ci/example.py
 def test_iter_json_objects_extracts_raw_and_embedded_json():
     assert norm.iter_json_objects('{"a": 1}') == [{"a": 1}, {"a": 1}]
     assert norm.iter_json_objects('prefix {"b": 2} suffix') == [{"b": 2}]
+    assert norm.iter_json_objects('prefix {"outer": {"inner": 1}} suffix') == [
+        {"outer": {"inner": 1}}
+    ]
     assert norm.iter_json_objects("prefix {  } suffix") == [{}]
     assert norm.iter_json_objects("prefix {not json}") == []
     assert norm.iter_json_objects('prefix {"bad": } suffix') == []
     assert norm.iter_json_objects("no json here") == []
+
+
+def test_escapes_html_comment_breakout(tmp_path):
+    output = tmp_path / "opencode.txt"
+    control_data = control(
+        result="REQUEST_CHANGES",
+        findings=[
+            {
+                "path": "test.py",
+                "line": 1,
+                "severity": "high",
+                "title": "Test finding",
+                "problem": "--> injected string with < and > and &",
+                "root_cause": "test",
+                "fix_direction": "test",
+                "regression_test_direction": "test",
+                "suggested_diff": "test",
+            }
+        ],
+    )
+    output.write_text("prefix\n" + json.dumps(control_data) + "\nsuffix", encoding="utf-8")
+    assert norm.main(["prog", "head", "run", "attempt", str(output)]) == 0
+    text = output.read_text(encoding="utf-8")
+
+    control_block_marker = "<!-- opencode-review-control-v1\n"
+    control_block_start = text.find(control_block_marker)
+    control_block_end = text.rfind("\n-->")
+    assert control_block_start != -1
+    assert control_block_end != -1
+    assert control_block_start < control_block_end
+
+    # Extract the JSON control block itself to ensure no unescaped `<, >, &` exists.
+    control_block_start += len(control_block_marker)
+    json_text = text[control_block_start:control_block_end]
+
+    escaped_fragments = ("\\u003c", "\\u003e", "\\u0026")
+    raw_comment_breakout_fragments = ("-->", "<", ">", "&")
+
+    assert all(fragment in json_text for fragment in escaped_fragments)
+    assert all(fragment not in json_text for fragment in raw_comment_breakout_fragments)
+
+    parsed_control = json.loads(json_text)
+    assert parsed_control["findings"][0]["problem"] == "--> injected string with < and > and &"
 
 
 def test_main_normalizes_valid_output_and_reports_failures(tmp_path, capsys):
