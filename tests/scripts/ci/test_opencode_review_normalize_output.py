@@ -1,3 +1,4 @@
+"""Tests for opencode_review_normalize_output.py."""
 import json
 import pytest
 from pathlib import Path
@@ -17,6 +18,7 @@ from opencode_review_normalize_output import (
 )
 
 def get_base_valid_value():
+    """Test get base valid value."""
     return {
         "head_sha": "abc123sha",
         "run_id": "123456",
@@ -28,6 +30,7 @@ def get_base_valid_value():
     }
 
 def test_valid_control_not_dict():
+    """Test valid control not dict."""
     assert valid_control(
         "not a dict",
         expected_head_sha="abc123sha",
@@ -36,6 +39,7 @@ def test_valid_control_not_dict():
     ) is None
 
 def test_valid_control_head_sha_mismatch():
+    """Test valid control head sha mismatch."""
     value = get_base_valid_value()
     value["head_sha"] = "wrong_sha"
     assert valid_control(
@@ -46,6 +50,7 @@ def test_valid_control_head_sha_mismatch():
     ) is None
 
 def test_valid_control_run_id_mismatch():
+    """Test valid control run id mismatch."""
     value = get_base_valid_value()
     value["run_id"] = "wrong_id"
     assert valid_control(
@@ -56,6 +61,7 @@ def test_valid_control_run_id_mismatch():
     ) is None
 
 def test_valid_control_run_attempt_mismatch():
+    """Test valid control run attempt mismatch."""
     value = get_base_valid_value()
     value["run_attempt"] = "wrong_attempt"
     assert valid_control(
@@ -66,6 +72,7 @@ def test_valid_control_run_attempt_mismatch():
     ) is None
 
 def test_valid_control_invalid_result():
+    """Test valid control invalid result."""
     value = get_base_valid_value()
     value["result"] = "PENDING"
     assert valid_control(
@@ -76,6 +83,7 @@ def test_valid_control_invalid_result():
     ) is None
 
 def test_valid_control_reason_invalid():
+    """Test valid control reason invalid."""
     # missing reason
     value = get_base_valid_value()
     del value["reason"]
@@ -105,6 +113,7 @@ def test_valid_control_reason_invalid():
     ) is None
 
 def test_valid_control_summary_invalid():
+    """Test valid control summary invalid."""
     # missing summary
     value = get_base_valid_value()
     del value["summary"]
@@ -134,6 +143,7 @@ def test_valid_control_summary_invalid():
     ) is None
 
 def test_valid_control_findings_logic():
+    """Test valid control findings logic."""
     # findings not a list
     value = get_base_valid_value()
     value["findings"] = "not a list"
@@ -190,6 +200,7 @@ def test_valid_control_findings_logic():
 
 
 def get_base_valid_finding():
+    """Test get base valid finding."""
     return {
         "path": "src/main.py",
         "line": 10,
@@ -203,6 +214,7 @@ def get_base_valid_finding():
     }
 
 def test_valid_control_findings_validation():
+    """Test valid control findings validation."""
     base_val = get_base_valid_value()
     base_val["result"] = "REQUEST_CHANGES"
 
@@ -285,6 +297,7 @@ def test_valid_control_findings_validation():
     assert len(res["findings"]) == 1
 
 def test_admits_missing_structural_review():
+    """Test admits missing structural review."""
     # True cases from phrases
     assert admits_missing_structural_review("reason", "structural exploration was not possible")
     assert admits_missing_structural_review("could not access changed files", "summary")
@@ -299,6 +312,7 @@ def test_admits_missing_structural_review():
     assert not admits_missing_structural_review("structural exploration was successful", "summary")
 
 def test_mentions_changed_file_evidence():
+    """Test mentions changed file evidence."""
     # True cases
     assert mentions_changed_file_evidence("Changes in src/main.py", "summary")
     assert mentions_changed_file_evidence("reason", "Edited the README")
@@ -310,6 +324,7 @@ def test_mentions_changed_file_evidence():
     assert not mentions_changed_file_evidence("Edited python", "but no py extension file path")
 
 def test_valid_control_approve_admission_and_evidence():
+    """Test valid control approve admission and evidence."""
     value = get_base_valid_value()
     value["result"] = "APPROVE"
 
@@ -336,6 +351,7 @@ def test_valid_control_approve_admission_and_evidence():
     assert res["result"] == "APPROVE"
 
 def test_check_structural_approval(tmp_path, capsys):
+    """Test check structural approval."""
     # Invalid JSON
     f = tmp_path / "control.json"
     f.write_text("{invalid json", encoding="utf-8")
@@ -390,6 +406,7 @@ def test_check_structural_approval(tmp_path, capsys):
     assert check_structural_approval(f) == 0
 
 def test_iter_json_objects():
+    """Test iter json objects."""
     # Only prose
     assert iter_json_objects("Just some text here.") == []
 
@@ -410,6 +427,7 @@ def test_iter_json_objects():
     assert res[1] == {"b": 2}
 
 def test_main_cli(tmp_path, capsys):
+    """Test main cli."""
     # Invalid arg length
     assert main(["opencode_review_normalize_output.py"]) == 64
     captured = capsys.readouterr()
@@ -442,6 +460,7 @@ def test_main_cli(tmp_path, capsys):
     assert '"head_sha":"sha"' in out_text
 
 def test_main_check_structural_approval(tmp_path):
+    """Test main check structural approval."""
     data = get_base_valid_value()
     f = tmp_path / "output.json"
     f.write_text(json.dumps(data), encoding="utf-8")
@@ -449,6 +468,7 @@ def test_main_check_structural_approval(tmp_path):
     assert main(["script", "--check-structural-approval", str(f)]) == 0
 
 def test_main_cli_invalid_control(tmp_path):
+    """Test main cli invalid control."""
     data = get_base_valid_value()
     # Modify data so valid_control returns None
     data["result"] = "INVALID_RESULT_TYPE"
@@ -460,6 +480,7 @@ def test_main_cli_invalid_control(tmp_path):
 import subprocess
 
 def test_module_execution():
+    """Test module execution."""
     import runpy
     script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../scripts/ci/opencode_review_normalize_output.py'))
     with pytest.raises(SystemExit) as excinfo:

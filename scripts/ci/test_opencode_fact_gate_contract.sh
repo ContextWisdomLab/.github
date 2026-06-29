@@ -17,7 +17,7 @@ check_contains() {
 }
 
 check_contains '## Changed docs repository tree evidence'
-check_contains 'git ls-tree -r --name-only HEAD -- "$docs_dir"'
+check_contains 'emit_changed_docs_tree_evidence'
 check_contains 'Do not claim repository docs, images, or reference assets are unavailable, missing, or absent unless the changed docs repository tree evidence proves it.'
 check_contains 'collect_unresolved_human_review_threads()'
 check_contains 'reviewThreads(first: 100)'
