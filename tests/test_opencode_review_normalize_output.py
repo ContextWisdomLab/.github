@@ -479,18 +479,25 @@ def test_escapes_html_comment_breakout(tmp_path):
     assert norm.main(["prog", "head", "run", "attempt", str(output)]) == 0
     text = output.read_text(encoding="utf-8")
 
-    # Verify opencode-review-control-v1 exists in the output.
-    assert "opencode-review-control-v1" in text
+    control_block_marker = "<!-- opencode-review-control-v1\n"
+    control_block_start = text.find(control_block_marker)
+    control_block_end = text.rfind("\n-->")
+    assert control_block_start != -1
+    assert control_block_end != -1
+    assert control_block_start < control_block_end
 
     # Extract the JSON control block itself to ensure no unescaped `<, >, &` exists.
-    control_block_start = text.find("<!-- opencode-review-control-v1\n") + len("<!-- opencode-review-control-v1\n")
-    control_block_end = text.rfind("\n-->")
+    control_block_start += len(control_block_marker)
     json_text = text[control_block_start:control_block_end]
 
     assert "-->" not in json_text
+    assert "<" not in json_text
+    assert ">" not in json_text
+    assert "&" not in json_text
     assert "\\u003c" in json_text
     assert "\\u003e" in json_text
     assert "\\u0026" in json_text
+    assert json.loads(json_text)["findings"][0]["problem"] == "--> injected string with < and > and &"
 
 
 def test_main_normalizes_valid_output_and_reports_failures(tmp_path, capsys):
