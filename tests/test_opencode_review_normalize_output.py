@@ -658,6 +658,23 @@ def test_main_normalizes_valid_output_and_reports_failures(tmp_path, capsys):
     approval.write_text(json.dumps(control()), encoding="utf-8")
     assert norm.main(["prog", "--check-structural-approval", str(approval)]) == 0
 
+    generic_failed_check = tmp_path / "generic-failed-check.json"
+    generic_failed_check.write_text(
+        json.dumps(
+            control(
+                result="REQUEST_CHANGES",
+                summary=(
+                    "No deterministic missing-string markers or Strix report locations "
+                    "were recognized."
+                ),
+                findings=[finding(problem="No deterministic missing-string markers were found.")],
+            )
+        ),
+        encoding="utf-8",
+    )
+    assert norm.main(["prog", "--check-structural-approval", str(generic_failed_check)]) == 4
+    assert "non-actionable failed-check deflection" in capsys.readouterr().err
+
 def test_main_normalizes_and_escapes_html_markers(tmp_path):
     output = tmp_path / "opencode.txt"
     control_data = control(reason="Malicious --> comment", summary=FULL_SUMMARY + "\nBreakout <script>alert(1)</script>")

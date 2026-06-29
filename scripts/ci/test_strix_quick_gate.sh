@@ -1483,6 +1483,7 @@ EOF
 	set -e
 	assert_equals "4" "$rc" "failed-check review validator rejects unrelated findings"
 	assert_file_contains "$tmp_dir/bad.out" "FAILED_CHECK_EVIDENCE_NOT_REFERENCED" "failed-check validator explains unrelated finding rejection"
+	assert_file_contains "$tmp_dir/bad.out" "review does not cite failed-log marker" "failed-check validator logs the missing evidence marker"
 
 	cat >"$control_json" <<'EOF'
 {"head_sha":"abc123","run_id":"42","run_attempt":"1","result":"REQUEST_CHANGES","reason":"Strix Security Scan/strix failed","summary":"No deterministic missing-string markers or Strix report locations were recognized. Use the failed-check evidence below to map each failed check to exact local source lines before approving.","findings":[{"path":"scripts/ci/collect_failed_check_evidence.sh","line":15,"severity":"HIGH","title":"Generic failed-check deflection","problem":"No deterministic missing-string markers or Strix report locations were recognized.","root_cause":"The review did not map Strix Security Scan/strix to failed log evidence and concrete local source lines.","fix_direction":"Inspect the failed-check evidence and produce source-backed findings instead of handing the mapping back to the reader.","regression_test_direction":"Reject generic failed-check deflections before publishing reviews.","suggested_diff":"diff --git a/scripts/ci/collect_failed_check_evidence.sh b/scripts/ci/collect_failed_check_evidence.sh\n--- a/scripts/ci/collect_failed_check_evidence.sh\n+++ b/scripts/ci/collect_failed_check_evidence.sh\n@@ -1 +1 @@\n-old\n+new"}]}
@@ -1494,6 +1495,7 @@ EOF
 	set -e
 	assert_equals "4" "$rc" "failed-check review validator rejects generic failed-check deflections"
 	assert_file_contains "$tmp_dir/generic.out" "FAILED_CHECK_EVIDENCE_NOT_REFERENCED" "failed-check validator blocks generic deflection review text"
+	assert_file_contains "$tmp_dir/generic.out" "punts failed-check diagnosis back to the reader" "failed-check validator logs generic deflection reason"
 
 	cat >"$evidence_file" <<'EOF'
 ## Failed check: Strix Security Scan/strix
@@ -1528,6 +1530,7 @@ EOF
 	set -e
 	assert_equals "4" "$rc" "failed-check review validator rejects collapsed duplicate Strix model reports"
 	assert_file_contains "$tmp_dir/collapsed.out" "FAILED_CHECK_EVIDENCE_NOT_REFERENCED" "failed-check validator requires one Strix-specific finding per model report"
+	assert_file_contains "$tmp_dir/collapsed.out" "distinct source-backed findings" "failed-check validator logs collapsed Strix report reason"
 
 	cat >"$control_json" <<'EOF'
 {"head_sha":"abc123","run_id":"42","run_attempt":"1","result":"REQUEST_CHANGES","reason":"Strix Security Scan/strix failed","summary":"Strix Security Scan/strix failed and mentioned github-models/openai/gpt-5 plus deepseek/deepseek-v3-0324, but the model reports were still collapsed.","findings":[{"path":".github/workflows/strix.yml","line":120,"severity":"HIGH","title":"Strix self-test failed","problem":"Strix Security Scan/strix failed in Self-test Strix gate script while github-models/openai/gpt-5 and deepseek/deepseek-v3-0324 model reports were present elsewhere in the evidence.","root_cause":"The workflow finding is about CI self-test evidence, not a distinct model vulnerability report.","fix_direction":"Fix the workflow default.","regression_test_direction":"Keep the self-test assertion.","suggested_diff":"diff --git a/.github/workflows/strix.yml b/.github/workflows/strix.yml\n--- a/.github/workflows/strix.yml\n+++ b/.github/workflows/strix.yml\n@@ -120 +120 @@\n-old\n+new"},{"path":"backend/app/auth.py","line":132,"severity":"CRITICAL","title":"Authentication Bypass via X-Dev-User Header","problem":"Strix Security Scan/strix failed with github-models/openai/gpt-5 and deepseek/deepseek-v3-0324 reports for Authentication Bypass via X-Dev-User Header, Severity: CRITICAL, /api/me, Method: GET, backend/app/auth.py:132-135.","root_cause":"This finding still collapses two Strix model reports into one item even though the titles and locations match.","fix_direction":"Remove the unauthenticated fallback at backend/app/auth.py:132-135.","regression_test_direction":"Add auth tests for both request paths.","suggested_diff":"diff --git a/backend/app/auth.py b/backend/app/auth.py\n--- a/backend/app/auth.py\n+++ b/backend/app/auth.py\n@@ -132 +132 @@\n-old\n+new"}]}
