@@ -121,7 +121,7 @@ assert_strix_workflow_pr_trigger_hardened() {
 	assert_file_contains "$workflow_file" "target_repository:" "strix workflow_dispatch can target a repository whose PR does not inherit required workflows"
 	assert_file_contains "$workflow_file" 'REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}' "strix manual dispatch fetches target repository data instead of the central .github repo"
 	assert_file_contains "$workflow_file" 'github.event.inputs.pr_base_sha || github.sha' "strix manual dispatch materializes the target repository base SHA instead of the central .github SHA"
-	assert_file_contains "$workflow_file" 'GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || github.token }}' "strix manual dispatch can use the cross-repo approval token to read private target repositories"
+	assert_file_contains "$workflow_file" 'GH_TOKEN: ${{ steps.target_app_token.outputs.token || secrets.OPENCODE_APPROVE_TOKEN || github.token }}' "strix manual dispatch can use the OpenCode app token or cross-repo approval token to read private target repositories"
 	assert_file_contains "$workflow_file" "TARGET_WORKSPACE_SHA" "strix workflow pins target workspace SHA"
 	assert_file_contains "$workflow_file" "TRUSTED_WORKSPACE=\$trusted_workspace" "strix workflow exports a trusted workspace path"
 	assert_file_contains "$workflow_file" "git -C \"\$TRUSTED_WORKSPACE\"" "strix workflow runs git only inside trusted workspace"
@@ -159,7 +159,7 @@ assert_strix_workflow_pr_trigger_hardened() {
 			in_block { print }
 		' "$workflow_file"
 	)"
-	if [[ "$pr_head_fetch_block" != *'GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || github.token }}'* ]]; then
+	if [[ "$pr_head_fetch_block" != *'GH_TOKEN: ${{ steps.target_app_token.outputs.token || secrets.OPENCODE_APPROVE_TOKEN || github.token }}'* ]]; then
 		record_failure "strix workflow passes GH_TOKEN to PR head fetch step"
 	fi
 	if [[ "$pr_head_fetch_block" != *"gh auth setup-git"* ]]; then
