@@ -2378,6 +2378,15 @@ jobs:
                       emit_change_flow_mermaid_graph "$merge_state"
                     }
 
+          ensure_review_body_has_change_graph() {
+            local body="$1"
+            printf '%s\n' "$body"
+            if grep -Fq "## Change Flow DAG" <<<"$body"; then
+              return 0
+            fi
+            append_mermaid_review_graph
+          }
+
           append_merge_conflict_guidance() {
             local pr_json merge_state base_ref head_ref base_fetch_ref base_origin_ref head_push_ref
             pr_json="$(gh pr view "$PR_NUMBER" --repo "$GH_REPOSITORY" --json baseRefName,headRefName,mergeStateStatus 2>/dev/null || true)"

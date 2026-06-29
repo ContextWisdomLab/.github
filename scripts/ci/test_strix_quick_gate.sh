@@ -753,6 +753,8 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" "Merge Conflict Guidance" "opencode approval gate emits explicit conflict guidance when mergeability is dirty"
 	assert_file_contains "$workflow_file" "Change Flow DAG" "opencode review overview labels Mermaid as changed-file flow analysis"
 	assert_file_contains "$workflow_file" 'body="$(ensure_review_body_has_change_graph "$body")"' "opencode PR review body gets deterministic changed-file flow analysis"
+	graph_helper_definitions="$(grep -Fc 'ensure_review_body_has_change_graph() {' "$workflow_file")"
+	assert_equals "2" "$graph_helper_definitions" "opencode defines the graph helper in each shell scope that publishes reviews"
 	assert_file_contains "$workflow_file" "rewritten_payload_file" "opencode inline review payload is rewritten after graph insertion"
 	assert_file_contains "$workflow_file" '.body = $body' "opencode inline review payload JSON receives the same logged review body"
 	assert_file_contains "$workflow_file" "OpenCode bounded evidence" "opencode Mermaid graph ties changed files to bounded review evidence"
