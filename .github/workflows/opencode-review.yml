@@ -2105,6 +2105,15 @@ jobs:
                       emit_change_flow_mermaid_graph "$merge_state"
                     }
 
+          ensure_review_body_has_change_graph() {
+            local body="$1"
+            printf '%s\n' "$body"
+            if grep -Fq "## Change Flow DAG" <<<"$body"; then
+              return 0
+            fi
+            append_mermaid_review_graph
+          }
+
           append_merge_conflict_guidance() {
             local pr_json merge_state base_ref head_ref base_fetch_ref base_origin_ref head_push_ref
             pr_json="$(gh pr view "$PR_NUMBER" --repo "$GH_REPOSITORY" --json baseRefName,headRefName,mergeStateStatus 2>/dev/null || true)"
@@ -2419,7 +2428,9 @@ jobs:
               printf -- '- Workflow attempt: %s\n' "$RUN_ATTEMPT"
               printf -- "- Gate result: \`%s\` (approval step)\n\n" "$result"
               printf '%s\n' "$body"
-              append_mermaid_review_graph
+              if ! grep -Fq "## Change Flow DAG" <<<"$body"; then
+                append_mermaid_review_graph
+              fi
               append_merge_conflict_guidance
             } >"$overview_body_file"
 
@@ -2457,6 +2468,7 @@ jobs:
             local review_payload_file
             gh_error_file="$(mktemp)"
             review_payload_file="$(mktemp)"
+            body="$(ensure_review_body_has_change_graph "$body")"
             emit_review_body_to_action_log "$event" "$body"
             jq -n \
               --arg event "$event" \
@@ -2725,7 +2737,15 @@ jobs:
           create_pull_review_with_payload() {
             local event="$1" body="$2" review_payload_file="$3" fallback_body_file="$4"
             local gh_error_file
+            local rewritten_payload_file
             gh_error_file="$(mktemp)"
+            rewritten_payload_file="$(mktemp)"
+            body="$(ensure_review_body_has_change_graph "$body")"
+            if jq --arg body "$body" '.body = $body' "$review_payload_file" >"$rewritten_payload_file"; then
+              mv "$rewritten_payload_file" "$review_payload_file"
+            else
+              rm -f "$rewritten_payload_file"
+            fi
             emit_review_body_to_action_log "$event" "$body" "$review_payload_file"
             if ! gh api -X POST "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}/reviews" --input "$review_payload_file" >/dev/null 2>"$gh_error_file"; then
               warn_gh_publication_failure "pull review inline comments" "$gh_error_file"
