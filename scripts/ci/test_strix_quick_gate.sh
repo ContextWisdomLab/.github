@@ -568,6 +568,7 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" "Python project dependencies (requirements.txt)" "opencode coverage evidence records repository Python dependency installation"
 	assert_file_contains "$workflow_file" "python3 -m pip install --disable-pip-version-check -r requirements.txt" "opencode coverage evidence installs repository Python requirements before pytest"
 	assert_file_contains "$workflow_file" "uv sync --project" "opencode coverage evidence installs uv-managed Python project dependencies before pytest"
+	assert_file_contains "$workflow_file" 'uv pip install --project "$project_dir" -r "${project_dir}/requirements.txt"' "opencode coverage evidence installs requirements into uv-managed project environments"
 	assert_file_contains "$workflow_file" "--extra dev" "opencode coverage evidence installs pyproject optional dev extras when repositories do not use dependency-groups"
 	assert_file_contains "$workflow_file" 'cd "$1" && PYTHONPATH=. uv run --with pytest-cov pytest tests --cov' "opencode coverage evidence measures uv-managed Python projects with pytest-cov inside their project environment"
 	assert_file_contains "$workflow_file" 'uv run pytest tests/test_docstrings.py' "opencode coverage evidence accepts repository-owned Python docstring tests"
