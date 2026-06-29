@@ -1180,6 +1180,41 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert "existing auto-merge request remains queued" in blocked_failed_behind_decision.reason
     assert called == [("owner/repo", 1, True)]
     assert disabled == []
+    called.clear()
+    blocked_failed_behind_auto_without_opencode_approval = make_pr(
+        mergeStateStatus="BLOCKED",
+        restMergeableState="BLOCKED",
+        compareBehindBy=2,
+        autoMergeRequest={"enabledAt": "now"},
+        statusCheckRollup={
+            "contexts": {
+                "nodes": [{"__typename": "CheckRun", "name": "strix", "conclusion": "FAILURE"}],
+            }
+        },
+    )
+    blocked_without_opencode_decision = inspect(blocked_failed_behind_auto_without_opencode_approval)
+    assert blocked_without_opencode_decision.action == "update_branch"
+    assert "auto-merge already enabled" in blocked_without_opencode_decision.reason
+    assert "base branch is 2 commit(s) ahead" in blocked_without_opencode_decision.reason
+    assert "existing auto-merge request remains queued" in blocked_without_opencode_decision.reason
+    assert called == [("owner/repo", 1, True)]
+    called.clear()
+    disabled.clear()
+    assert (
+        inspect(blocked_failed_behind_auto_without_opencode_approval, update_branches=False).reason
+        == "auto-merge already enabled; branch update disabled"
+    )
+    assert called == []
+    assert disabled == []
+    behind_auto_without_opencode_approval = make_pr(
+        mergeStateStatus="BEHIND",
+        autoMergeRequest={"enabledAt": "now"},
+    )
+    behind_without_opencode_decision = inspect(behind_auto_without_opencode_approval)
+    assert behind_without_opencode_decision.action == "update_branch"
+    assert behind_without_opencode_decision.reason.startswith("auto-merge already enabled; branch update requested")
+    assert "existing auto-merge request remains queued" in behind_without_opencode_decision.reason
+    assert called == [("owner/repo", 1, True)]
 
 
 def test_inspect_pr_handles_approved_reviews_and_dispatch(monkeypatch):
