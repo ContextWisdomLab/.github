@@ -6,6 +6,11 @@
 **Vulnerability:** Workflow CI Security Bypass / Markdown Injection
 **Learning:** The GitHub Actions workflow `opencode-review.yml` attempted to optimize performance by doing a fast-path bash string extraction. If this succeeded, it skipped the Python JSON normalizer (`opencode_review_normalize_output.py`). This is a security flaw because the bash script does not escape `<, >, &` characters, allowing attackers to inject `-->` directly in JSON strings to break out of HTML comment sections.
 **Prevention:** Removed the fast-path check entirely. We must always enforce JSON normalization via `opencode_review_normalize_output.py` because it correctly parses the JSON payload and safely escapes all characters as `\u003c`, `\u003e` and `\u0026`.
-## Security Learnings
-* `shopt nocasematch`를 사용할 때 서브쉘이나 루프를 통한 부수 효과가 남아있지 않도록 항상 이전 설정을 안전하게 저장하고 복구하는 패턴(`shopt -q` 활용)을 적용해야 함.
-* `eval`과 같은 불안전한 명령어 실행을 지양하고, 대신 안전한 조건문(`if [ "$was_nocasematch" -eq 0 ]`)을 사용하여 쉘 옵션을 제어해야 보안 취약점을 예방할 수 있음.
+## 2026-06-25 - Prevent CI Logs Security Exposure and Explicit Shell Usage
+**Vulnerability:** Information Disclosure / Command Injection
+**Learning:** `subprocess.run` defaults to `shell=False`, but linters like Bandit require explicit `shell=False` to pass security checks. Furthermore, logging `process.stderr` or command arguments in CI tools can leak sensitive data (e.g., GitHub tokens or API keys passed to commands) if a command fails and dumps the context.
+**Prevention:** Always explicitly define `shell=False` when using `subprocess.run()`. Scrub secrets from both arguments and `stderr` before including them in error messages within CI scripts.
+## 2026-06-25 - Restore Shell Options After Case-Insensitive Matching
+**Vulnerability:** Shell Option State Leakage / Unsafe Command Execution
+**Learning:** `shopt nocasematch` can leak case-insensitive matching state into later checks when scripts enable it inside helpers without restoring the previous setting. Avoid `eval` for shell option restoration.
+**Prevention:** Save the previous `nocasematch` state with `shopt -q`, use a normal conditional to restore it, and return explicit status codes from helpers that run under `set -e`.
