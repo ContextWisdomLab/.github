@@ -7,7 +7,9 @@
 ## 2024-11-20 - JSON Decoding Performance - Index Advancement
 **Learning:** Even when avoiding string slicing using `json.JSONDecoder().raw_decode(text, index)`, failing to correctly advance the index by ignoring the returned `end` index (`value, _ = decoder.raw_decode(...)`) forces the search loop to repeatedly attempt to decode nested JSON structures (e.g., inner braces `{`) sequentially. This leads to massive O(N^2) time complexity and redundant parsing for large, deeply nested JSON objects.
 **Action:** Always capture and use the new end index returned by `raw_decode` (e.g., `value, next_idx = decoder.raw_decode(text, index)`) to jump over the completely parsed object and proceed efficiently.
-
-## 2024-05-19 - Pre-compile regex patterns to optimize deep label-scanning loops
-**Learning:** Found a codebase-specific anti-pattern in `scripts/ci/opencode_review_normalize_output.py` where deep label-scanning loops over long review texts were redundantly recompiling regexes for 18 different verification labels (using `re.compile(re.escape(label))`) inside the `label_matches` inner function. This was causing measurable overhead in the CI review script.
-**Action:** When performing deep text inspection using repetitive substring or pattern matching across a known set of keys/labels, always pre-compile the regex objects at the module level.
+## 2026-06-25 - Avoid N+1 API blocking in PR checks
+**Learning:** In backend processing scripts, synchronous iterations calling an external service, such as fetching `restMergeableState` per PR, cause N+1 API bottlenecks and stall pipeline execution linearly. This matters for PR schedulers handling multiple PRs.
+**Action:** Use `concurrent.futures.ThreadPoolExecutor` for independent network calls in a loop, and bound `max_workers` to avoid API rate limits.
+## 2026-06-27 - Pre-compile Regex Patterns for Deep Label Scanning
+**Learning:** Found a codebase-specific anti-pattern in `scripts/ci/opencode_review_normalize_output.py` where deep label-scanning loops over long review texts were redundantly recompiling regexes for verification labels inside the `label_matches` inner function. This caused measurable overhead in the CI review script.
+**Action:** When performing deep text inspection using repetitive substring or pattern matching across a known set of keys or labels, pre-compile the regex objects at the module level.
