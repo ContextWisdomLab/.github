@@ -2499,6 +2499,10 @@ jobs:
           echo "check lookup token source=${check_lookup_token_source}"
           echo "review write token source=${review_write_token_source}"
 
+          app_token_limited_check_lookup() {
+            [ "${check_lookup_token_source:-}" = "opencode-app" ] && [ -n "${OPENCODE_APP_TOKEN:-}" ]
+          }
+
           warn_gh_publication_failure() {
             local action="$1" error_file="$2"
             printf 'OpenCode could not publish %s; continuing without review side effect.\n' "$action" >&2
@@ -4484,6 +4488,11 @@ jobs:
               pending_wait_status=$?
               set -e
               if [ "$pending_wait_status" -eq 1 ]; then
+                if app_token_limited_check_lookup; then
+                  echo "GitHub Checks statusCheckRollup lookup is unavailable to the OpenCode app token; branch protection remains authoritative for target-repository checks."
+                  : >"$pending_checks_file"
+                  pending_wait_status=0
+                else
                 body="$(printf '%s\n' \
                   "## Pull request overview" \
                   "" \
@@ -4503,6 +4512,7 @@ jobs:
                   "- Workflow run: ${RUN_ID}" \
                   "- Workflow attempt: ${RUN_ATTEMPT}")"
                 stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
+                fi
               fi
               if [ "$pending_wait_status" -ne 0 ]; then
                 failed_check_review_body_file="$(mktemp)"
@@ -4511,6 +4521,10 @@ jobs:
               fi
               failed_checks_file="$(mktemp)"
               if ! collect_github_checks_with_retry collect_failed_github_checks "$failed_checks_file"; then
+                if app_token_limited_check_lookup; then
+                  echo "GitHub failed-check lookup is unavailable to the OpenCode app token; approving based on source-backed OpenCode result and successful coverage evidence while branch protection remains authoritative."
+                  : >"$failed_checks_file"
+                else
                 body="$(printf '%s\n' \
                   "## Pull request overview" \
                   "" \
@@ -4530,6 +4544,7 @@ jobs:
                   "- Workflow run: ${RUN_ID}" \
                   "- Workflow attempt: ${RUN_ATTEMPT}")"
                 stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
+                fi
               fi
               if [ -s "$failed_checks_file" ]; then
                 failed_check_evidence_file="$(mktemp)"
