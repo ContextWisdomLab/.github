@@ -136,11 +136,23 @@ public non-fork target repository inherits org ruleset `18156473`, which require
 central Strix, OpenCode Review, and PR Review Merge Scheduler. Write actions
 still remain PR-head capability checks.
 
+Private target repository exception found on 2026-06-29 KST:
+`ContextualWisdomLab/xtrmLLMBatchPython` is a private, non-fork Git Flow
+repository with default branch `develop`. It has a repository-local `PR`
+ruleset requiring one approving review, but current PR head
+`734b266fbf116bc7431d9d4e9a91e1f99e6fb448` on PR #50 has no central Strix,
+OpenCode Review, or PR Review Merge Scheduler check run. Because the PR author
+is the only direct write collaborator visible to the repository API, GitHub
+rejects same-user approval. Add this repository to the organization central
+required-workflow ruleset, or explicitly document a private-repository
+onboarding exception before relying on autonomous PR queue draining.
+
 | Bucket | Repositories | Scheduler implication |
 |---|---|---|
 | Public target repos with central required Strix, OpenCode, and scheduler | `.github`, `ContextualWisdomLab.github.io`, `appguardrail`, `bandscope`, `clearfolio`, `codec-carver`, `contextual-orchestrator`, `hyosung-itx-slogan-brief`, `naruon`, `newsdom-api`, `pg-erd-cloud`, `scopeweave` | Treat central required workflows as the rollout mechanism. Do not add repo-local copies only to satisfy governance. |
 | Public target repos with repo-local Strix/OpenCode/scheduler copies | `.github`, `ContextualWisdomLab.github.io`, `appguardrail`, `clearfolio`, `codec-carver`, `naruon`, `newsdom-api`, `pg-erd-cloud`, `scopeweave` | Retire thick local copies only after central required workflow runs prove stable for that repo's current heads. |
 | Public target repos with partial or no local governance workflow footprint | `bandscope`, `contextual-orchestrator`, `hyosung-itx-slogan-brief` | They are still centrally governed by ruleset `18156473`; local absence is not a required-workflow gap. |
+| Private target repos missing central required workflow onboarding | `xtrmLLMBatchPython` | Treat missing central Strix/OpenCode/scheduler checks as an organization ruleset onboarding gap. Do not bypass review or weaken repository approval rules to drain the queue. |
 | Public forks | `argos`, `html4tree`, `nonnest2`, `seedream_evasepic`, `vooster`, `vooster-v2-mvp` | Fork status is not a categorical exclusion; onboarding is an explicit repository decision, and PR mutation remains capability-gated per head. |
 
 | Repo | Flow | Default | Auto | Central required workflows | Repo rules/protection | Repo required checks | Stale dismissal | Open PRs | Local workflow footprint | Recent merged actor |
@@ -157,6 +169,7 @@ still remain PR-head capability checks.
 | `ContextualWisdomLab/newsdom-api` | Git Flow | `develop` | on | Strix; OpenCode; scheduler | `Lock default branch`, `mirror-classic-protection-main-develop` | `codeql (python, actions)`, `dependency-review`, `pytest`, `quality-gate`, `scorecard` | ruleset true | 6 | OpenCode Review; PR Review Merge Scheduler; Strix Security Scan; quality/security/release workflows | #203 `seonghobae`; #205 `seonghobae`; #206 `seonghobae` |
 | `ContextualWisdomLab/pg-erd-cloud` | GitHub Flow | `main` | on | Strix; OpenCode; scheduler | `Lock default branch` | none | ruleset true | 15 | OpenCode Review; PR Review Autofix; PR Review Fix Scheduler; PR Review Merge Scheduler; Strix Security Scan | #247 `github-actions`; #246 `github-actions`; #239 `github-actions` |
 | `ContextualWisdomLab/scopeweave` | Git Flow | `develop` | on | Strix; OpenCode; scheduler | `Lock default branch` | none | ruleset true | 11 | OpenCode Review; PR Review Merge Scheduler; Strix Gate Self-Test; Strix Security Scan; security/pages workflows | #124 `seonghobae`; #118 `seonghobae`; #116 `seonghobae` |
+| `ContextualWisdomLab/xtrmLLMBatchPython` | Git Flow | `develop` | off | missing | `PR` | none | ruleset false | 1 | A2Z compliance; CodeQL; dependency/security checks; no OpenCode/Strix/scheduler | #49 `seonghobae`; #47 `seonghobae`; #45 `seonghobae` |
 
 ## Current Gaps By Repo
 
@@ -173,6 +186,7 @@ still remain PR-head capability checks.
 | `pg-erd-cloud` | Good GitHub Actions merge samples; keep autofix workflows repo-local. |
 | `scopeweave` | PR #127 is the current representative trace. Dry-run `28147098767` selected `auto_merge`, but live run `28147157319` failed with `GraphQL: Resource not accessible by integration (mergePullRequest)` because merge through GitHub Actions requires a contents-write mutation surface. Commit `6601953` proved the tempting fix, but Scorecard immediately opened a Token-Permissions review thread against job-level `contents: write`; follow-up commit `c5c5530` restores `contents: read` and keeps update-branch on the lower-privilege PR-write path. Current head `c5c5530` is clean, approved, and green; it remains unmerged because Actions-based merge is an explicit repo policy exception, not the default rollout. |
 | `appguardrail` | Public organization repo discovered in the 2026-06-26 refresh. It follows Git Flow on `develop`, inherits the central required workflow ruleset, has local review/merge/Strix workflow names, and has no open PRs at the snapshot, so it is a clean onboarding target for the central contract rather than a proof fixture. |
+| `xtrmLLMBatchPython` | Private repository discovered during PR queue draining on 2026-06-29. PR #50 is blocked by the repository-local one-approval rule because the only visible direct collaborator is also the PR author, and no current-head central OpenCode or Strix check exists. Add the private repository to the central required-workflow ruleset before continuing autonomous merges; do not force-merge and do not reduce the approval count to zero as a workaround. |
 
 ## Representative Evidence
 
