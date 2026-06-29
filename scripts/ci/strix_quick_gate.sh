@@ -10,7 +10,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$({ CDPATH='' && cd -P -- "$(dirname -- "$0")" && pwd -P; })"
-REPO_ROOT="$({ CDPATH='' && cd -P -- "$SCRIPT_DIR/../.." && pwd -P; })"
+DEFAULT_REPO_ROOT="$({ CDPATH='' && cd -P -- "$SCRIPT_DIR/../.." && pwd -P; })"
+RAW_REPO_ROOT="${STRIX_REPO_ROOT:-$DEFAULT_REPO_ROOT}"
+if [ -z "$RAW_REPO_ROOT" ] || [ ! -d "$RAW_REPO_ROOT" ] || [ -L "$RAW_REPO_ROOT" ]; then
+	echo "ERROR: STRIX_REPO_ROOT must reference a regular directory when provided." >&2
+	exit 2
+fi
+REPO_ROOT="$({ CDPATH='' && cd -P -- "$RAW_REPO_ROOT" && pwd -P; })"
 RAW_TARGET_PATH="${STRIX_TARGET_PATH:-./}"
 TARGET_PATH=""
 PR_SCOPE_TARGET_SENTINEL="__PR_SCOPE__"
@@ -2290,6 +2296,7 @@ try:
         text=True,
         env=child_env,
         start_new_session=True,
+        shell=False,
     )
     output, _ = process.communicate(timeout=process_timeout)
     if output:
@@ -2594,6 +2601,15 @@ is_midstream_fallback_error() {
 # originated from an LLM provider rather than the target application.
 LLM_PROVIDER_ONLY_REGEX='(litellm|openai|anthropic|VertexAI|Vertex_ai|vertex\.ai|google\.cloud|GitHub Models|models\.github\.ai|github_models)'
 
+is_llm_token_limit_error() {
+	if grep -Eiq '(tokens_limit_reached|Request body too large|Max size:[[:space:]]*[0-9]+[[:space:]]+tokens|Error code:[[:space:]]*413|(^|[^0-9])413([^0-9]|$))' "$STRIX_LOG" &&
+		grep -Eiq "($LLM_PROVIDER_ONLY_REGEX|OpenAIException|openai\.APIStatusError)" "$STRIX_LOG"; then
+		return 0
+	fi
+
+	return 1
+}
+
 # Detect whether the strix log contains evidence of infrastructure-level
 # errors (timeout, rate-limit, transport failures) that indicate the scan
 # was interrupted or incomplete.  Used as a guard to prevent the
@@ -2608,6 +2624,10 @@ has_detected_infrastructure_error() {
 	fi
 
 	if is_rate_limit_error; then
+		return 0
+	fi
+
+	if is_llm_token_limit_error; then
 		return 0
 	fi
 
@@ -3289,6 +3309,10 @@ is_model_retryable_error() {
 	fi
 
 	if is_rate_limit_error; then
+		return 0
+	fi
+
+	if is_llm_token_limit_error; then
 		return 0
 	fi
 
