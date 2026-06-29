@@ -1330,3 +1330,21 @@ def test_action_error_guidance_distinguishes_update_branch_from_merge():
     )
     assert "PR head likely changed after inspection" in stale_head_error
     assert "reads the new head before mutating" in stale_head_error
+
+def test_parse_workflow_action_required_reason():
+    """Test extracting ACTION_REQUIRED check names from a scheduler reason."""
+    # Test valid marker extraction
+    reason = "Some other text workflow action required: Check 1; Check 2"
+    assert sched.parse_workflow_action_required_reason(reason) == "Check 1"
+
+    # Test missing marker
+    reason2 = "Some text without the marker"
+    assert sched.parse_workflow_action_required_reason(reason2) is None
+
+    # Test marker with no extra checks
+    reason3 = "workflow action required:"
+    assert sched.parse_workflow_action_required_reason(reason3) is None
+
+    # Test marker with whitespace
+    reason4 = "workflow action required:    "
+    assert sched.parse_workflow_action_required_reason(reason4) is None
