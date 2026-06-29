@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -148,7 +149,7 @@ def scrub_sensitive_data(text: str | None) -> str | None:
         return text
     text = re.sub(r'(?i)(bearer\s+)[^\s"\'\\]+', r'\1***', text)
     text = re.sub(r'(?i)(token\s+)[^\s"\'\\]+', r'\1***', text)
-    text = re.sub(r'(ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)', '***', text)
+    text = re.sub(r'(?i)(github_pat_[A-Za-z0-9_]+|gh[psuo]_[A-Za-z0-9_]+)', '***', text)
     return text
 
 
@@ -410,11 +411,16 @@ def fetch_rest_mergeable_state(repo: str, number: int) -> str:
 
 def enrich_rest_mergeable_states(repo: str, prs: list[dict[str, Any]]) -> None:
     """Attach REST mergeability evidence to GraphQL pull request payloads."""
-    for pr in prs:
+    def enrich(pr: dict[str, Any]) -> None:
+        """Attach REST mergeability evidence to one pull request payload."""
         try:
             pr["restMergeableState"] = fetch_rest_mergeable_state(repo, int(pr["number"]))
         except RuntimeError as exc:
             pr["restMergeableStateError"] = bounded_error_summary(str(exc))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(prs) or 1)) as executor:
+        for _ in executor.map(enrich, prs):
+            pass
 
 
 def effective_merge_state(pr: dict[str, Any]) -> str:
