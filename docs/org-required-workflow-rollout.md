@@ -1,6 +1,6 @@
 # ContextualWisdomLab central required workflow rollout
 
-Updated: 2026-06-30 00:28 KST
+Updated: 2026-06-30 00:45 KST
 
 ## Decision
 
@@ -18,7 +18,7 @@ Use an organization repository ruleset instead of copying workflow files into ea
   - `.github/workflows/pr-review-merge-scheduler.yml`
 - Required workflow ref: `refs/heads/main`
 - Last verified workflow implementation commit: `919b83faf29237803cfdd0cfd6febbe5ae1a8a3c` (`#149`)
-- Required workflow trigger support: `pull_request_target`
+- Required workflow trigger support: `pull_request_target`, `push`, `workflow_run`
 
 `.github` PRs `#136`, `#137`, `#138`, `#139`, and `#140` are now in `main`. The required-workflow
 ruleset points at `.github@main`; if live organization ruleset inspection
@@ -54,6 +54,8 @@ The central `.github/workflows/pr-review-merge-scheduler.yml` is now part of the
 - PR-event scope: when GitHub invokes the workflow for a PR, the scheduler passes `--pr-number` and inspects only that PR instead of scanning or mutating the whole repository queue
 - Token posture: the workflow passes `GH_TOKEN: ${{ github.token }}` so stale-thread resolution, branch update, auto-merge, and direct merge mutations are attributed to the target repository's `github-actions[bot]`
 - Flow posture: default branches named `main` or `master` are treated as GitHub Flow; default branches named `develop` are treated as Git Flow unless a repository explicitly sets `PROJECT_FLOW`
+- Branch freshness posture: the scheduler also runs after protected base-branch pushes to `main`, `develop`, or `master`, because those pushes can create the GitHub UI state where reviews are satisfied, auto-merge is enabled, checks are stale or failed, and the PR shows `Update branch` without a PR `synchronize` event.
+- Auto-merge posture: `auto_merge_enabled` PR events trigger the scheduler so an already stale branch is refreshed immediately after native auto-merge is turned on instead of waiting for the two-hour schedule.
 - Automation boundary: `update-branch` handles `BEHIND` PRs after current-head OpenCode approval, and also handles PRs where auto-merge is already enabled but compare evidence shows the base branch is ahead; `DIRTY` or `CONFLICTING` PRs still require author or maintainer conflict resolution guidance
 - Retry posture: before retrying OpenCode, the scheduler force-cancels older active OpenCode runs for the same PR number and a previous head SHA. It does not automatically cancel Strix runs because security evidence should not be silently discarded by force-push churn.
 
@@ -122,6 +124,7 @@ The active ruleset targets all non-fork repositories found by live GitHub invent
 - `.github` PR `#138` added compare-API branch freshness evidence so approved PRs with auto-merge enabled can still receive `update-branch` when GitHub reports `BLOCKED` but the base branch is ahead. Local verification passed `pytest -q`, scheduler self-test, `py_compile`, 100% coverage, 100% docstring coverage, `actionlint`, `bash -n`, and `git diff --check`.
 - `.github` PR `#140` extended `update-branch` handling to PRs where auto-merge is already enabled even if the scheduler cannot find a current-head OpenCode approval node, so queued auto-merge PRs with failed checks can still be refreshed when compare evidence shows the base branch is ahead. Local verification passed `pytest -q`, `coverage report` at 100%, `interrogate` at 100%, `py_compile`, `bash -n`, and `git diff --check`.
 - `.github` PR `#145` treats compare API `status: behind` as branch-staleness evidence even when `behind_by` is missing or zero, so an auto-merge-enabled PR with failed checks and a visible GitHub "Update branch" action requests `update_branch` before disabling auto-merge. It merged at 2026-06-29 23:14 KST with merge commit `1ec0f3dcc7250fdf4a5a3ec6c26feaa98cce4f48`.
+- Live dry runs on 2026-06-30 00:40 KST found update-branch candidates in `.github` PR `#147` and `naruon` PR `#803`. The follow-up scheduler trigger change runs the central queue scan after base-branch pushes and `auto_merge_enabled` events, so those UI-visible stale-branch states are not left waiting only for the periodic schedule.
 - `.github` PR `#146` taught central OpenCode `coverage-evidence` to discover nested requirements-only Python test projects such as `backend/requirements.txt` plus `backend/tests`, install those requirements, and run tests from that project directory. It merged at 2026-06-29 23:24 KST with merge commit `0393bc1c48b80597d6d35c336aca43aee18e22b9`.
 - `.github` PR `#149` tightened the central OpenCode model-failure path and merged at 2026-06-30 00:26 KST with merge commit `919b83faf29237803cfdd0cfd6febbe5ae1a8a3c`. The follow-up commit `6fdffe43b50a2246b3db2790a0ab532618a89c2b` fixed the fallback approval path so pending-check and human-thread evidence are written to real temporary files instead of empty paths. Local verification passed `pytest -q`, `coverage report --fail-under=100`, `interrogate --fail-under=100`, `actionlint -shellcheck=`, targeted OpenCode quick-gate assertions, `bash -n`, and `git diff --check`; the full quick-gate script exceeded the local 300s timeout in this environment.
 - Organization ruleset `18156473` now targets all live non-fork repositories, including private `aFIPC`, `linux-cluster-ops`, and `xtrmLLMBatchPython`.
