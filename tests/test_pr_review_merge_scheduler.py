@@ -944,6 +944,15 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert same_head_auto_decision.action == "wait"
     assert same_head_auto_decision.reason == "current head is approved; auto-merge already enabled"
     assert disabled == []
+    blocked_auto = make_pr(
+        restMergeableState="blocked",
+        autoMergeRequest={"enabledAt": "now"},
+        reviews={"nodes": [opencode_review("APPROVED", "head")]},
+    )
+    blocked_auto_decision = inspect(blocked_auto)
+    assert blocked_auto_decision.action == "wait"
+    assert "GitHub mergeability is BLOCKED" in blocked_auto_decision.reason
+    assert "rerun the scheduler" in blocked_auto_decision.reason
 
     stale_behind = make_pr(mergeStateStatus="BEHIND", reviews={"nodes": [opencode_review("APPROVED", "old")]})
     dispatched = []

@@ -910,6 +910,17 @@ def merge_conflict_guidance(pr: dict[str, Any], merge_state: str) -> str:
     )
 
 
+def auto_merge_wait_reason(merge_state: str) -> str:
+    """Explain why an approved PR with auto-merge enabled is still waiting."""
+    if merge_state == "CLEAN":
+        return "current head is approved; auto-merge already enabled"
+    return (
+        "current head is approved and auto-merge is already enabled, "
+        f"but GitHub mergeability is {merge_state}; wait for required workflows, rulesets, "
+        "or branch freshness to clear, then rerun the scheduler if GitHub does not merge it"
+    )
+
+
 def inspect_pr(
     repo: str,
     pr: dict[str, Any],
@@ -1043,7 +1054,7 @@ def inspect_pr(
 
     if current_head_approved:
         if pr.get("autoMergeRequest"):
-            return decide("wait", "current head is approved; auto-merge already enabled")
+            return decide("wait", auto_merge_wait_reason(merge_state))
         if not enable_auto_merge_flag:
             return decide("wait", "current head is approved; auto-merge disabled by scheduler inputs")
         if merge_mode == "disabled":
