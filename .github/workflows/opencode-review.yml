@@ -33,7 +33,7 @@ on:
         type: string
 
 concurrency:
-  group: opencode-review-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.inputs.pr_number || github.run_id }}
+  group: opencode-review-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.inputs.pr_number || github.run_id }}-${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha || github.sha }}
   cancel-in-progress: true
 
 permissions:
@@ -3853,6 +3853,102 @@ jobs:
             return 2
           }
 
+          approve_after_model_failure_when_current_head_gates_pass() {
+            local pending_file="$1"
+            local failed_file="$2"
+            local unresolved_threads_file="$3"
+            local human_thread_body_file="$4"
+            local wait_status=0
+            local changed_files_summary body
+
+            wait_for_peer_github_checks "$pending_file" || wait_status=$?
+            if [ "$wait_status" -eq 1 ]; then
+              body="$(printf '%s\n' \
+                "OpenCode could not validate deterministic fallback approval because current-head checks were unavailable." \
+                "" \
+                "- Result: CHECKS_LOOKUP_FAILED" \
+                "- Reason: GitHub Checks statusCheckRollup could not be read after all model attempts failed." \
+                "- Required next evidence: readable current-head statusCheckRollup plus a rerun of the OpenCode approval gate." \
+                "- Head SHA: \`${HEAD_SHA}\`" \
+                "- Workflow run: ${RUN_ID}" \
+                "- Workflow attempt: ${RUN_ATTEMPT}" \
+                "" \
+                "No PR review was posted because check lookup failure is a review-tool state, not a source finding.")"
+              stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
+            elif [ "$wait_status" -eq 2 ]; then
+              build_waiting_for_checks_body "$pending_file" "$human_thread_body_file"
+              stop_approval_without_review "WAITING_FOR_CHECKS" "$(cat "$human_thread_body_file")"
+            fi
+
+            if ! collect_github_checks_with_retry collect_failed_github_checks "$failed_file"; then
+              body="$(printf '%s\n' \
+                "OpenCode could not validate deterministic fallback approval because current-head failed checks were unavailable." \
+                "" \
+                "- Result: CHECKS_LOOKUP_FAILED" \
+                "- Reason: GitHub Checks statusCheckRollup could not be read after peer checks completed." \
+                "- Required next evidence: readable current-head statusCheckRollup plus a rerun of the OpenCode approval gate." \
+                "- Head SHA: \`${HEAD_SHA}\`" \
+                "- Workflow run: ${RUN_ID}" \
+                "- Workflow attempt: ${RUN_ATTEMPT}" \
+                "" \
+                "No PR review was posted because check lookup failure is a review-tool state, not a source finding.")"
+              stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
+            fi
+            if [ -s "$failed_file" ]; then
+              return 1
+            fi
+
+            if request_changes_for_merge_conflict_if_present; then
+              return 0
+            fi
+
+            if ! collect_unresolved_human_review_threads "$unresolved_threads_file"; then
+              build_human_thread_lookup_failure_body "$human_thread_body_file"
+              create_pull_review "REQUEST_CHANGES" "$(cat "$human_thread_body_file")"
+              return 0
+            fi
+            if [ -s "$unresolved_threads_file" ]; then
+              build_unresolved_human_threads_body "$unresolved_threads_file" "$human_thread_body_file"
+              create_pull_review "REQUEST_CHANGES" "$(cat "$human_thread_body_file")"
+              return 0
+            fi
+
+            if [ -s "${OPENCODE_CHANGED_FILES_FILE:-}" ]; then
+              changed_files_summary="$(
+                sed -n '1,8p' "$OPENCODE_CHANGED_FILES_FILE" |
+                  awk 'BEGIN { first=1 } { if (!first) printf ", "; printf "%s", $0; first=0 }'
+              )"
+            else
+              changed_files_summary="bounded current-head evidence"
+            fi
+            if [ -z "$changed_files_summary" ]; then
+              changed_files_summary="bounded current-head evidence"
+            fi
+
+            body="$(printf '%s\n' \
+              "## Pull request overview" \
+              "" \
+              "OpenCode model attempts did not emit a usable current-head control block, so the approval gate used deterministic current-head evidence instead of model prose." \
+              "" \
+              "## Findings" \
+              "" \
+              "No blocking findings." \
+              "" \
+              "## Summary" \
+              "" \
+              "- Result: APPROVE" \
+              "- Reason: coverage-evidence passed, peer GitHub Checks completed without failures, mergeability was clean, and no unresolved human review threads remained." \
+              "- Deterministic evidence: current-head changed-file evidence (${changed_files_summary}); coverage-evidence result ${COVERAGE_EVIDENCE_RESULT:-unknown}; peer checks from statusCheckRollup excluding this OpenCode check." \
+              "- Model outcomes: primary=${OPENCODE_PRIMARY_OUTCOME:-unknown}, fallback=${OPENCODE_FALLBACK_OUTCOME:-unknown}, second_fallback=${OPENCODE_SECOND_FALLBACK_OUTCOME:-unknown}, catalog_fallback=${OPENCODE_CATALOG_FALLBACK_OUTCOME:-unknown}." \
+              "- Head SHA: \`${HEAD_SHA}\`" \
+              "- Workflow run: ${RUN_ID}" \
+              "- Workflow attempt: ${RUN_ATTEMPT}" \
+              "" \
+              "Deterministic fallback approval was used only after model-output instability and did not bypass coverage, failed-check, mergeability, or human-review gates.")"
+            create_pull_review "APPROVE" "$body"
+            return 0
+          }
+
                     request_changes_for_merge_conflict_if_present() {
                       local pr_json merge_state mergeable base_ref head_ref body change_graph
 
@@ -3951,9 +4047,9 @@ jobs:
             failed_check_review_body_file="$(mktemp)"
             failed_check_review_payload_file="$(mktemp)"
             failed_check_inline_failure_body_file="$(mktemp)"
-            pending_checks_file=""
-            unresolved_human_threads_file=""
-            human_thread_review_body_file=""
+            pending_checks_file="$(mktemp)"
+            unresolved_human_threads_file="$(mktemp)"
+            human_thread_review_body_file="$(mktemp)"
             # shellcheck disable=SC2329
             cleanup_failed_outcome_files() {
               rm -f "$failed_checks_file" "$failed_check_evidence_file" "$failed_check_review_body_file" "$failed_check_review_payload_file" "$failed_check_inline_failure_body_file" "$pending_checks_file" "$unresolved_human_threads_file" "$human_thread_review_body_file"
@@ -3988,6 +4084,10 @@ jobs:
             if request_changes_for_merge_conflict_if_present; then
               :
             else
+              if approve_after_model_failure_when_current_head_gates_pass "$pending_checks_file" "$failed_checks_file" "$unresolved_human_threads_file" "$human_thread_review_body_file"; then
+                echo "::endgroup::"
+                exit 0
+              fi
               body="$(printf '%s\n' \
                 "all configured OpenCode model attempts failed to produce a usable current-head control block." \
                 "" \
