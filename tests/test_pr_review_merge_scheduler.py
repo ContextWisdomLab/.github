@@ -221,6 +221,42 @@ def test_fetch_pr_uses_exact_pull_request_number(monkeypatch):
     assert seen == [{"owner": "owner", "name": "repo", "number": 42}]
 
 
+def test_gh_graphql_retries_transient_gateway_errors(monkeypatch):
+    calls = []
+    sleeps = []
+
+    def fake_run(args, stdin=None):
+        calls.append((args, stdin))
+        if len(calls) == 1:
+            raise RuntimeError("Command failed (1): gh api graphql\ngh: HTTP 502")
+        if len(calls) == 2:
+            raise RuntimeError("Command failed (1): gh api graphql\ngh: HTTP 504")
+        return '{"data":{"repository":{"pullRequests":{"nodes":[],"pageInfo":{"hasNextPage":false}}}}}'
+
+    monkeypatch.setattr(sched, "run", fake_run)
+    monkeypatch.setattr(sched.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    payload = sched.gh_graphql("query", owner="owner", name="repo", pageSize=100)
+
+    assert payload["data"]["repository"]["pullRequests"]["nodes"] == []
+    assert len(calls) == 3
+    assert sleeps == [1, 2]
+
+
+def test_gh_graphql_does_not_retry_non_transient_errors(monkeypatch):
+    calls = []
+
+    def fake_run(args, stdin=None):
+        calls.append(args)
+        raise RuntimeError("Command failed (1): gh api graphql\ngh: Field 'unknown' doesn't exist on type 'PullRequest'")
+
+    monkeypatch.setattr(sched, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="Field 'unknown'"):
+        sched.gh_graphql("query", owner="owner")
+    assert len(calls) == 1
+
+
 def test_rest_mergeable_state_helpers(monkeypatch):
     calls = []
 
@@ -969,7 +1005,9 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert "merge conflict: DIRTY" in rest_conflict.reason
     unknown_mergeability = inspect(make_pr(mergeStateStatus="CLEAN", restMergeableState="UNKNOWN"))
     assert unknown_mergeability.action == "wait"
-    assert unknown_mergeability.reason == "mergeability is still being calculated"
+    assert unknown_mergeability.reason == (
+        "mergeability is still being calculated and no branch freshness evidence is available"
+    )
     unknown_auto_merge = inspect(
         make_pr(
             mergeStateStatus="CLEAN",
@@ -1197,6 +1235,72 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert "auto-merge already enabled" in blocked_without_opencode_decision.reason
     assert "base branch is 2 commit(s) ahead" in blocked_without_opencode_decision.reason
     assert "existing auto-merge request remains queued" in blocked_without_opencode_decision.reason
+    assert called == [("owner/repo", 1, True)]
+    called.clear()
+    blocked_compare_behind_auto = make_pr(
+        mergeStateStatus="BLOCKED",
+        restMergeableState="BLOCKED",
+        compareStatus="behind",
+        autoMergeRequest={"enabledAt": "now"},
+        statusCheckRollup={
+            "contexts": {
+                "nodes": [
+                    {"__typename": "CheckRun", "name": "strix", "conclusion": "FAILURE"},
+                    {"__typename": "CheckRun", "name": "coverage-evidence", "conclusion": "FAILURE"},
+                ],
+            }
+        },
+    )
+    blocked_compare_behind_decision = inspect(blocked_compare_behind_auto)
+    assert blocked_compare_behind_decision.action == "update_branch"
+    assert "auto-merge already enabled" in blocked_compare_behind_decision.reason
+    assert "base branch is 1 commit(s) ahead" in blocked_compare_behind_decision.reason
+    assert "existing auto-merge request remains queued" in blocked_compare_behind_decision.reason
+    assert called == [("owner/repo", 1, True)]
+    called.clear()
+    diverged_failed_auto = make_pr(
+        mergeStateStatus="BLOCKED",
+        restMergeableState="BLOCKED",
+        compareStatus="diverged",
+        compareBehindBy=184,
+        compareAheadBy=1,
+        autoMergeRequest={"enabledAt": "now"},
+        statusCheckRollup={
+            "contexts": {
+                "nodes": [
+                    {"__typename": "CheckRun", "name": "coverage-evidence", "conclusion": "FAILURE"},
+                    {"__typename": "CheckRun", "name": "opencode-review", "conclusion": "FAILURE"},
+                ],
+            }
+        },
+    )
+    diverged_failed_decision = inspect(diverged_failed_auto)
+    assert diverged_failed_decision.action == "update_branch"
+    assert "auto-merge already enabled" in diverged_failed_decision.reason
+    assert "base branch is 184 commit(s) ahead" in diverged_failed_decision.reason
+    assert "existing auto-merge request remains queued" in diverged_failed_decision.reason
+    assert called == [("owner/repo", 1, True)]
+    called.clear()
+    unknown_compare_behind_auto = make_pr(
+        mergeStateStatus="UNKNOWN",
+        restMergeableState="UNKNOWN",
+        compareStatus="behind",
+        autoMergeRequest={"enabledAt": "now"},
+        statusCheckRollup={
+            "contexts": {
+                "nodes": [
+                    {"__typename": "CheckRun", "name": "strix", "conclusion": "FAILURE"},
+                    {"__typename": "CheckRun", "name": "coverage-evidence", "conclusion": "FAILURE"},
+                ],
+            }
+        },
+    )
+    unknown_compare_behind_decision = inspect(unknown_compare_behind_auto)
+    assert unknown_compare_behind_decision.action == "update_branch"
+    assert "auto-merge already enabled" in unknown_compare_behind_decision.reason
+    assert "base branch is 1 commit(s) ahead" in unknown_compare_behind_decision.reason
+    assert "GitHub mergeability is UNKNOWN" in unknown_compare_behind_decision.reason
+    assert "existing auto-merge request remains queued" in unknown_compare_behind_decision.reason
     assert called == [("owner/repo", 1, True)]
     called.clear()
     disabled.clear()
