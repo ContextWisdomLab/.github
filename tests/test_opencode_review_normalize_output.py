@@ -191,10 +191,10 @@ def test_label_and_full_coverage_detection():
     assert norm.mentions_full_coverage("", FULL_SUMMARY)
     no_source_summary = FULL_SUMMARY.replace(
         "coverage execution evidence proves 100% test coverage",
-        "coverage execution evidence reports test coverage as not applicable because no supported source files or package manifests were found",
+        "coverage execution evidence reports test coverage as not applicable because no supported changed source files or package manifests were found",
     ).replace(
         "coverage execution evidence proves 100% docstring coverage",
-        "coverage execution evidence reports docstring coverage as not applicable because no supported source files or package manifests were found",
+        "coverage execution evidence reports docstring coverage as not applicable because no supported changed source files or package manifests were found",
     )
     assert norm.mentions_full_coverage("", no_source_summary)
     assert not norm.mentions_full_coverage("", "")
@@ -598,8 +598,8 @@ M\tREADME.md
         """\
 ## Coverage execution evidence
 - Result: PASS
-- Test coverage: not applicable (no supported source files or package manifests)
-- Docstring coverage: not applicable (no supported source files or package manifests)
+- Test coverage: not applicable (no supported changed source files or package manifests)
+- Docstring coverage: not applicable (no supported changed source files or package manifests)
 ## Changed files
 M\tscripts/ci/example.py
 """,
@@ -657,6 +657,23 @@ def test_main_normalizes_valid_output_and_reports_failures(tmp_path, capsys):
     approval = tmp_path / "approval.json"
     approval.write_text(json.dumps(control()), encoding="utf-8")
     assert norm.main(["prog", "--check-structural-approval", str(approval)]) == 0
+
+    generic_failed_check = tmp_path / "generic-failed-check.json"
+    generic_failed_check.write_text(
+        json.dumps(
+            control(
+                result="REQUEST_CHANGES",
+                summary=(
+                    "No deterministic missing-string markers or Strix report locations "
+                    "were recognized."
+                ),
+                findings=[finding(problem="No deterministic missing-string markers were found.")],
+            )
+        ),
+        encoding="utf-8",
+    )
+    assert norm.main(["prog", "--check-structural-approval", str(generic_failed_check)]) == 4
+    assert "non-actionable failed-check deflection" in capsys.readouterr().err
 
 def test_main_normalizes_and_escapes_html_markers(tmp_path):
     output = tmp_path / "opencode.txt"

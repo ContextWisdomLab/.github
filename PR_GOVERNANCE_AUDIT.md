@@ -281,17 +281,35 @@ PR #381: wait: OpenCode review is already in progress
 4. Treat fork and non-fork repositories uniformly for onboarding. At runtime,
    classify only the PR head mutation capability: observable/reviewable,
    updateable, auto-mergeable, or mergeable.
-5. Keep repo-specific product/build/autofix/security workflows repo-local only
+5. Do not leave an active public fork PR queue in the inventory-only state.
+   When a public fork such as `html4tree` has open PRs targeting the
+   organization-owned fork, it must either be included in the organization required-workflow ruleset
+   for Strix, OpenCode Review, and PR Review Merge
+   Scheduler, or carry a temporary thin caller that invokes the central
+   `.github` workflows until the ruleset can cover it. The fork label is not a
+   reason to merge without same-head central review evidence.
+6. Keep repo-specific product/build/autofix/security workflows repo-local only
    when they are not part of the governance contract. `pg-erd-cloud` autofix
    stays repo-local; Strix, OpenCode review, and PR review/merge governance
    should not.
-6. Use `contextual-orchestrator` as the no-copy onboarding fixture when it next
+7. Use `contextual-orchestrator` as the no-copy onboarding fixture when it next
    has a real PR. It now inherits central required workflows, but lacks
    repo-local branch-lock/stale-dismissal policy and has no open PR to prove
    runtime behavior.
 
 ## Remaining Proof Gaps
 
+- 2026-06-29 KST `html4tree` onboarding gap: PR #3 is the lowest open PR and is
+  cleanly mergeable by GitHub, but current head
+  `d0c4cbc2bb267aed407e4bf6308f4f3cfd3b504c` has no check runs and no reviews.
+  The PR title claims an XSS/attribute-injection fix, while the diff only
+  changes indentation in `src/main/kotlin/html4tree/util.kt`. This proves that
+  `html4tree` cannot be merged by queue order until central Strix, OpenCode
+  Review, and scheduler evidence run on the same head and OpenCode either
+  requests changes or approves real code/test evidence. The required process
+  repair is to add `html4tree` to the organization required-workflow target set
+  or add a temporary thin caller that delegates to `.github`; do not bypass the review gate
+  with a manual or forced merge.
 - 2026-06-26 17:53 KST continuation snapshot: `.github` PR #68 is merged at merge commit `590b4ecb2ac9eac700019a183081309e28d8f25b`; `bandscope` PR #459 is merged at merge commit `a7173e45304d8681f02fdf43e4de5a6b6540bb44`; `.github` PR #79 and #80 are merged, and organization ruleset `18156473` now requires central Strix, OpenCode, and scheduler workflows from `.github@807254a04efafd5f806e0f70cb067ecf050cfd11`. The live organization target inventory contains 12 public non-fork repositories and confirms `appguardrail` is present while `VibeSec` is not in that set.
 - PR #80 proved the no-copy required-workflow path after the ruleset update: `scan-pr-queue` ran as a required check in `ContextualWisdomLab/.github`, passed in 7s, used `PULL_REQUEST_NUMBER=80`, and reported `OpenCode review is already in progress` instead of scanning or mutating the entire queue. The same PR passed central Strix in 3m20s and OpenCode in 4m36s on current head `23ee41076b8f3cec21cff3afd3cd5b4380decf12`.
 - `bandscope` scheduler run `28192186833` is the current live fixture. PR #450 produced conflict guidance with `gh pr checkout 450`, `git fetch origin develop`, merge-or-rebase, `git status --short`, same-branch push, and `--force-with-lease` only for rebase. PR #451 and PR #446 were updated through the workflow `GITHUB_TOKEN`; the resulting head commits were authored by `github-actions[bot]`.
