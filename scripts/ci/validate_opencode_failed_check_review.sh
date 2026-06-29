@@ -12,6 +12,7 @@ FAILED_CHECK_EVIDENCE_FILE="$3"
 
 if [ ! -r "$CONTROL_JSON_FILE" ] || [ ! -r "$FAILED_CHECKS_FILE" ] || [ ! -r "$FAILED_CHECK_EVIDENCE_FILE" ]; then
   echo "FAILED_CHECK_EVIDENCE_NOT_REFERENCED"
+  echo "Reason: control JSON, failed-check list, or failed-check evidence file is unreadable."
   exit 4
 fi
 
@@ -52,6 +53,12 @@ contains_review_text() {
   grep -Fqi -- "$needle" <<<"$review_text"
 }
 
+reject_failed_check_review() {
+  echo "FAILED_CHECK_EVIDENCE_NOT_REFERENCED"
+  echo "Reason: $1"
+  exit 4
+}
+
 reject_non_actionable_failed_check_review() {
   local marker
 
@@ -63,8 +70,7 @@ reject_non_actionable_failed_check_review() {
     "map each failed check to exact local source lines before approving"
   do
     if contains_review_text "$marker"; then
-      echo "FAILED_CHECK_EVIDENCE_NOT_REFERENCED"
-      exit 4
+      reject_failed_check_review "review text punts failed-check diagnosis back to the reader: ${marker}"
     fi
   done
 }
@@ -397,8 +403,7 @@ while IFS= read -r failed_check_line; do
       failed_check_label="${failed_check_line#- }"
       failed_check_label="${failed_check_label%%:*}"
       if ! contains_review_text "$failed_check_label"; then
-        echo "FAILED_CHECK_EVIDENCE_NOT_REFERENCED"
-        exit 4
+        reject_failed_check_review "review does not name failed check '${failed_check_label}'."
       fi
       ;;
   esac
@@ -406,8 +411,7 @@ done <"$FAILED_CHECKS_FILE"
 
 while IFS= read -r fail_marker; do
   if ! contains_review_text "$fail_marker"; then
-    echo "FAILED_CHECK_EVIDENCE_NOT_REFERENCED"
-    exit 4
+    reject_failed_check_review "review does not cite failed-log marker '${fail_marker}'."
   fi
 done < <(awk -F 'FAIL: ' 'NF > 1 { print $2 }' "$FAILED_CHECK_EVIDENCE_FILE" | sort -u)
 
@@ -419,36 +423,31 @@ for evidence_marker in \
 do
   if grep -Fq -- "$evidence_marker" "$FAILED_CHECK_EVIDENCE_FILE" &&
     ! contains_review_text "$evidence_marker"; then
-    echo "FAILED_CHECK_EVIDENCE_NOT_REFERENCED"
-    exit 4
+    reject_failed_check_review "review omits required evidence marker '${evidence_marker}'."
   fi
 done
 
 if grep -Fq "Strix vulnerability report window" "$FAILED_CHECK_EVIDENCE_FILE"; then
   if ! validate_distinct_strix_report_findings; then
-    echo "FAILED_CHECK_EVIDENCE_NOT_REFERENCED"
-    exit 4
+    reject_failed_check_review "Strix vulnerability reports were not mapped to distinct source-backed findings."
   fi
 
   strix_title_count="$(extract_strix_title_markers | sed '/^[[:space:]]*$/d' | wc -l | tr -d '[:space:]')"
   finding_count="$(count_strix_review_findings)"
   if [ -n "$strix_title_count" ] && [ "$strix_title_count" -gt 0 ] &&
     [ "$finding_count" -lt "$strix_title_count" ]; then
-    echo "FAILED_CHECK_EVIDENCE_NOT_REFERENCED"
-    exit 4
+    reject_failed_check_review "review has fewer Strix-specific findings (${finding_count}) than Strix report titles (${strix_title_count})."
   fi
 
   while IFS= read -r model_name; do
     if ! contains_review_text "$model_name"; then
-      echo "FAILED_CHECK_EVIDENCE_NOT_REFERENCED"
-      exit 4
+      reject_failed_check_review "review omits Strix report model '${model_name}'."
     fi
   done < <(extract_strix_report_model_markers)
 
   while IFS= read -r strix_marker; do
     if ! contains_review_text "$strix_marker"; then
-      echo "FAILED_CHECK_EVIDENCE_NOT_REFERENCED"
-      exit 4
+      reject_failed_check_review "review omits Strix report marker '${strix_marker}'."
     fi
   done < <(extract_strix_required_markers)
 fi
