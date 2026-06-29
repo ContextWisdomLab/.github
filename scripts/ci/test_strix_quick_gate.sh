@@ -576,6 +576,8 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" "github-models/openai/o3 github-models/openai/o3-mini github-models/openai/o4-mini" "opencode review includes additional OpenAI reasoning model fallbacks"
 	assert_file_contains "$workflow_file" "coverage-evidence:" "opencode workflow measures coverage before review"
 	assert_file_contains "$workflow_file" "github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target'" "manual and required OpenCode reviews measure coverage instead of approving skipped coverage evidence"
+	assert_file_contains "$workflow_file" "Exchange OpenCode app token for target repository coverage reads" "coverage evidence can read private target repositories through the OpenCode app token"
+	assert_file_contains "$workflow_file" 'token: ${{ steps.coverage_app_token.outputs.token || secrets.OPENCODE_APPROVE_TOKEN || github.token }}' "coverage evidence prefers the OpenCode app token for private target repository checkout"
 	assert_file_contains "$workflow_file" 'ref: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}' "coverage evidence checks out the requested PR head SHA as data"
 	assert_file_contains "$workflow_file" 'ref: ${{ steps.trusted_source.outputs.ref }}' "OpenCode review checks out central trusted scripts for same-head validation"
 	assert_file_contains "$workflow_file" 'COVERAGE_EVIDENCE_RESULT: ${{ needs.coverage-evidence.result || '\''skipped'\'' }}' "opencode approval receives the coverage-evidence job conclusion"
