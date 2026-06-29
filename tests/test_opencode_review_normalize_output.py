@@ -111,13 +111,106 @@ def test_actual_changed_file_detection_prefers_current_head_file_list(tmp_path, 
     assert norm.mentions_actual_changed_file("scripts/ci/example.py", "")
 
 
+def test_changed_file_kind_contradictions_are_rejected(tmp_path, monkeypatch):
+    changed_files = tmp_path / "changed-files.txt"
+    changed_files.write_text(
+        "\n".join(
+            [
+                ".github/workflows/opencode-review.yml",
+                "scripts/ci/test_strix_quick_gate.sh",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_CHANGED_FILES_FILE", str(changed_files))
+
+    false_summary = (
+        FULL_SUMMARY.replace("scripts/ci/example.py", ".github/workflows/opencode-review.yml")
+        .replace(
+            "Linter/static: actionlint and bash -n passed.",
+            "Linter/static: Not applicable (no source files changed).",
+        )
+        .replace(
+            "TDD/regression: pytest covered the changed behavior.",
+            "TDD/regression: Not applicable (no test files changed).",
+        )
+        .replace(
+            "PoC/execution: local PoC executed successfully.",
+            "PoC/execution: Not applicable (no executable changes).",
+        )
+    )
+    approval = control(
+        reason="No blockers found after inspecting .github/workflows/opencode-review.yml.",
+        summary=false_summary,
+    )
+
+    assert norm.changed_file_is_source_like(".github/workflows/opencode-review.yml")
+    assert norm.changed_file_is_source_like("Dockerfile")
+    assert norm.changed_file_is_source_like("src/app.py")
+    assert not norm.changed_file_is_source_like("README.md")
+    assert norm.changed_file_is_test_like("scripts/ci/test_strix_quick_gate.sh")
+    assert norm.changed_file_is_test_like("tests/README.md")
+    assert norm.contradicts_changed_file_kinds(approval["reason"], approval["summary"])
+    assert norm.valid_control(
+        approval,
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    ) is None
+
+    path = tmp_path / "approval.json"
+    path.write_text(json.dumps(approval), encoding="utf-8")
+    assert norm.check_structural_approval(path) == 4
+
+    changed_files.write_text("scripts/deploy.sh\n", encoding="utf-8")
+    assert norm.contradicts_changed_file_kinds(
+        "Reviewed scripts/deploy.sh.",
+        "PoC/execution: Not applicable (no executable changes).",
+    )
+
+    changed_files.write_text("tests/README.md\n", encoding="utf-8")
+    assert norm.contradicts_changed_file_kinds(
+        "Reviewed tests/README.md.",
+        "TDD/regression: Not applicable (no tests changed).",
+    )
+
+    changed_files.write_text("scripts/deploy.sh\n", encoding="utf-8")
+    assert not norm.contradicts_changed_file_kinds(
+        "Reviewed scripts/deploy.sh.",
+        "PoC/execution: bash -n scripts/deploy.sh passed.",
+    )
+
+    monkeypatch.delenv("OPENCODE_CHANGED_FILES_FILE")
+    assert not norm.contradicts_changed_file_kinds(approval["reason"], approval["summary"])
+
+
 def test_label_and_full_coverage_detection():
     combined = FULL_SUMMARY.casefold()
     assert "100%" in norm.label_section(combined, "coverage:")
     assert norm.label_section(combined, "missing:") == ""
     assert norm.mentions_full_coverage("", FULL_SUMMARY)
+    no_source_summary = FULL_SUMMARY.replace(
+        "coverage execution evidence proves 100% test coverage",
+        "coverage execution evidence reports test coverage as not applicable because no supported changed source files or package manifests were found",
+    ).replace(
+        "coverage execution evidence proves 100% docstring coverage",
+        "coverage execution evidence reports docstring coverage as not applicable because no supported changed source files or package manifests were found",
+    )
+    assert norm.mentions_full_coverage("", no_source_summary)
     assert not norm.mentions_full_coverage("", "")
     assert not norm.mentions_full_coverage("", FULL_SUMMARY.replace("100%", "99%", 1))
+    assert not norm.mentions_full_coverage("", FULL_SUMMARY.replace("100%", "not applicable", 1))
+    assert not norm.mentions_full_coverage(
+        "",
+        FULL_SUMMARY.replace(
+            "coverage execution evidence proves 100% test coverage",
+            "coverage execution evidence did not prove 100% test coverage",
+        ),
+    )
+    assert norm.evidence_coverage_mode(
+        "- Result: PASS\n"
+        "- Test coverage: not applicable (no supported source files or package manifests)\n"
+    ) is None
     assert not norm.mentions_full_coverage(
         "",
         FULL_SUMMARY.replace("coverage execution evidence", "measured evidence", 1),
@@ -155,14 +248,13 @@ def test_check_structural_approval_rejects_invalid_or_unsafe_approvals(tmp_path)
             control(
                 result="REQUEST_CHANGES",
                 summary=(
-                    "No deterministic missing-string markers or Strix report locations were "
-                    "recognized. Use the failed-check evidence below to map each failed check "
-                    "to exact local source lines before approving."
+                    "The review could not map each failed check to exact local source lines "
+                    "from the available logs, so it needs better failed-check evidence."
                 ),
                 findings=[
                     finding(
                         title="Generic failed-check deflection",
-                        problem="No deterministic missing-string markers were recognized.",
+                        problem="The failed-check diagnosis did not produce source-backed findings.",
                     )
                 ],
             )
@@ -206,9 +298,8 @@ def test_valid_control_filters_shape_head_and_review_contract():
             dict(
                 request,
                 summary=(
-                    "No deterministic missing-string markers or Strix report locations were "
-                    "recognized. Use the failed-check evidence below to map each failed check "
-                    "to exact local source lines before approving."
+                    "The review could not map each failed check to exact local source lines "
+                    "from the available logs, so it needs better failed-check evidence."
                 ),
             ),
             **kwargs,
@@ -356,6 +447,74 @@ Security/privacy: Not applicable.
     assert norm.mentions_full_coverage(repaired["reason"], repaired["summary"])
 
 
+def test_valid_control_repair_drops_contradictory_changed_file_kind_claims(tmp_path, monkeypatch):
+    evidence = tmp_path / "bounded-review-evidence.md"
+    changed_files = tmp_path / "changed-files.txt"
+    evidence.write_text(
+        """\
+# OpenCode bounded PR review evidence
+
+## Coverage execution evidence
+
+# Coverage Evidence
+
+## Coverage Decision
+
+- Result: PASS
+- Test coverage: 100%
+- Docstring coverage: 100%
+
+## Changed files
+
+M\tapps/desktop/src/App.tsx
+M\tapps/desktop/src/App.test.tsx
+""",
+        encoding="utf-8",
+    )
+    changed_files.write_text(
+        "apps/desktop/src/App.tsx\napps/desktop/src/App.test.tsx\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_APPROVAL_REPAIR_EVIDENCE_FILE", str(evidence))
+    monkeypatch.setenv("OPENCODE_CHANGED_FILES_FILE", str(changed_files))
+
+    repaired = norm.valid_control(
+        control(
+            reason="No blocking issues found in the inspected files.",
+            summary="""\
+Inspected changes in PR #475. No blocking issues were found.
+Verification posture: CodeGraph was mentioned.
+Linter/static: Not applicable (no linter changes).
+TDD/regression: Not applicable (no test changes).
+Coverage: Not applicable (no coverage changes).
+Docstring coverage: Not applicable (no docstring changes).
+DAG: Not applicable (no DAG changes).
+PoC/execution: Not applicable (no executable changes).
+DDD/domain: Not applicable.
+CDD/context: Not applicable.
+Similar issues: Not applicable.
+Claim/concept check: Not applicable.
+Standards search: Not applicable.
+Compatibility/convention: Not applicable.
+Breaking-change/backcompat: Not applicable.
+Performance: Not applicable.
+Developer experience: Not applicable.
+User experience: Not applicable.
+Security/privacy: Not applicable.
+""",
+        ),
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    )
+
+    assert repaired is not None
+    assert "apps/desktop/src/App.tsx" in repaired["summary"]
+    assert "no executable changes" not in repaired["summary"]
+    assert "no test changes" not in repaired["summary"]
+    assert not norm.contradicts_changed_file_kinds(repaired["reason"], repaired["summary"])
+
+
 def test_valid_control_does_not_repair_unsafe_or_unproven_approval(tmp_path, monkeypatch):
     evidence = tmp_path / "bounded-review-evidence.md"
     evidence.write_text(
@@ -433,6 +592,22 @@ M\tREADME.md
     )
     assert summary is not None
     assert "and 1 more" in summary
+
+    no_source_summary = norm.build_approval_repair_summary(
+        "No blockers were found.",
+        """\
+## Coverage execution evidence
+- Result: PASS
+- Test coverage: not applicable (no supported changed source files or package manifests)
+- Docstring coverage: not applicable (no supported changed source files or package manifests)
+## Changed files
+M\tscripts/ci/example.py
+""",
+    )
+    assert no_source_summary is not None
+    assert "test coverage as not applicable" in no_source_summary
+    assert "docstring coverage as not applicable" in no_source_summary
+    assert norm.mentions_full_coverage("", no_source_summary)
 
     evidence = tmp_path / "bounded-review-evidence.md"
     evidence.write_text("placeholder", encoding="utf-8")
@@ -525,3 +700,34 @@ def test_main_normalizes_valid_output_and_reports_failures(tmp_path, capsys):
     approval = tmp_path / "approval.json"
     approval.write_text(json.dumps(control()), encoding="utf-8")
     assert norm.main(["prog", "--check-structural-approval", str(approval)]) == 0
+
+    generic_failed_check = tmp_path / "generic-failed-check.json"
+    generic_failed_check.write_text(
+        json.dumps(
+            control(
+                result="REQUEST_CHANGES",
+                summary=(
+                    "No deterministic missing-string markers or Strix report locations "
+                    "were recognized."
+                ),
+                findings=[finding(problem="No deterministic missing-string markers were found.")],
+            )
+        ),
+        encoding="utf-8",
+    )
+    assert norm.main(["prog", "--check-structural-approval", str(generic_failed_check)]) == 4
+    assert "non-actionable failed-check deflection" in capsys.readouterr().err
+
+def test_main_normalizes_and_escapes_html_markers(tmp_path):
+    output = tmp_path / "opencode.txt"
+    control_data = control(reason="Malicious --> comment", summary=FULL_SUMMARY + "\nBreakout <script>alert(1)</script>")
+    output.write_text(json.dumps(control_data), encoding="utf-8")
+    assert norm.main(["prog", "head", "run", "attempt", str(output)]) == 0
+
+    saved_text = output.read_text(encoding="utf-8")
+    assert "opencode-review-control-v1" in saved_text
+    assert "<script>" not in saved_text
+    assert "\\u003cscript\\u003e" in saved_text
+    inner = saved_text.split("<!-- opencode-review-control-v1")[1]
+    assert "-->" in inner
+    assert "-->" not in inner.split("-->", 1)[0].strip()
