@@ -557,7 +557,7 @@ def check_structural_approval(control_file: Path) -> int:
         str(value.get("summary", "")),
     ):
         return reject("approval admits missing structural review")
-    if value.get("result") == "APPROVE" and not mentions_changed_file_evidence(
+    if value.get("result") == "APPROVE" and not mentions_actual_changed_file(
         str(value.get("reason", "")),
         str(value.get("summary", "")),
     ):
