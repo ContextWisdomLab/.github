@@ -1258,6 +1258,8 @@ EOF
 	assert_equals "4" "$rc" "opencode approval gate rejects approvals without changed-file evidence"
 	assert_equals "NO_CONCLUSION" "$gate_result" "missing changed-file evidence rejection gate result"
 	assert_file_contains "$REPO_ROOT/.github/workflows/opencode-review.yml" "Before APPROVE, the summary must include at least one exact changed file path inspected as changed-file evidence" "opencode prompt requires changed-file evidence before approval"
+	assert_file_contains "$REPO_ROOT/.github/workflows/opencode-review.yml" "when result is APPROVE the JSON findings value must be exactly []" "opencode prompt keeps approval findings empty"
+	assert_file_contains "$REPO_ROOT/.github/workflows/opencode-review.yml" "Put all required Verification posture labels inside the JSON summary string itself" "opencode prompt keeps approval evidence inside the control JSON"
 	assert_file_contains "$REPO_ROOT/.github/workflows/opencode-review.yml" "never say no source files changed, no test files changed, or no executable changes when exact changed-file evidence lists workflow, script, source, or test files" "opencode prompt rejects contradictory changed-file kind claims"
 	assert_file_contains "$REPO_ROOT/.github/workflows/opencode-review.yml" "OPENCODE_CHANGED_FILES_FILE" "opencode workflow exports exact current-head changed files"
 	assert_file_contains "$REPO_ROOT/.github/workflows/opencode-review.yml" 'diff --name-only --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA" >"$OPENCODE_CHANGED_FILES_FILE"' "opencode workflow writes exact changed files for the normalizer"
