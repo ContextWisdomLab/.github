@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -410,8 +411,6 @@ def fetch_rest_mergeable_state(repo: str, number: int) -> str:
 
 def enrich_rest_mergeable_states(repo: str, prs: list[dict[str, Any]]) -> None:
     """Attach REST mergeability evidence to GraphQL pull request payloads."""
-    import concurrent.futures
-
     def enrich(pr: dict[str, Any]) -> None:
         try:
             pr["restMergeableState"] = fetch_rest_mergeable_state(repo, int(pr["number"]))
@@ -420,7 +419,8 @@ def enrich_rest_mergeable_states(repo: str, prs: list[dict[str, Any]]) -> None:
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(prs) or 1)) as executor:
         # ⚡ Bolt: Execute REST calls concurrently to avoid N+1 API blocking
-        list(executor.map(enrich, prs))
+        for _ in executor.map(enrich, prs):
+            pass
 
 
 def effective_merge_state(pr: dict[str, Any]) -> str:
