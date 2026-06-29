@@ -197,6 +197,19 @@ def test_label_and_full_coverage_detection():
         "coverage execution evidence reports docstring coverage as not applicable because no supported changed source files or package manifests were found",
     )
     assert norm.mentions_full_coverage("", no_source_summary)
+    suite_passed_summary = FULL_SUMMARY.replace(
+        "coverage execution evidence proves 100% test coverage",
+        "coverage execution evidence reports supported repository test suites passed",
+    ).replace(
+        "coverage execution evidence proves 100% docstring coverage",
+        "coverage execution evidence reports configured repository docstring gates passed or docstring coverage was advisory",
+    )
+    assert norm.mentions_full_coverage("", suite_passed_summary)
+    advisory_summary = FULL_SUMMARY.replace(
+        "coverage execution evidence proves 100% docstring coverage",
+        "coverage execution evidence reports docstring coverage was advisory",
+    )
+    assert norm.mentions_full_coverage("", advisory_summary)
     assert not norm.mentions_full_coverage("", "")
     assert not norm.mentions_full_coverage("", FULL_SUMMARY.replace("100%", "99%", 1))
     assert not norm.mentions_full_coverage("", FULL_SUMMARY.replace("100%", "not applicable", 1))
@@ -608,6 +621,22 @@ M\tscripts/ci/example.py
     assert "test coverage as not applicable" in no_source_summary
     assert "docstring coverage as not applicable" in no_source_summary
     assert norm.mentions_full_coverage("", no_source_summary)
+
+    suite_passed_summary = norm.build_approval_repair_summary(
+        "No blockers were found.",
+        """\
+## Coverage execution evidence
+- Result: PASS
+- Test evidence: supported repository test suites passed
+- Docstring evidence: configured repository docstring gates passed or docstring coverage was advisory
+## Changed files
+M\tscripts/ci/example.py
+""",
+    )
+    assert suite_passed_summary is not None
+    assert "supported repository test suites passed" in suite_passed_summary
+    assert "docstring coverage was advisory" in suite_passed_summary
+    assert norm.mentions_full_coverage("", suite_passed_summary)
 
     evidence = tmp_path / "bounded-review-evidence.md"
     evidence.write_text("placeholder", encoding="utf-8")

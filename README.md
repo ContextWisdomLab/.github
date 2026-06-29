@@ -60,7 +60,7 @@ does not serialize newer current-head evidence.
 
 OpenCode approval is evidence-gated. Before approval, the review summary must
 name changed files, CodeGraph or structural MCP evidence, a Change Flow DAG,
-100% test coverage evidence, 100% docstring coverage evidence, and a concrete
+passing supported test-suite evidence, configured docstring-gate evidence or advisory docstring status, and a concrete
 PoC/execution result. It must also split `Developer experience:` from
 `User experience:` so maintainability/review/CI friction is not confused with
 product, documentation, review-comment, or status-check reader outcomes. The PoC
