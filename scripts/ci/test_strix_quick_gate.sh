@@ -1711,10 +1711,12 @@ assert_opencode_failed_check_fallback_explains_pytest_and_cancelled_checks() {
 	local fixture_repo
 	local evidence_file
 	local output_file
+	local stderr_file
 	tmp_dir="$(mktemp -d)"
 	fixture_repo="$tmp_dir/repo"
 	evidence_file="$tmp_dir/failed-check-evidence.md"
 	output_file="$tmp_dir/fallback.md"
+	stderr_file="$tmp_dir/fallback.err"
 	mkdir -p "$fixture_repo/tests/live"
 
 	cat >"$fixture_repo/tests/live/test_live_api_sequence.py" <<'EOF'
@@ -1777,7 +1779,7 @@ backend (Python 3.14)	Run backend tests	1 failed, 965 passed, 15 skipped in 7.28
 EOF
 
 	bash "$REPO_ROOT/scripts/ci/emit_opencode_failed_check_fallback_findings.sh" \
-		"$evidence_file" "$fixture_repo" >"$output_file"
+		"$evidence_file" "$fixture_repo" >"$output_file" 2>"$stderr_file"
 
 	assert_file_contains "$output_file" "Failed GitHub Check needs a source-backed pytest fix for test_live_harness_avoids_broad_url_opener_pattern" "fallback explains pytest failure with the test name"
 	assert_file_contains "$output_file" "tests/live/test_live_api_sequence.py:" "fallback maps pytest failure to a source file and line"
