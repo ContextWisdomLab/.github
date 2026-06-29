@@ -561,6 +561,7 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" 'wait_for_peer_github_checks "$pending_file"' "deterministic model-failure approval waits for peer checks before approving"
 	assert_file_contains "$workflow_file" 'pending_checks_file="$(mktemp)"' "deterministic model-failure approval writes pending-check evidence to a real temp file"
 	assert_file_contains "$workflow_file" 'collect_github_checks_with_retry collect_failed_github_checks "$failed_file"' "deterministic model-failure approval rejects current-head failed peer checks"
+	assert_file_contains "$workflow_file" 'run_failed_check_diagnosis "$failed_file" "$failed_check_evidence_file" "$failed_check_review_body_file" "$failed_check_review_payload_file" "$failed_check_inline_failure_body_file"' "deterministic model-failure approval diagnoses late current-head failed peer checks before falling back to unavailable"
 	assert_file_contains "$workflow_file" "request_changes_for_merge_conflict_if_present" "deterministic model-failure approval still gates on mergeability"
 	assert_file_contains "$workflow_file" 'unresolved_human_threads_file="$(mktemp)"' "deterministic model-failure approval writes human-thread evidence to a real temp file"
 	assert_file_contains "$workflow_file" 'collect_unresolved_human_review_threads "$unresolved_threads_file"' "deterministic model-failure approval rechecks human review threads"
