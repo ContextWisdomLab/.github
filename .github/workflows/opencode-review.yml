@@ -4387,12 +4387,14 @@ jobs:
             failed_check_review_body_file="$(mktemp)"
             failed_check_review_payload_file="$(mktemp)"
             failed_check_inline_failure_body_file="$(mktemp)"
-            pending_checks_file="$(mktemp)"
-            unresolved_human_threads_file="$(mktemp)"
-            human_thread_review_body_file="$(mktemp)"
+            pending_checks_file=""
+            fallback_changed_files_file=""
+            fallback_approval_body_file=""
+            unresolved_human_threads_file=""
+            human_thread_review_body_file=""
             # shellcheck disable=SC2329
             cleanup_failed_outcome_files() {
-              rm -f "$failed_checks_file" "$failed_check_evidence_file" "$failed_check_review_body_file" "$failed_check_review_payload_file" "$failed_check_inline_failure_body_file" "$pending_checks_file" "$unresolved_human_threads_file" "$human_thread_review_body_file"
+              rm -f "$failed_checks_file" "$failed_check_evidence_file" "$failed_check_review_body_file" "$failed_check_review_payload_file" "$failed_check_inline_failure_body_file" "$pending_checks_file" "$fallback_changed_files_file" "$fallback_approval_body_file" "$unresolved_human_threads_file" "$human_thread_review_body_file"
             }
             trap cleanup_failed_outcome_files EXIT
             if collect_github_checks_with_retry collect_failed_github_checks "$failed_checks_file" && [ -s "$failed_checks_file" ]; then
@@ -4424,22 +4426,63 @@ jobs:
             if request_changes_for_merge_conflict_if_present; then
               :
             else
-              if approve_after_model_failure_when_current_head_gates_pass "$pending_checks_file" "$failed_checks_file" "$unresolved_human_threads_file" "$human_thread_review_body_file"; then
+              pending_checks_file="$(mktemp)"
+              set +e
+              wait_for_peer_github_checks "$pending_checks_file"
+              pending_wait_status=$?
+              set -e
+              if [ "$pending_wait_status" -eq 1 ]; then
+                body="$(printf '%s\n' \
+                  "all configured OpenCode model attempts failed to produce a usable current-head control block, and GitHub Checks statusCheckRollup could not be read." \
+                  "" \
+                  "- Result: CHECKS_LOOKUP_FAILED" \
+                  "- Reason: GitHub Checks statusCheckRollup could not be read before considering deterministic review-process fallback." \
+                  "- Required next evidence: readable current-head statusCheckRollup plus a valid OpenCode control block or eligible fallback evidence." \
+                  "- Head SHA: \`${HEAD_SHA}\`" \
+                  "- Workflow run: ${RUN_ID}" \
+                  "- Workflow attempt: ${RUN_ATTEMPT}")"
+                stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
+              fi
+              if [ "$pending_wait_status" -ne 0 ]; then
+                build_pending_check_body "$pending_checks_file" "$failed_check_review_body_file"
+                stop_approval_without_review "WAITING_FOR_CHECKS" "$(cat "$failed_check_review_body_file")"
+              fi
+
+              unresolved_human_threads_file="$(mktemp)"
+              human_thread_review_body_file="$(mktemp)"
+              if ! collect_unresolved_human_review_threads "$unresolved_human_threads_file"; then
+                build_human_thread_lookup_failure_body "$human_thread_review_body_file"
+                create_pull_review "REQUEST_CHANGES" "$(cat "$human_thread_review_body_file")"
                 echo "::endgroup::"
                 exit 0
               fi
-              body="$(printf '%s\n' \
-                "all configured OpenCode model attempts failed to produce a usable current-head control block." \
-                "" \
-                "- Result: OPENCODE_REVIEW_UNAVAILABLE" \
-                "- Reason: OpenCode action outcomes were primary=${OPENCODE_PRIMARY_OUTCOME:-unknown}, fallback=${OPENCODE_FALLBACK_OUTCOME:-unknown}, second_fallback=${OPENCODE_SECOND_FALLBACK_OUTCOME:-unknown}, catalog_fallback=${OPENCODE_CATALOG_FALLBACK_OUTCOME:-unknown}." \
-                "- Required next evidence: rerun OpenCode with a model/tooling attempt that emits a valid source-backed control block for this head." \
-                "- Head SHA: \`${HEAD_SHA}\`" \
-                "- Workflow run: ${RUN_ID}" \
-                "- Workflow attempt: ${RUN_ATTEMPT}" \
-                "" \
-                "Leaving the PR review unchanged because this is review tooling instability, not a source-code finding.")"
-              stop_approval_without_review "OPENCODE_REVIEW_UNAVAILABLE" "$body"
+              if [ -s "$unresolved_human_threads_file" ]; then
+                build_unresolved_human_threads_body "$unresolved_human_threads_file" "$human_thread_review_body_file"
+                create_pull_review "REQUEST_CHANGES" "$(cat "$human_thread_review_body_file")"
+                echo "::endgroup::"
+                exit 0
+              fi
+
+              fallback_changed_files_file="$(mktemp)"
+              fallback_approval_body_file="$(mktemp)"
+              if collect_changed_files_for_review_fallback "$fallback_changed_files_file" &&
+                central_review_process_only_change "$fallback_changed_files_file"; then
+                build_central_review_process_fallback_approval_body "$fallback_changed_files_file" "$fallback_approval_body_file"
+                create_pull_review "APPROVE" "$(cat "$fallback_approval_body_file")"
+              else
+                body="$(printf '%s\n' \
+                  "all configured OpenCode model attempts failed to produce a usable current-head control block." \
+                  "" \
+                  "- Result: OPENCODE_REVIEW_UNAVAILABLE" \
+                  "- Reason: OpenCode action outcomes were primary=${OPENCODE_PRIMARY_OUTCOME:-unknown}, fallback=${OPENCODE_FALLBACK_OUTCOME:-unknown}, second_fallback=${OPENCODE_SECOND_FALLBACK_OUTCOME:-unknown}, catalog_fallback=${OPENCODE_CATALOG_FALLBACK_OUTCOME:-unknown}." \
+                  "- Required next evidence: rerun OpenCode with a model/tooling attempt that emits a valid source-backed control block for this head." \
+                  "- Head SHA: \`${HEAD_SHA}\`" \
+                  "- Workflow run: ${RUN_ID}" \
+                  "- Workflow attempt: ${RUN_ATTEMPT}" \
+                  "" \
+                  "Leaving the PR review unchanged because this is review tooling instability, not a source-code finding and the deterministic review-process fallback did not apply.")"
+                stop_approval_without_review "OPENCODE_REVIEW_UNAVAILABLE" "$body"
+              fi
             fi
             echo "::endgroup::"
             exit 0
