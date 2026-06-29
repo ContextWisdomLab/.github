@@ -536,7 +536,7 @@ jobs:
     if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target')
     runs-on: ubuntu-latest
     permissions:
-      actions: read
+      actions: write
       checks: read
       id-token: write
       contents: read
@@ -1478,8 +1478,8 @@ jobs:
           {"head_sha":"${HEAD_SHA}","run_id":"${RUN_ID}","run_attempt":"${RUN_ATTEMPT}","result":"APPROVE or REQUEST_CHANGES","reason":"short reason","summary":"short review summary with concrete evidence and Verification posture labels","findings":[]}
           -->
           Do not include analysis, planning, tool-call narration, placeholders, or prose before the sentinel.
-          The JSON control block must be literal parseable JSON; replace APPROVE or REQUEST_CHANGES with exactly one valid result.
-          APPROVE only for no blockers. REQUEST_CHANGES findings require path,line,severity,title,problem,root_cause,fix_direction,regression_test_direction,suggested_diff. The line must be a positive line number from an actual changed or relevant local file; never use line 0. Failed-check findings must be line-specific and concrete; include the failed check label, exact failed log phrase, observable impact, and trigger condition that led to the line, then provide a minimal suggested diff that changes the identified line. The regression_test_direction should name an exact test target or verification command when the repository already provides one. The suggested_diff must be source-backed and GitHub suggestion-ready when possible: every removed line in the diff must exist in the cited current local file, so do not request changes for code you did not verify in the current source. Multiple Strix model reports must not be collapsed; preserve the model name, report title, severity, endpoint, and Code Locations/path:line evidence in each finding's problem or root_cause when present. One Strix model vulnerability report requires one distinct finding; do not combine duplicate titles or matching locations from different models into one finding. Unrelated speculative findings are invalid when failed-check evidence is present.
+          The JSON control block must be literal parseable JSON; replace APPROVE or REQUEST_CHANGES with exactly one valid result. Put all required Verification posture labels inside the JSON summary string itself, not only in prose after the control block.
+          APPROVE only for no blockers, and when result is APPROVE the JSON findings value must be exactly [] with no advisory, informational, already-fixed, or positive findings. REQUEST_CHANGES findings require path,line,severity,title,problem,root_cause,fix_direction,regression_test_direction,suggested_diff. The line must be a positive line number from an actual changed or relevant local file; never use line 0. Failed-check findings must be line-specific and concrete; include the failed check label, exact failed log phrase, observable impact, and trigger condition that led to the line, then provide a minimal suggested diff that changes the identified line. The regression_test_direction should name an exact test target or verification command when the repository already provides one. The suggested_diff must be source-backed and GitHub suggestion-ready when possible: every removed line in the diff must exist in the cited current local file, so do not request changes for code you did not verify in the current source. Multiple Strix model reports must not be collapsed; preserve the model name, report title, severity, endpoint, and Code Locations/path:line evidence in each finding's problem or root_cause when present. One Strix model vulnerability report requires one distinct finding; do not combine duplicate titles or matching locations from different models into one finding. Unrelated speculative findings are invalid when failed-check evidence is present.
           Return only the review body.
           EOF
           cd "$OPENCODE_REVIEW_WORKDIR"
@@ -1604,8 +1604,8 @@ jobs:
           {"head_sha":"${HEAD_SHA}","run_id":"${RUN_ID}","run_attempt":"${RUN_ATTEMPT}","result":"APPROVE or REQUEST_CHANGES","reason":"short reason","summary":"short review summary with concrete evidence and Verification posture labels","findings":[]}
           -->
           Do not include analysis, planning, tool-call narration, placeholders, or prose before the sentinel.
-          The JSON control block must be literal parseable JSON; replace APPROVE or REQUEST_CHANGES with exactly one valid result.
-          APPROVE only for no blockers. REQUEST_CHANGES findings require path,line,severity,title,problem,root_cause,fix_direction,regression_test_direction,suggested_diff. The line must be a positive line number from an actual changed or relevant local file; never use line 0. Failed-check findings must be line-specific and concrete; include the failed check label, exact failed log phrase, observable impact, and trigger condition that led to the line, then provide a minimal suggested diff that changes the identified line. The regression_test_direction should name an exact test target or verification command when the repository already provides one. The suggested_diff must be source-backed and GitHub suggestion-ready when possible: every removed line in the diff must exist in the cited current local file, so do not request changes for code you did not verify in the current source. Multiple Strix model reports must not be collapsed; preserve the model name, report title, severity, endpoint, and Code Locations/path:line evidence in each finding's problem or root_cause when present. One Strix model vulnerability report requires one distinct finding; do not combine duplicate titles or matching locations from different models into one finding. Unrelated speculative findings are invalid when failed-check evidence is present.
+          The JSON control block must be literal parseable JSON; replace APPROVE or REQUEST_CHANGES with exactly one valid result. Put all required Verification posture labels inside the JSON summary string itself, not only in prose after the control block.
+          APPROVE only for no blockers, and when result is APPROVE the JSON findings value must be exactly [] with no advisory, informational, already-fixed, or positive findings. REQUEST_CHANGES findings require path,line,severity,title,problem,root_cause,fix_direction,regression_test_direction,suggested_diff. The line must be a positive line number from an actual changed or relevant local file; never use line 0. Failed-check findings must be line-specific and concrete; include the failed check label, exact failed log phrase, observable impact, and trigger condition that led to the line, then provide a minimal suggested diff that changes the identified line. The regression_test_direction should name an exact test target or verification command when the repository already provides one. The suggested_diff must be source-backed and GitHub suggestion-ready when possible: every removed line in the diff must exist in the cited current local file, so do not request changes for code you did not verify in the current source. Multiple Strix model reports must not be collapsed; preserve the model name, report title, severity, endpoint, and Code Locations/path:line evidence in each finding's problem or root_cause when present. One Strix model vulnerability report requires one distinct finding; do not combine duplicate titles or matching locations from different models into one finding. Unrelated speculative findings are invalid when failed-check evidence is present.
           Return only the review body.
           EOF
           cd "$OPENCODE_REVIEW_WORKDIR"
@@ -1731,8 +1731,8 @@ jobs:
           {"head_sha":"${HEAD_SHA}","run_id":"${RUN_ID}","run_attempt":"${RUN_ATTEMPT}","result":"APPROVE or REQUEST_CHANGES","reason":"short reason","summary":"short review summary with concrete evidence and Verification posture labels","findings":[]}
           -->
           Do not include analysis, planning, tool-call narration, placeholders, or prose before the sentinel.
-          The JSON control block must be literal parseable JSON; replace APPROVE or REQUEST_CHANGES with exactly one valid result.
-          APPROVE only for no blockers. REQUEST_CHANGES findings require path,line,severity,title,problem,root_cause,fix_direction,regression_test_direction,suggested_diff. The line must be a positive line number from an actual changed or relevant local file; never use line 0. Failed-check findings must be line-specific and concrete; include the failed check label, exact failed log phrase, observable impact, and trigger condition that led to the line, then provide a minimal suggested diff that changes the identified line. The regression_test_direction should name an exact test target or verification command when the repository already provides one. The suggested_diff must be source-backed and GitHub suggestion-ready when possible: every removed line in the diff must exist in the cited current local file, so do not request changes for code you did not verify in the current source. Multiple Strix model reports must not be collapsed; preserve the model name, report title, severity, endpoint, and Code Locations/path:line evidence in each finding's problem or root_cause when present. One Strix model vulnerability report requires one distinct finding; do not combine duplicate titles or matching locations from different models into one finding. Unrelated speculative findings are invalid when failed-check evidence is present.
+          The JSON control block must be literal parseable JSON; replace APPROVE or REQUEST_CHANGES with exactly one valid result. Put all required Verification posture labels inside the JSON summary string itself, not only in prose after the control block.
+          APPROVE only for no blockers, and when result is APPROVE the JSON findings value must be exactly [] with no advisory, informational, already-fixed, or positive findings. REQUEST_CHANGES findings require path,line,severity,title,problem,root_cause,fix_direction,regression_test_direction,suggested_diff. The line must be a positive line number from an actual changed or relevant local file; never use line 0. Failed-check findings must be line-specific and concrete; include the failed check label, exact failed log phrase, observable impact, and trigger condition that led to the line, then provide a minimal suggested diff that changes the identified line. The regression_test_direction should name an exact test target or verification command when the repository already provides one. The suggested_diff must be source-backed and GitHub suggestion-ready when possible: every removed line in the diff must exist in the cited current local file, so do not request changes for code you did not verify in the current source. Multiple Strix model reports must not be collapsed; preserve the model name, report title, severity, endpoint, and Code Locations/path:line evidence in each finding's problem or root_cause when present. One Strix model vulnerability report requires one distinct finding; do not combine duplicate titles or matching locations from different models into one finding. Unrelated speculative findings are invalid when failed-check evidence is present.
           Return only the review body.
           EOF
           cd "$OPENCODE_REVIEW_WORKDIR"
@@ -1871,7 +1871,7 @@ jobs:
           <!-- opencode-review-control-v1
           {"head_sha":"${HEAD_SHA}","run_id":"${RUN_ID}","run_attempt":"${RUN_ATTEMPT}","result":"APPROVE or REQUEST_CHANGES","reason":"short reason","summary":"short review summary with concrete evidence and Verification posture labels","findings":[]}
           -->
-          APPROVE only for no blockers. REQUEST_CHANGES findings require path,line,severity,title,problem,root_cause,fix_direction,regression_test_direction,suggested_diff. Use line-specific, source-backed findings only. Return only the review body.
+          APPROVE only for no blockers, and when result is APPROVE the JSON findings value must be exactly [] with no advisory, informational, already-fixed, or positive findings. Put all required Verification posture labels inside the JSON summary string itself, not only in prose after the control block. REQUEST_CHANGES findings require path,line,severity,title,problem,root_cause,fix_direction,regression_test_direction,suggested_diff. Use line-specific, source-backed findings only. Return only the review body.
           EOF
 
             for opencode_attempt in $(seq 1 "$opencode_attempts"); do
@@ -2759,24 +2759,24 @@ jobs:
               "- Workflow attempt: ${RUN_ATTEMPT}" >"$body_file"
           }
 
-          build_coverage_evidence_failure_body() {
+          build_coverage_evidence_check_failure_body() {
             local body_file="$1"
 
             {
               printf '%s\n' \
                 "## Pull request overview" \
                 "" \
-                "OpenCode reviewed the current-head evidence but cannot approve because required coverage evidence did not pass." \
+                "OpenCode cannot approve yet because required coverage evidence did not pass." \
                 "" \
-                "## Findings" \
+                "## Check outcome" \
                 "" \
                 "### 1. HIGH .github/workflows/opencode-review.yml:1 - Coverage evidence did not prove required test/docstring evidence" \
                 "- Problem: The OpenCode approval path reached an APPROVE control result while the separate coverage-evidence job result was \`${COVERAGE_EVIDENCE_RESULT:-unknown}\`." \
                 "- Root cause: Automated approval is only valid when the same-head coverage-evidence job proves supported repository test suites passed and configured docstring gates passed or were advisory, or reports not applicable because no supported source files or package manifests exist. Missing, failed, skipped, unavailable, or unsupported-tooling test evidence is a blocker." \
                 "- Fix: Install or configure the repository test/docstring evidence tooling when source files or package manifests exist, rerun the current-head coverage-evidence job, and approve only after it reports \`success\` with required evidence or explicit no-source not-applicable evidence." \
-                "- Regression test: Keep the approval branch checking \`needs.coverage-evidence.result == success\` before posting APPROVE." \
+                "- Regression test: Keep the approval branch checking \`needs.coverage-evidence.result == success\` before posting APPROVE, but leave the PR review unchanged for coverage-evidence blocker states such as cancelled, skipped, failed, unsupported-tooling, or below-100 evidence." \
                 "" \
-                "- Result: REQUEST_CHANGES" \
+                "- Result: CHECK_FAILED" \
                 "- Reason: coverage-evidence result was \`${COVERAGE_EVIDENCE_RESULT:-unknown}\`, so required test/docstring evidence was not proven for current head \`${HEAD_SHA}\`." \
                 "- Head SHA: \`${HEAD_SHA}\`" \
                 "- Workflow run: ${RUN_ID}" \
@@ -2786,6 +2786,17 @@ jobs:
                 ""
               printf '%s\n' "${COVERAGE_EVIDENCE_SUMMARY:-Coverage evidence summary was unavailable.}" | sed -n '1,240p'
             } >"$body_file"
+          }
+
+          fail_for_coverage_evidence_without_review() {
+            local body_file
+            body_file="$(mktemp)"
+            build_coverage_evidence_check_failure_body "$body_file"
+            emit_review_body_to_action_log "CHECK_FAILED" "$(cat "$body_file")"
+            update_review_overview "CHECK_FAILED" "$(cat "$body_file")"
+            rm -f "$body_file"
+            echo "::endgroup::"
+            exit 1
           }
 
           create_pull_review_with_payload() {
@@ -3696,6 +3707,7 @@ jobs:
                       | select((.conclusion // "" | ascii_upcase) as $c | ["FAILURE","TIMED_OUT","ACTION_REQUIRED","CANCELLED","STARTUP_FAILURE"] | index($c))
                       | select(((.conclusion // "" | ascii_downcase) == "cancelled" and (.name // "") == "metadata-only gate evaluation" and (.checkSuite.workflowRun.workflow.name // "") == "PR Governance") | not)
                       | select(((.conclusion // "" | ascii_downcase) == "cancelled" and ((.isRequired // false) | not) and (.checkSuite.workflowRun.workflow.name // "") == "CodeQL") | not)
+                      | select(((.conclusion // "" | ascii_downcase) == "cancelled" and (.name // "") == "scan-pr-queue" and ((.checkSuite.workflowRun.workflow.name // "") == "PR Review Merge Scheduler" or (.checkSuite.workflowRun.workflow.name // "") == "Required PR Review Merge Scheduler")) | not)
                       | "- " + ((.checkSuite.workflowRun.workflow.name // "") + "/" + (.name // "check") | gsub("^/"; "")) + ": " + (.conclusion // "unknown") + (if (.detailsUrl // "") != "" then " (" + .detailsUrl + ")" else "" end)
                     elif .__typename == "StatusContext" then
                       select(((.context // "") | ascii_downcase | contains("opencode-review")) | not)
@@ -4047,11 +4059,7 @@ jobs:
           fi
 
           if [ "${COVERAGE_EVIDENCE_RESULT:-skipped}" != "success" ]; then
-            failed_check_review_body_file="$(mktemp)"
-            build_coverage_evidence_failure_body "$failed_check_review_body_file"
-            create_pull_review "REQUEST_CHANGES" "$(cat "$failed_check_review_body_file")"
-            echo "::endgroup::"
-            exit 0
+            fail_for_coverage_evidence_without_review
           fi
 
           opencode_review_outcome="${OPENCODE_PRIMARY_OUTCOME:-unknown}"
@@ -4208,11 +4216,7 @@ jobs:
           case "$gate_result" in
             APPROVE)
               if [ "${COVERAGE_EVIDENCE_RESULT:-skipped}" != "success" ]; then
-                failed_check_review_body_file="$(mktemp)"
-                build_coverage_evidence_failure_body "$failed_check_review_body_file"
-                create_pull_review "REQUEST_CHANGES" "$(cat "$failed_check_review_body_file")"
-                echo "::endgroup::"
-                exit 0
+                fail_for_coverage_evidence_without_review
               fi
               if request_changes_for_merge_conflict_if_present; then
                 echo "::endgroup::"
@@ -4442,3 +4446,40 @@ jobs:
               ;;
           esac
           echo "::endgroup::"
+
+      - name: Dispatch merge scheduler after approval
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref || github.event.inputs.pr_base_ref || '' }}
+        run: |
+          set -euo pipefail
+          scheduler_ref="$(
+            gh api "repos/${GH_REPOSITORY}" --jq '.default_branch // empty' 2>/dev/null || true
+          )"
+          scheduler_ref="${scheduler_ref:-${PR_BASE_REF:-main}}"
+
+          dispatch_status=1
+          dispatch_error="$(mktemp)"
+          for attempt in 1 2 3; do
+            : >"$dispatch_error"
+            if gh workflow run pr-review-merge-scheduler.yml \
+              --repo "$GH_REPOSITORY" \
+              --ref "$scheduler_ref" \
+              -f dry_run=false \
+              -f max_prs=100 \
+              -f trigger_reviews=false \
+              -f enable_auto_merge=true \
+              -f merge_mode=auto \
+              -f update_branches=true 2>"$dispatch_error"; then
+              dispatch_status=0
+              break
+            fi
+            sed 's/^/scheduler dispatch: /' "$dispatch_error" >&2 || true
+            sleep "$((attempt * 5))"
+          done
+
+          if [ "$dispatch_status" -ne 0 ]; then
+            printf '::warning::Merge scheduler dispatch failed after approval; leaving OpenCode approval intact. Repository=%s ref=%s. The scheduled and workflow_run scheduler paths remain authoritative.\n' "$GH_REPOSITORY" "$scheduler_ref"
+          fi
