@@ -7,3 +7,6 @@
 ## 2024-11-20 - JSON Decoding Performance - Index Advancement
 **Learning:** Even when avoiding string slicing using `json.JSONDecoder().raw_decode(text, index)`, failing to correctly advance the index by ignoring the returned `end` index (`value, _ = decoder.raw_decode(...)`) forces the search loop to repeatedly attempt to decode nested JSON structures (e.g., inner braces `{`) sequentially. This leads to massive O(N^2) time complexity and redundant parsing for large, deeply nested JSON objects.
 **Action:** Always capture and use the new end index returned by `raw_decode` (e.g., `value, next_idx = decoder.raw_decode(text, index)`) to jump over the completely parsed object and proceed efficiently.
+## 2024-11-21 - Subprocess Memoization Optimization
+**Learning:** Shelling out to external commands like `git diff` inside a loop (or per-finding mapping) can severely bottleneck performance due to redundant child process overhead when evaluating multiple items tied to the same target resource (e.g. multiple findings in the same file).
+**Action:** When validating batch inputs (such as security findings) against shell commands grouped by path or target, use `@functools.cache` to memoize the subprocess execution function (`subprocess.run`), avoiding redundant executions on identical inputs.
