@@ -1077,19 +1077,29 @@ def inspect_pr(
         return decide("block", "current-head OpenCode review requested changes")
 
     current_head_approved = has_current_head_approval(pr)
+    auto_merge_enabled = bool(pr.get("autoMergeRequest"))
     behind_by = branch_outdated_by_base(pr, merge_state)
-    if behind_by and current_head_approved:
+    if behind_by and (current_head_approved or auto_merge_enabled):
         if not update_branches:
-            return decide("wait", "current-head OpenCode review approved; branch update disabled")
+            if current_head_approved:
+                return decide("wait", "current-head OpenCode review approved; branch update disabled")
+            return decide("wait", "auto-merge already enabled; branch update disabled")
         if not can_update_pr_head(repo, pr):
             return decide("wait", non_mutable_head_reason(repo, pr))
         update_branch(repo, pr, dry_run=dry_run)
-        suffix = "; existing auto-merge request remains queued" if pr.get("autoMergeRequest") else ""
-        if merge_state == "BEHIND":
+        suffix = "; existing auto-merge request remains queued" if auto_merge_enabled else ""
+        if current_head_approved and merge_state == "BEHIND":
             freshness_reason = "current-head OpenCode review approved"
-        else:
+        elif current_head_approved:
             freshness_reason = (
                 "current-head OpenCode review approved; "
+                f"base branch is {behind_by} commit(s) ahead even though GitHub mergeability is {merge_state}"
+            )
+        elif merge_state == "BEHIND":
+            freshness_reason = "auto-merge already enabled"
+        else:
+            freshness_reason = (
+                "auto-merge already enabled; "
                 f"base branch is {behind_by} commit(s) ahead even though GitHub mergeability is {merge_state}"
             )
         return decide(
