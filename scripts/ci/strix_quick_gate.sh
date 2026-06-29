@@ -10,7 +10,13 @@
 set -euo pipefail
 
 SCRIPT_DIR="$({ CDPATH='' && cd -P -- "$(dirname -- "$0")" && pwd -P; })"
-REPO_ROOT="$({ CDPATH='' && cd -P -- "$SCRIPT_DIR/../.." && pwd -P; })"
+DEFAULT_REPO_ROOT="$({ CDPATH='' && cd -P -- "$SCRIPT_DIR/../.." && pwd -P; })"
+RAW_REPO_ROOT="${STRIX_REPO_ROOT:-$DEFAULT_REPO_ROOT}"
+if [ -z "$RAW_REPO_ROOT" ] || [ ! -d "$RAW_REPO_ROOT" ] || [ -L "$RAW_REPO_ROOT" ]; then
+	echo "ERROR: STRIX_REPO_ROOT must reference a regular directory when provided." >&2
+	exit 2
+fi
+REPO_ROOT="$({ CDPATH='' && cd -P -- "$RAW_REPO_ROOT" && pwd -P; })"
 RAW_TARGET_PATH="${STRIX_TARGET_PATH:-./}"
 TARGET_PATH=""
 PR_SCOPE_TARGET_SENTINEL="__PR_SCOPE__"
@@ -36,6 +42,7 @@ STRIX_TRANSIENT_RETRY_BACKOFF_SECONDS="${STRIX_TRANSIENT_RETRY_BACKOFF_SECONDS:-
 STRIX_FAIL_ON_MIN_SEVERITY="${STRIX_FAIL_ON_MIN_SEVERITY:-MEDIUM}"
 STRIX_FAIL_ON_PROVIDER_SIGNAL="${STRIX_FAIL_ON_PROVIDER_SIGNAL:-0}"
 RUN_START_EPOCH="$(date +%s)"
+TOTAL_TIMEOUT_EXCEEDED=0
 PREEXISTING_REPORT_DIRS=()
 REPO_NAME="${REPO_ROOT##*/}"
 # shellcheck source=scripts/ci/strix_model_utils.sh
@@ -1706,10 +1713,10 @@ text = Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
 patterns = [
     re.compile(r'(?P<path>/workspace/[^`\r\n]*\.[A-Za-z0-9_]+|[A-Za-z0-9_./ \[\]-]+\.[A-Za-z0-9_]+):\d+'),
     re.compile(r'(?P<path>/workspace/[A-Za-z0-9_./ \[\]-]*(?:Dockerfile|Containerfile|Makefile))'),
-    re.compile(r'<file>\s*(?P<path>/workspace/[^<`│]*\.[A-Za-z0-9_]+|[A-Za-z0-9_./\[\]-][A-Za-z0-9_./ \[\]-]*\.[A-Za-z0-9_]+)\s*</file>'),
-    re.compile(r'^[^\S\r\n│]*[│]?[ \t]*(?:\*\*)?Target:(?:\*\*)?[ \t]*(?:File:[ \t]*)?(?P<path>/workspace/[^`│]*\.[A-Za-z0-9_]+|[A-Za-z0-9_./\[\]-][A-Za-z0-9_./ \[\]-]*\.[A-Za-z0-9_]+)', re.MULTILINE),
+    re.compile(r'<file>\s*(?P<path>/workspace/[^<`\r\n│]*\.[A-Za-z0-9_]+|[A-Za-z0-9_./\[\]-][A-Za-z0-9_./ \[\]-]*\.[A-Za-z0-9_]+)\s*</file>'),
+    re.compile(r'^[^\S\r\n│]*[│]?[ \t]*(?:\*\*)?Target:(?:\*\*)?[ \t]*(?:File:[ \t]*)?(?P<path>/workspace/[^`\r\n│]*\.[A-Za-z0-9_]+|[A-Za-z0-9_./\[\]-][A-Za-z0-9_./ \[\]-]*\.[A-Za-z0-9_]+)', re.MULTILINE),
     re.compile(r'^[^\S\r\n│]*[│]?[ \t]*(?:\*\*)?Target:(?:\*\*)?[ \t]*(?:File:[ \t]*)?(?P<path>/workspace/[A-Za-z0-9_./ \[\]-]*(?:Dockerfile|Containerfile|Makefile)|(?:Dockerfile|Containerfile|Makefile))', re.MULTILINE),
-    re.compile(r'^[^\S\r\n│]*[│]?[ \t]*(?:\*\*)?Endpoint:(?:\*\*)?[ \t]*(?P<path>/workspace/[^`│]*\.[A-Za-z0-9_]+|[A-Za-z0-9_./\[\]-][A-Za-z0-9_./ \[\]-]*\.[A-Za-z0-9_]+)', re.MULTILINE),
+    re.compile(r'^[^\S\r\n│]*[│]?[ \t]*(?:\*\*)?Endpoint:(?:\*\*)?[ \t]*(?P<path>/workspace/[^`\r\n│]*\.[A-Za-z0-9_]+|[A-Za-z0-9_./\[\]-][A-Za-z0-9_./ \[\]-]*\.[A-Za-z0-9_]+)', re.MULTILINE),
     re.compile(r'(?:in\s+)?file\s+`(?P<path>(?:\.\.?/)?[A-Za-z0-9_./ \[\]-]+\.[A-Za-z0-9_]+)`', flags=re.IGNORECASE),
     re.compile(r'`(?P<path>(?:\.\.?/)?[A-Za-z0-9_./ \[\]-]+\.[A-Za-z0-9_]+)`\s+file\b', flags=re.IGNORECASE),
     re.compile(r'(?<![A-Za-z0-9_./-])(?P<path>Dockerfile|Containerfile|Makefile)(?![A-Za-z0-9_./-])'),
@@ -2154,15 +2161,18 @@ run_strix_once() {
 	local child_model
 	local resolved_target_path
 	local timeout_seconds="$STRIX_PROCESS_TIMEOUT_SECONDS"
+	local total_budget_limited_timeout=0
 	if [ "$STRIX_TOTAL_TIMEOUT_SECONDS" -gt 0 ]; then
 		local remaining_budget
 		remaining_budget="$(remaining_total_budget)"
 		if [ "$remaining_budget" -le 0 ]; then
+			TOTAL_TIMEOUT_EXCEEDED=1
 			printf "Strix quick scan exceeded total timeout of %ss.\n" "$STRIX_TOTAL_TIMEOUT_SECONDS" | tee "$STRIX_LOG" >&2
 			return 1
 		fi
 		if [ "$timeout_seconds" -eq 0 ] || [ "$remaining_budget" -lt "$timeout_seconds" ]; then
 			timeout_seconds="$remaining_budget"
+			total_budget_limited_timeout=1
 		fi
 	fi
 	if ! llm_api_base_value="$(resolved_llm_api_base_for_model "$model")"; then
@@ -2290,6 +2300,7 @@ try:
         text=True,
         env=child_env,
         start_new_session=True,
+        shell=False,
     )
     output, _ = process.communicate(timeout=process_timeout)
     if output:
@@ -2326,6 +2337,10 @@ PY
 
 	if [ "$rc" -eq 124 ]; then
 		echo "Strix run timed out after ${timeout_seconds}s." | tee -a "$STRIX_LOG" >&2
+		if [ "$total_budget_limited_timeout" -eq 1 ]; then
+			TOTAL_TIMEOUT_EXCEEDED=1
+			printf "Strix quick scan exceeded total timeout of %ss.\n" "$STRIX_TOTAL_TIMEOUT_SECONDS" | tee -a "$STRIX_LOG" >&2
+		fi
 	fi
 
 	sanitize_known_strix_report_warnings "$ACTIVE_REPORTS_DIR" "${resolved_target_path%/}/strix_runs"
@@ -2428,12 +2443,16 @@ run_strix_with_transient_retry() {
 		if [ "$run_rc" -eq 2 ]; then
 			return 2
 		fi
+		if [ "$TOTAL_TIMEOUT_EXCEEDED" -eq 1 ]; then
+			return 1
+		fi
 
 		if [ "$attempt" -ge "$max_attempts" ]; then
 			return 1
 		fi
 
 		if [ "$STRIX_TOTAL_TIMEOUT_SECONDS" -gt 0 ] && [ "$(remaining_total_budget)" -le 0 ]; then
+			TOTAL_TIMEOUT_EXCEEDED=1
 			printf "Strix quick scan exceeded total timeout of %ss.\n" "$STRIX_TOTAL_TIMEOUT_SECONDS" | tee "$STRIX_LOG" >&2
 			return 1
 		fi
@@ -2594,6 +2613,15 @@ is_midstream_fallback_error() {
 # originated from an LLM provider rather than the target application.
 LLM_PROVIDER_ONLY_REGEX='(litellm|openai|anthropic|VertexAI|Vertex_ai|vertex\.ai|google\.cloud|GitHub Models|models\.github\.ai|github_models)'
 
+is_llm_token_limit_error() {
+	if grep -Eiq '(tokens_limit_reached|Request body too large|Max size:[[:space:]]*[0-9]+[[:space:]]+tokens|Error code:[[:space:]]*413|(^|[^0-9])413([^0-9]|$))' "$STRIX_LOG" &&
+		grep -Eiq "($LLM_PROVIDER_ONLY_REGEX|OpenAIException|openai\.APIStatusError)" "$STRIX_LOG"; then
+		return 0
+	fi
+
+	return 1
+}
+
 # Detect whether the strix log contains evidence of infrastructure-level
 # errors (timeout, rate-limit, transport failures) that indicate the scan
 # was interrupted or incomplete.  Used as a guard to prevent the
@@ -2608,6 +2636,10 @@ has_detected_infrastructure_error() {
 	fi
 
 	if is_rate_limit_error; then
+		return 0
+	fi
+
+	if is_llm_token_limit_error; then
 		return 0
 	fi
 
@@ -3088,12 +3120,174 @@ vulnerability_file_has_hallucinated_source_claim() {
 	return 1
 }
 
+opencode_config_source_candidates() {
+	local resolved_scan_target=""
+	resolved_scan_target="$(resolve_current_target_path "$TARGET_PATH" 2>/dev/null || true)"
+
+	if [ -n "$resolved_scan_target" ]; then
+		printf '%s\n' "$resolved_scan_target/.github/workflows/opencode-review.yml"
+		printf '%s\n' "$resolved_scan_target/opencode.jsonc"
+	fi
+	if pull_request_head_blob_required || [ "$TARGET_PATH_IS_INTERNAL_PR_SCOPE" -eq 1 ]; then
+		return 0
+	fi
+	printf '%s\n' "$REPO_ROOT/.github/workflows/opencode-review.yml"
+	printf '%s\n' "$REPO_ROOT/opencode.jsonc"
+}
+
+source_file_uses_documented_opencode_env_api_key_reference() {
+	local source_file="$1"
+	python3 - "$source_file" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+documented_reference = re.search(
+    r'"apiKey"\s*:\s*"\{env:STRIX_GITHUB_MODELS_TOKEN\}"',
+    text,
+)
+raise SystemExit(0 if documented_reference else 1)
+PY
+}
+
+vulnerability_file_reports_documented_opencode_env_api_key_reference() {
+	local vuln_file="$1"
+	if [ ! -f "$vuln_file" ] || [ -L "$vuln_file" ]; then
+		return 1
+	fi
+	if ! grep -Fq "Secret templating in configuration file" "$vuln_file"; then
+		return 1
+	fi
+	if ! grep -Fq '"apiKey": "{env:STRIX_GITHUB_MODELS_TOKEN}"' "$vuln_file"; then
+		return 1
+	fi
+
+	local source_file
+	while IFS= read -r source_file; do
+		if [ -z "$source_file" ]; then
+			continue
+		fi
+		if [ ! -f "$source_file" ] || [ -L "$source_file" ]; then
+			continue
+		fi
+		if source_file_uses_documented_opencode_env_api_key_reference "$source_file"; then
+			echo "Detected Strix report treating OpenCode's documented env apiKey reference as secret material; treating as retryable model inconsistency." >&2
+			return 0
+		fi
+	done < <(opencode_config_source_candidates)
+
+	return 1
+}
+
+github_actions_workflow_source_candidates() {
+	local resolved_scan_target=""
+	resolved_scan_target="$(resolve_current_target_path "$TARGET_PATH" 2>/dev/null || true)"
+
+	if [ -n "$resolved_scan_target" ]; then
+		printf '%s\n' "$resolved_scan_target/.github/workflows/strix.yml"
+	fi
+	if pull_request_head_blob_required || [ "$TARGET_PATH_IS_INTERNAL_PR_SCOPE" -eq 1 ]; then
+		return 0
+	fi
+	printf '%s\n' "$REPO_ROOT/.github/workflows/strix.yml"
+}
+
+source_file_refutes_generic_github_actions_workflow_insecurity() {
+	local source_file="$1"
+	python3 - "$source_file" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+permissions_block = re.search(r"(?ms)^permissions:\n(?:(?:[ \t]+[A-Za-z-]+:[ \t]+read[ \t]*\n)+)", text)
+if not permissions_block:
+    raise SystemExit(1)
+permissions_text = permissions_block.group(0)
+required_permissions = {"actions", "contents", "models"}
+observed_permissions = set(re.findall(r"^[ \t]+([A-Za-z-]+):[ \t]+read[ \t]*$", permissions_text, re.MULTILINE))
+if not required_permissions.issubset(observed_permissions):
+    raise SystemExit(1)
+if re.search(
+    r"(?m)^[ \t]*(?:write-all|(?:actions|contents|models|pull-requests|issues|checks|deployments):[ \t]+write)\b",
+    text,
+):
+    raise SystemExit(1)
+
+counterevidence = [
+    'echo "::add-mask::${sanitized}"',
+    "umask 077",
+    '[[ "$PR_HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]',
+    '[[ "$PR_BASE_SHA" =~ ^[0-9a-fA-F]{40}$ ]]',
+    "STRIX_LLM must select GitHub Models openai/gpt-5 or newer",
+]
+if not all(needle in text for needle in counterevidence):
+    raise SystemExit(1)
+
+raise SystemExit(0)
+PY
+}
+
+vulnerability_file_reports_generic_github_actions_workflow_insecurity() {
+	local vuln_file="$1"
+	if [ ! -f "$vuln_file" ] || [ -L "$vuln_file" ]; then
+		return 1
+	fi
+	if ! grep -Fq "Insecure Configurations in GitHub Actions Workflows" "$vuln_file"; then
+		return 1
+	fi
+	if ! grep -Fq ".github/workflows/strix.yml" "$vuln_file"; then
+		return 1
+	fi
+	if ! grep -Fq "Full file content" "$vuln_file"; then
+		return 1
+	fi
+	if ! grep -Fq "Current content" "$vuln_file" || ! grep -Fq "Secured version" "$vuln_file"; then
+		return 1
+	fi
+	if ! grep -Fq "Secrets are written to temporary files without proper access controls" "$vuln_file"; then
+		return 1
+	fi
+	if ! grep -Fq "API keys are passed through environment variables without adequate masking" "$vuln_file"; then
+		return 1
+	fi
+	if ! grep -Fq "Excessive permissions granted to workflows" "$vuln_file"; then
+		return 1
+	fi
+	if ! grep -Fq "Insufficient input validation for workflow parameters" "$vuln_file"; then
+		return 1
+	fi
+
+	local source_file
+	while IFS= read -r source_file; do
+		if [ -z "$source_file" ]; then
+			continue
+		fi
+		if [ ! -f "$source_file" ] || [ -L "$source_file" ]; then
+			continue
+		fi
+		if source_file_refutes_generic_github_actions_workflow_insecurity "$source_file"; then
+			echo "Detected Strix report making a generic GitHub Actions workflow security claim contradicted by the scanned workflow; treating as retryable model inconsistency." >&2
+			return 0
+		fi
+	done < <(github_actions_workflow_source_candidates)
+
+	return 1
+}
+
 vulnerability_file_is_retryable_model_inconsistency() {
 	local vuln_file="$1"
 	if vulnerability_file_has_absent_endpoint_finding "$vuln_file"; then
 		return 0
 	fi
 	if vulnerability_file_has_hallucinated_source_claim "$vuln_file"; then
+		return 0
+	fi
+	if vulnerability_file_reports_documented_opencode_env_api_key_reference "$vuln_file"; then
+		return 0
+	fi
+	if vulnerability_file_reports_generic_github_actions_workflow_insecurity "$vuln_file"; then
 		return 0
 	fi
 	return 1
@@ -3127,6 +3321,10 @@ is_model_retryable_error() {
 	fi
 
 	if is_rate_limit_error; then
+		return 0
+	fi
+
+	if is_llm_token_limit_error; then
 		return 0
 	fi
 
@@ -3180,6 +3378,9 @@ run_current_target_scan() {
 	if [ "$primary_scan_rc" -eq 2 ]; then
 		return 2
 	fi
+	if [ "$TOTAL_TIMEOUT_EXCEEDED" -eq 1 ]; then
+		return 1
+	fi
 
 	local strict_primary_provider_fallback=0
 	if [ "$INFRA_ERROR_DETECTED" -eq 1 ] && provider_signal_fail_closed_enabled; then
@@ -3229,6 +3430,9 @@ run_current_target_scan() {
 				echo "Skipping fallback model '$candidate' — same as primary model." >&2
 			fi
 			continue
+		fi
+		if [ "$TOTAL_TIMEOUT_EXCEEDED" -eq 1 ]; then
+			return 1
 		fi
 
 		fallback_tried=1

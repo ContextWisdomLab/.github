@@ -16,3 +16,8 @@ In an automated environment with complex bash and Python CI integration scripts,
 
 **Prevention:**
 Never include the exact command string/arguments (`args`) in standard exception messages from automated scripts if there is any chance they contain secrets. Provide the command name or a generic description along with the `stderr` to aid debugging without exposing secrets.
+
+## 2026-06-25 - Prevent CI Logs Security Exposure and Explicit Shell Usage
+**Vulnerability:** Information Disclosure / Command Injection
+**Learning:** `subprocess.run` defaults to `shell=False`, but linters like Bandit require explicit `shell=False` to pass security checks. Furthermore, logging `process.stderr` or command arguments in CI tools can leak sensitive data (e.g., GitHub tokens or API keys passed to commands) if a command fails and dumps the context.
+**Prevention:** Always explicitly define `shell=False` when using `subprocess.run()`. Scrub secrets from both arguments and `stderr` before including them in error messages within CI scripts.
