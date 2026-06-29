@@ -795,7 +795,19 @@ def active_workflow_runs(repo: str) -> list[dict[str, Any]]:
     runs: list[dict[str, Any]] = []
     for status in ("queued", "in_progress"):
         payload = json.loads(
-            run(["gh", "api", f"repos/{repo}/actions/runs", "-f", f"status={status}", "-F", "per_page=100"])
+            run(
+                [
+                    "gh",
+                    "api",
+                    "--method",
+                    "GET",
+                    f"repos/{repo}/actions/runs",
+                    "-f",
+                    f"status={status}",
+                    "-F",
+                    "per_page=100",
+                ]
+            )
         )
         runs.extend(payload.get("workflow_runs") or [])
     return runs

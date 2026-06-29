@@ -97,7 +97,7 @@ on:
 
 concurrency:
   group: central-pr-review-merge-scheduler-${{ github.repository }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   scan-pr-queue:
