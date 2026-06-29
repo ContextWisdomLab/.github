@@ -4514,6 +4514,16 @@ run_filtered_gate_case_if_requested() {
 			"" \
 			"1"
 		;;
+	vertex-primary-notfound-fallback-success)
+		run_gate_case "vertex-primary-notfound-fallback-success" \
+			"vertex_ai/missing-primary" \
+			"vertex_ai/fallback-one vertex_ai/fallback-two" \
+			"0" \
+			"REGEX:Strix quick scan succeeded with fallback model 'vertex_ai/fallback-one' in [0-9]+s\\." \
+			"2" \
+			"vertex_ai/missing-primary|vertex_ai/fallback-one" \
+			"<unset>|<unset>"
+		;;
 	*)
 		record_failure "unknown STRIX_TEST_CASE_FILTER '${STRIX_TEST_CASE_FILTER:-}'"
 		;;
