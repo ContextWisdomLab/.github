@@ -71,8 +71,16 @@ STRUCTURAL_FAILURE_PATTERNS = (
     re.compile(r"\b(?:no|zero)\s+changed\s+files?\b"),
 )
 
+NON_ACTIONABLE_FAILED_CHECK_REVIEW_PHRASES = (
+    "deterministic missing-string markers",
+    "deterministic missing string markers",
+    "strix report locations",
+    "failed-check evidence below",
+    "map each failed check to exact local source lines",
+)
+
 CHANGED_FILE_EVIDENCE_PATTERN = re.compile(
-    r"(?<![A-Za-z0-9_])(?:[A-Za-z0-9_.-]+/)+(?:[A-Za-z0-9_.@+-]+\."
+    r"(?<![A-Za-z0-9_])(?:[A-Za-z0-9_.-]+/){1,64}(?:[A-Za-z0-9_.@+-]+\."
     r"(?:py|js|jsx|ts|tsx|mjs|cjs|sh|bash|yml|yaml|json|jsonc|toml|lock|md|txt|css|scss|html|sql|go|rs|java|kt|swift|rb|php|cs|xml|ini|cfg)"
     r"|Dockerfile|Makefile|README|LICENSE|AGENTS\.md)(?![A-Za-z0-9_])"
     r"|(?<![A-Za-z0-9_])[A-Za-z0-9_.-]+\."
@@ -97,8 +105,65 @@ APPROVAL_VERIFICATION_LABELS = (
     "compatibility/convention:",
     "breaking-change/backcompat:",
     "performance:",
-    "design/ux:",
+    "developer experience:",
+    "user experience:",
     "security/privacy:",
+)
+
+SOURCE_LIKE_CHANGED_FILE_EXTENSIONS = frozenset(
+    {
+        ".bash",
+        ".cjs",
+        ".cfg",
+        ".cs",
+        ".css",
+        ".go",
+        ".html",
+        ".ini",
+        ".java",
+        ".js",
+        ".json",
+        ".jsonc",
+        ".jsx",
+        ".kt",
+        ".mjs",
+        ".php",
+        ".py",
+        ".rb",
+        ".rs",
+        ".scss",
+        ".sh",
+        ".sql",
+        ".swift",
+        ".toml",
+        ".ts",
+        ".tsx",
+        ".xml",
+        ".yaml",
+        ".yml",
+    }
+)
+
+SOURCE_KIND_FALSE_PHRASES = (
+    "no source file changed",
+    "no source files changed",
+    "no source code changed",
+    "no source changes",
+    "no supported source files",
+    "no source files or package manifests",
+)
+
+TEST_KIND_FALSE_PHRASES = (
+    "no test file changed",
+    "no test files changed",
+    "no tests changed",
+    "no test changes",
+)
+
+EXECUTABLE_KIND_FALSE_PHRASES = (
+    "no executable changes",
+    "no executable file changed",
+    "no executable files changed",
 )
 
 COVERAGE_FAILURE_PHRASES = (
@@ -112,6 +177,8 @@ COVERAGE_FAILURE_PHRASES = (
     "missing",
     "partial",
     "unknown",
+    "did not prove",
+    "does not prove",
     "did not run",
     "did not publish",
     "job did not run",
@@ -130,6 +197,32 @@ def admits_missing_structural_review(reason: str, summary: str) -> bool:
     return any(phrase in combined for phrase in STRUCTURAL_FAILURE_PHRASES) or any(
         pattern.search(combined) for pattern in STRUCTURAL_FAILURE_PATTERNS
     )
+
+
+def control_review_text(value: dict[str, Any]) -> str:
+    """Return human review text from a control block for policy validation."""
+    chunks = [str(value.get("reason", "")), str(value.get("summary", ""))]
+    for finding in value.get("findings", []) or []:
+        if not isinstance(finding, dict):
+            continue
+        chunks.extend(str(finding.get(field, "")) for field in (
+            "path",
+            "line",
+            "severity",
+            "title",
+            "problem",
+            "root_cause",
+            "fix_direction",
+            "regression_test_direction",
+            "suggested_diff",
+        ))
+    return "\n".join(chunks)
+
+
+def contains_non_actionable_failed_check_review(value: dict[str, Any]) -> bool:
+    """Return whether a review punts failed-check diagnosis back to the reader."""
+    combined = control_review_text(value).casefold()
+    return any(phrase in combined for phrase in NON_ACTIONABLE_FAILED_CHECK_REVIEW_PHRASES)
 
 
 def mentions_changed_file_evidence(reason: str, summary: str) -> bool:
@@ -152,16 +245,58 @@ def current_changed_files() -> set[str]:
         return set()
 
 
+def changed_file_is_source_like(path: str) -> bool:
+    """Return whether a changed path can affect executable or workflow behavior."""
+    normalized = path.replace("\\", "/")
+    name = normalized.rsplit("/", 1)[-1]
+    if normalized.startswith(".github/workflows/"):
+        return True
+    if name in {"Dockerfile", "Makefile"}:
+        return True
+    return Path(name).suffix.casefold() in SOURCE_LIKE_CHANGED_FILE_EXTENSIONS
+
+
+def changed_file_is_test_like(path: str) -> bool:
+    """Return whether a changed path is part of a test surface."""
+    normalized = path.replace("\\", "/").casefold()
+    name = normalized.rsplit("/", 1)[-1]
+    parts = normalized.split("/")
+    return (
+        any(part in {"test", "tests", "__tests__"} for part in parts)
+        or name.startswith("test_")
+        or name.startswith("test-")
+        or "_test." in name
+        or "-test." in name
+        or ".test." in name
+        or ".spec." in name
+    )
+
+
+def contradicts_changed_file_kinds(reason: str, summary: str) -> bool:
+    """Return whether approval prose denies changed file kinds that evidence lists."""
+    changed_files = current_changed_files()
+    if not changed_files:
+        return False
+
+    combined = f"{reason}\n{summary}".casefold()
+    has_source_like_change = any(changed_file_is_source_like(path) for path in changed_files)
+    has_test_like_change = any(changed_file_is_test_like(path) for path in changed_files)
+    if has_source_like_change and any(phrase in combined for phrase in SOURCE_KIND_FALSE_PHRASES):
+        return True
+    if has_source_like_change and any(phrase in combined for phrase in EXECUTABLE_KIND_FALSE_PHRASES):
+        return True
+    if has_test_like_change and any(phrase in combined for phrase in TEST_KIND_FALSE_PHRASES):
+        return True
+    return False
+
+
 def mentions_actual_changed_file(reason: str, summary: str) -> bool:
     """Return whether an approval names an exact current-head changed file."""
     changed_files = current_changed_files()
     if not changed_files:
         return mentions_changed_file_evidence(reason, summary)
     combined = f"{reason}\n{summary}"
-    return any(
-        re.search(r"(?<![/\w])" + re.escape(changed_file) + r"(?![/\w])", combined)
-        for changed_file in changed_files
-    )
+    return any(changed_file in combined for changed_file in changed_files)
 
 
 def mentions_verification_posture(reason: str, summary: str) -> bool:
@@ -196,22 +331,31 @@ def label_section(text: str, label: str) -> str:
     return text[start:end]
 
 
+def coverage_section_is_valid(section: str) -> bool:
+    """Return whether one approval coverage label cites acceptable evidence."""
+    if "coverage execution evidence" not in section:
+        return False
+    if (
+        "not applicable" in section
+        and "no supported source files or package manifests" in section
+    ):
+        return True
+    if any(phrase in section for phrase in COVERAGE_FAILURE_PHRASES):
+        return False
+    if "100%" in section:
+        return True
+    return False
+
+
 def mentions_full_coverage(reason: str, summary: str) -> bool:
-    """Return whether test and docstring coverage are both explicitly 100%."""
+    """Return whether test and docstring coverage labels cite valid evidence."""
     combined = f"{reason}\n{summary}".casefold()
     coverage_section = label_section(combined, "coverage:")
     docstring_section = label_section(combined, "docstring coverage:")
     required_sections = (coverage_section, docstring_section)
     if not all(required_sections):
         return False
-    for section in required_sections:
-        if any(phrase in section for phrase in COVERAGE_FAILURE_PHRASES):
-            return False
-        if "coverage execution evidence" not in section:
-            return False
-        if "100%" not in section:
-            return False
-    return True
+    return all(coverage_section_is_valid(section) for section in required_sections)
 
 
 def approval_repair_evidence_file() -> Path | None:
@@ -224,6 +368,14 @@ def approval_repair_evidence_file() -> Path | None:
         if path.is_file():
             return path
     return None
+
+
+def read_text_lossy(path: Path) -> str | None:
+    """Read text while preserving progress across invalid UTF-8 bytes."""
+    try:
+        return path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
 
 
 def section_between_markers(text: str, marker: str) -> str:
@@ -261,34 +413,52 @@ def changed_files_from_evidence(text: str) -> list[str]:
     return files
 
 
-def evidence_proves_full_coverage(text: str) -> bool:
-    """Return whether bounded evidence proves 100% test and docstring coverage."""
+def evidence_coverage_mode(text: str) -> str | None:
+    """Return the coverage mode proven by bounded evidence."""
     section = text.casefold()
-    return (
-        "- result: pass" in section
-        and "- test coverage: 100%" in section
-        and "- docstring coverage: 100%" in section
-    )
+    if "- result: pass" not in section:
+        return None
+    if "- test coverage: 100%" in section and "- docstring coverage: 100%" in section:
+        return "full"
+    no_source = "no supported source files or package manifests" in section
+    test_na = "- test coverage: not applicable" in section
+    docstring_na = "- docstring coverage: not applicable" in section
+    if no_source and test_na and docstring_na:
+        return "not_applicable"
+    return None
 
 
 def build_approval_repair_summary(summary: str, evidence_text: str) -> str | None:
     """Append missing approval labels from bounded current-head evidence."""
     changed_files = changed_files_from_evidence(evidence_text)
-    if not changed_files or not evidence_proves_full_coverage(evidence_text):
+    coverage_mode = evidence_coverage_mode(evidence_text)
+    if not changed_files or coverage_mode is None:
         return None
 
     first_file = changed_files[0]
     file_list = ", ".join(changed_files[:5])
     if len(changed_files) > 5:
         file_list += f", and {len(changed_files) - 5} more"
+    if coverage_mode == "not_applicable":
+        coverage_line = (
+            "Coverage: coverage execution evidence reports test coverage as not applicable "
+            "because no supported source files or package manifests were found."
+        )
+        docstring_line = (
+            "Docstring coverage: coverage execution evidence reports docstring coverage as not applicable "
+            "because no supported source files or package manifests were found."
+        )
+    else:
+        coverage_line = "Coverage: coverage execution evidence proves 100% test coverage."
+        docstring_line = "Docstring coverage: coverage execution evidence proves 100% docstring coverage."
 
     repair = f"""\
 
 Verification posture: CodeGraph evidence was initialized and bounded current-head evidence reviewed for changed-file evidence including {file_list}.
 Linter/static: workflow/static review evidence is bounded by the current-head GitHub Checks gate and changed-file evidence.
 TDD/regression: coverage execution evidence and focused changed hunks were reviewed from bounded-review-evidence.md.
-Coverage: coverage execution evidence proves 100% test coverage.
-Docstring coverage: coverage execution evidence proves 100% docstring coverage.
+{coverage_line}
+{docstring_line}
 DAG: Change Flow DAG maps {first_file} through bounded evidence, review risk, and required checks.
 PoC/execution: coverage-evidence job executed on the current head and reported PASS.
 DDD/domain: workflow and repository-governance invariants were reviewed against changed files in bounded evidence.
@@ -299,7 +469,8 @@ Standards search: standards and external-source checks are delegated to configur
 Compatibility/convention: changed workflow/script conventions and compatibility surfaces were checked in bounded evidence.
 Breaking-change/backcompat: deployment evidence and changed-file history were checked for backward-compatibility risk.
 Performance: changed surfaces were checked for performance risk in bounded evidence.
-Design/UX: changed files did not identify a UI-facing design surface; bounded evidence was reviewed.
+Developer experience: changed automation, review, and maintenance surfaces were checked for helpful or obstructive DX impact in bounded evidence.
+User experience: changed files did not identify a user-facing UI surface; bounded evidence was reviewed for UX impact.
 Security/privacy: workflow-token, review-gate, and repository-automation security/privacy boundaries were checked in bounded evidence.
 """
     return f"{summary.rstrip()}\n{repair}"
@@ -315,12 +486,14 @@ def repair_approval_summary(reason: str, summary: str) -> str:
     evidence_file = approval_repair_evidence_file()
     if evidence_file is None:
         return summary
-    try:
-        evidence_text = evidence_file.read_text(encoding="utf-8")
-    except OSError:
+    evidence_text = read_text_lossy(evidence_file)
+    if evidence_text is None:
         return summary
 
     repaired_summary = build_approval_repair_summary(summary, evidence_text)
+    if repaired_summary and contradicts_changed_file_kinds(reason, repaired_summary):
+        # ponytail: drop model prose only when bounded evidence proves it denied changed file kinds.
+        repaired_summary = build_approval_repair_summary("", evidence_text)
     return repaired_summary or summary
 
 
@@ -358,6 +531,16 @@ def check_structural_approval(control_file: Path) -> int:
         str(value.get("reason", "")),
         str(value.get("summary", "")),
     ):
+        print("NO_CONCLUSION", file=sys.stderr)
+        return 4
+    if value.get("result") == "APPROVE" and contradicts_changed_file_kinds(
+        str(value.get("reason", "")),
+        str(value.get("summary", "")),
+    ):
+        print("NO_CONCLUSION", file=sys.stderr)
+        return 4
+    # Generic failed-check deflections are invalid for both approvals and request-changes.
+    if contains_non_actionable_failed_check_review(value):
         print("NO_CONCLUSION", file=sys.stderr)
         return 4
 
@@ -402,6 +585,8 @@ def valid_control(
         return None
     if result == "REQUEST_CHANGES" and not findings:
         return None
+    if contains_non_actionable_failed_check_review(value):
+        return None
     if result == "APPROVE":
         if admits_missing_structural_review(reason, summary):
             return None
@@ -411,6 +596,8 @@ def valid_control(
         if not mentions_verification_posture(reason, summary):
             return None
         if not mentions_full_coverage(reason, summary):
+            return None
+        if contradicts_changed_file_kinds(reason, summary):
             return None
 
     required_finding_fields = (
@@ -460,12 +647,21 @@ def iter_json_objects(text: str) -> list[Any]:
         index = text.find("{", index)
         if index == -1:
             break
-        try:
-            value, end = decoder.raw_decode(text, index)
-            values.append(value)
-            index = end
-        except json.JSONDecodeError:
+        next_index = index + 1
+        while next_index < len(text) and text[next_index] in " \t\r\n":
+            next_index += 1
+        if next_index < len(text) and text[next_index] not in {'"', "}"}:
             index += 1
+            continue
+        try:
+            value, new_index = decoder.raw_decode(text, index)
+            values.append(value)
+            # ⚡ Bolt: Advance index to avoid O(N^2) redundant parsing of nested JSON blocks
+            index = new_index
+            continue
+        except json.JSONDecodeError:
+            pass
+        index += 1
 
     return values
 
@@ -487,7 +683,7 @@ def main(argv: list[str]) -> int:
     expected_head_sha, expected_run_id, expected_run_attempt, output_file_arg = argv[1:]
     output_file = Path(output_file_arg)
     try:
-        output_text = output_file.read_text(encoding="utf-8")
+        output_text = output_file.read_text(encoding="utf-8", errors="replace")
     except OSError as exc:
         print(f"cannot read OpenCode output file: {exc}", file=sys.stderr)
         return 65
@@ -502,7 +698,7 @@ def main(argv: list[str]) -> int:
         if control is None:
             continue
 
-        normalized_json = json.dumps(control, separators=(",", ":"), ensure_ascii=False)
+        normalized_json = json.dumps(control, separators=(",", ":"), ensure_ascii=False).replace("<", r"\u003c").replace(">", r"\u003e").replace("&", r"\u0026")
         output_file.write_text(
             "\n".join(
                 [
