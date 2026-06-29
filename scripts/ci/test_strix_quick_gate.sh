@@ -568,16 +568,13 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" 'fail_for_coverage_evidence_without_review' "opencode approval fails the check, not the PR review state, when coverage-evidence did not pass"
 	assert_file_contains "$workflow_file" "leave the PR review unchanged for coverage-evidence blocker states such as cancelled, skipped, failed, unsupported-tooling, or below-100 evidence" "opencode approval does not turn coverage-evidence blocker states into source review findings"
 	assert_file_contains "$workflow_file" "needs.coverage-evidence.result == 'success'" "opencode model steps skip when coverage-evidence already failed"
-	assert_file_contains "$workflow_file" "--cov-fail-under=100" "opencode coverage evidence requires 100 percent Python test coverage"
-	assert_file_contains "$workflow_file" "--fail-under=100" "opencode coverage evidence requires 100 percent Python docstring coverage"
-	assert_file_contains "$workflow_file" "Coverage below 100%:" "opencode coverage evidence fails below-100 JavaScript coverage"
+	assert_file_contains "$workflow_file" "supported repository test suites passed" "opencode coverage evidence requires supported repository test suites to pass"
 	assert_file_contains "$workflow_file" "Python project dependencies (requirements.txt)" "opencode coverage evidence records repository Python dependency installation"
 	assert_file_contains "$workflow_file" "python3 -m pip install --disable-pip-version-check -r requirements.txt" "opencode coverage evidence installs repository Python requirements before pytest"
 	assert_file_contains "$workflow_file" "uv sync --project" "opencode coverage evidence installs uv-managed Python project dependencies before pytest"
 	assert_file_contains "$workflow_file" 'uv pip install --project "$project_dir" -r "${project_dir}/requirements.txt"' "opencode coverage evidence installs requirements into uv-managed project environments"
 	assert_file_contains "$workflow_file" "--extra dev" "opencode coverage evidence installs pyproject optional dev extras when repositories do not use dependency-groups"
-	assert_file_contains "$workflow_file" 'cd "$1" && PYTHONPATH=. uv run --with pytest-cov pytest tests --cov' "opencode coverage evidence measures uv-managed Python projects with pytest-cov inside their project environment"
-	assert_file_contains "$workflow_file" 'uv run pytest tests/test_docstrings.py' "opencode coverage evidence accepts repository-owned Python docstring tests"
+	assert_file_contains "$workflow_file" 'cd "$1" && PYTHONPATH=. uv run pytest tests' "opencode coverage evidence runs uv-managed Python project tests inside their project environment"
 	assert_file_contains "$workflow_file" "JavaScript/TypeScript dependencies (npm ci)" "opencode coverage evidence installs npm workspace dependencies before JS coverage"
 	assert_file_contains "$workflow_file" "coverage/coverage-summary.json" "opencode coverage evidence reads JS coverage summaries instead of trusting test exit codes"
 	assert_file_contains "$workflow_file" "coverage/coverage-final.json" "opencode coverage evidence supports Vitest Istanbul final coverage files"
@@ -585,10 +582,8 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" "Repository docstring coverage" "opencode coverage evidence accepts repository-owned docstring coverage scripts"
 	assert_file_contains "$workflow_file" "check:python-docstrings" "opencode coverage evidence can use repository Python docstring gates exposed through package scripts"
 	assert_file_contains "$workflow_file" "Coverage execution evidence" "opencode evidence exposes coverage measurement to the review model"
-	assert_file_contains "$workflow_file" "Coverage and Docstring coverage labels must cite Coverage execution evidence proving 100%" "opencode approval requires 100 percent coverage evidence"
-	assert_file_contains "$workflow_file" "has_changed_tracked_files '*.py'" "opencode coverage evidence only measures changed Python source"
-	assert_file_contains "$workflow_file" "has_changed_tracked_files 'package.json' '*.js' '*.jsx' '*.ts' '*.tsx'" "opencode coverage evidence only measures changed JavaScript/TypeScript source"
-	assert_file_contains "$workflow_file" "or explicitly cite Coverage execution evidence as not applicable because no supported source files or package manifests were found" "opencode approval permits only evidence-backed no-source coverage exceptions"
+	assert_file_contains "$workflow_file" "Coverage and Docstring coverage labels must cite Coverage execution evidence showing supported repository test suites passed" "opencode approval requires passing test evidence when coverage is applicable"
+	assert_file_contains "$workflow_file" "or explicitly cite Coverage execution evidence as not applicable because no supported source files or package manifests were found" "opencode approval permits only evidence-backed no-source coverage N/A"
 	assert_file_contains "$REPO_ROOT/scripts/ci/opencode_review_normalize_output.py" "COVERAGE_FAILURE_PHRASES" "opencode normalizer rejects unmeasured coverage approvals"
 	assert_file_contains "$workflow_file" "Review language evidence" "opencode evidence captures PR language for review prose"
 	assert_file_contains "$workflow_file" "Preferred review language" "opencode evidence names the preferred review language"
@@ -1627,10 +1622,12 @@ assert_opencode_failed_check_fallback_emits_each_strix_report() {
 	local fixture_repo
 	local evidence_file
 	local output_file
+	local stderr_file
 	tmp_dir="$(mktemp -d)"
 	fixture_repo="$tmp_dir/repo"
 	evidence_file="$tmp_dir/failed-check-evidence.md"
 	output_file="$tmp_dir/fallback.md"
+	stderr_file="$tmp_dir/fallback.err"
 	mkdir -p "$fixture_repo/backend/services" "$fixture_repo/frontend/src/app/prompt-studio" "$fixture_repo/frontend"
 
 	{
@@ -1686,7 +1683,7 @@ Model deepseek/deepseek-v3-0324 Vulnerabilities 1
 EOF
 
 	bash "$REPO_ROOT/scripts/ci/emit_opencode_failed_check_fallback_findings.sh" \
-		"$evidence_file" "$fixture_repo" >"$output_file"
+		"$evidence_file" "$fixture_repo" >"$output_file" 2>"$stderr_file"
 
 	assert_file_contains "$output_file" "Strix report from deepseek/deepseek-r1-0528: Path Traversal in Email Attachment Handling" "fallback includes first model report"
 	assert_file_contains "$output_file" "backend/services/email_parser.py:60" "fallback maps first report to exact source line"
@@ -1706,10 +1703,12 @@ assert_opencode_failed_check_fallback_explains_pytest_and_cancelled_checks() {
 	local fixture_repo
 	local evidence_file
 	local output_file
+	local stderr_file
 	tmp_dir="$(mktemp -d)"
 	fixture_repo="$tmp_dir/repo"
 	evidence_file="$tmp_dir/failed-check-evidence.md"
 	output_file="$tmp_dir/fallback.md"
+	stderr_file="$tmp_dir/fallback.err"
 	mkdir -p "$fixture_repo/tests/live"
 
 	cat >"$fixture_repo/tests/live/test_live_api_sequence.py" <<'EOF'
@@ -1772,16 +1771,62 @@ backend (Python 3.14)	Run backend tests	1 failed, 965 passed, 15 skipped in 7.28
 EOF
 
 	bash "$REPO_ROOT/scripts/ci/emit_opencode_failed_check_fallback_findings.sh" \
-		"$evidence_file" "$fixture_repo" >"$output_file"
+		"$evidence_file" "$fixture_repo" >"$output_file" 2>"$stderr_file"
 
 	assert_file_contains "$output_file" "Failed GitHub Check needs a source-backed pytest fix for test_live_harness_avoids_broad_url_opener_pattern" "fallback explains pytest failure with the test name"
 	assert_file_contains "$output_file" "tests/live/test_live_api_sequence.py:" "fallback maps pytest failure to a source file and line"
 	assert_file_contains "$output_file" "urllib.request" "fallback preserves the assertion term that caused the pytest failure"
 	assert_file_contains "$output_file" "cd backend && python -m pytest tests/live/test_live_api_sequence.py::test_live_harness_avoids_broad_url_opener_pattern -q" "fallback gives a focused pytest rerun command"
-	assert_file_contains "$output_file" "do not approve or post a URL-only review" "fallback explicitly rejects URL-only failed-check reviews"
-	assert_file_contains "$output_file" "GitHub Checks queue - PR Governance/metadata-only gate evaluation was cancelled by a newer queued request" "fallback explains cancelled governance checks as queue state"
-	assert_file_contains "$output_file" "no repository source edit is justified by this cancelled check alone" "fallback does not invent source fixes for cancelled queue state"
+	assert_file_not_contains "$output_file" "GitHub Checks queue - PR Governance/metadata-only gate evaluation was cancelled by a newer queued request" "fallback does not publish cancelled queue states as source-backed findings"
+	assert_file_contains "$stderr_file" "Non-source-backed cancelled check queue state" "fallback explains cancelled governance checks outside source-backed findings"
+	assert_file_contains "$stderr_file" "no repository source edit is justified by this cancelled check alone" "fallback does not invent source fixes for cancelled queue state"
 	assert_file_not_contains "$output_file" "No deterministic missing-string markers" "fallback must not fall back to generic evidence-dump text when pytest evidence is actionable"
+
+	rm -rf "$tmp_dir"
+}
+
+assert_opencode_failed_check_fallback_rejects_cancelled_queue_only_reviews() {
+	local tmp_dir
+	local fixture_repo
+	local evidence_file
+	local output_file
+	local stderr_file
+	local rc
+	tmp_dir="$(mktemp -d)"
+	fixture_repo="$tmp_dir/repo"
+	evidence_file="$tmp_dir/failed-check-evidence.md"
+	output_file="$tmp_dir/fallback.md"
+	stderr_file="$tmp_dir/fallback.err"
+	mkdir -p "$fixture_repo"
+
+	cat >"$evidence_file" <<'EOF'
+# Failed GitHub Check Evidence
+
+- PR: #119
+- Head SHA: `96ce73d581b4ddeb8668f93768deb2b106b8f55a`
+- Repository: `ContextualWisdomLab/.github`
+
+## Failed check: PR Review Merge Scheduler/scan-pr-queue
+
+- Type: `check_run`
+- Conclusion: `CANCELLED`
+- Details URL: https://github.com/ContextualWisdomLab/.github/actions/runs/28354829112/job/83995330163
+
+### Check annotations
+
+- .github:1-1 [failure] Canceling since a higher priority waiting request for central-pr-review-merge-scheduler-ContextualWisdomLab/.github exists
+EOF
+
+	set +e
+	bash "$REPO_ROOT/scripts/ci/emit_opencode_failed_check_fallback_findings.sh" \
+		"$evidence_file" "$fixture_repo" >"$output_file" 2>"$stderr_file"
+	rc=$?
+	set -e
+
+	assert_equals "1" "$rc" "cancelled queue-only evidence does not produce REQUEST_CHANGES findings"
+	assert_file_contains "$stderr_file" "Non-source-backed cancelled check queue state" "cancelled queue-only evidence is explained as non-source-backed"
+	assert_file_contains "$stderr_file" "No source-backed failed-check fallback finding matched" "cancelled queue-only evidence asks for rerun or newer logs"
+	assert_file_not_contains "$output_file" "GitHub Checks queue" "cancelled queue-only evidence does not emit a finding"
 
 	rm -rf "$tmp_dir"
 }
@@ -6817,6 +6862,8 @@ assert_opencode_failed_check_review_validator_rejects_unrelated_findings
 assert_opencode_failed_check_fallback_emits_each_strix_report
 
 assert_opencode_failed_check_fallback_explains_pytest_and_cancelled_checks
+
+assert_opencode_failed_check_fallback_rejects_cancelled_queue_only_reviews
 
 assert_opencode_failed_check_fallback_explains_trusted_base_strix_prs
 

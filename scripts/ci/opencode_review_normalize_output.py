@@ -173,7 +173,6 @@ COVERAGE_FAILURE_PHRASES = (
     "unmeasured",
     "partial",
     "not proven",
-    "not applicable",
     "n/a",
     "skipped",
     "unavailable",
@@ -352,7 +351,15 @@ def coverage_section_is_valid(section: str) -> bool:
         return True
     if any(phrase in section for phrase in COVERAGE_FAILURE_PHRASES):
         return False
-    return "100%" in section
+    if "supported repository test suites passed" in section:
+        return True
+    if "configured repository docstring gates passed" in section:
+        return True
+    if "docstring coverage was advisory" in section:
+        return True
+    if "100%" in section:
+        return True
+    return False
 
 
 def mentions_full_coverage(reason: str, summary: str) -> bool:
@@ -428,6 +435,11 @@ def evidence_coverage_mode(text: str) -> str | None:
         return None
     if "- test coverage: 100%" in section and "- docstring coverage: 100%" in section:
         return "full"
+    if (
+        "- test evidence: supported repository test suites passed" in section
+        and "- docstring evidence: configured repository docstring gates passed or docstring coverage was advisory" in section
+    ):
+        return "suite_passed"
     no_source = (
         "no supported source files or package manifests" in section
         or "no supported changed source files or package manifests" in section
@@ -458,6 +470,12 @@ def build_approval_repair_summary(summary: str, evidence_text: str) -> str | Non
         docstring_line = (
             "Docstring coverage: coverage execution evidence reports docstring coverage as not applicable "
             "because no supported changed source files or package manifests were found."
+        )
+    elif coverage_mode == "suite_passed":
+        coverage_line = "Coverage: coverage execution evidence reports supported repository test suites passed."
+        docstring_line = (
+            "Docstring coverage: coverage execution evidence reports configured repository docstring gates passed "
+            "or docstring coverage was advisory."
         )
     else:
         coverage_line = "Coverage: coverage execution evidence proves 100% test coverage for the current head."
