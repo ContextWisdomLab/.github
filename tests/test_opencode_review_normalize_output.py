@@ -623,14 +623,30 @@ M\tscripts/ci/example.py
     assert norm.repair_approval_summary("reason", "summary") == "summary"
 
 
-def test_iter_json_objects_extracts_raw_and_embedded_json():
+def test_iter_json_objects_skips_reparsing_decoded_objects():
     cases = [
-        ('{"a": 1}', [{"a": 1}]),
-        ('prefix {"b": 2} suffix', [{"b": 2}]),
-        ('prefix {"outer": {"inner": 1}} suffix', [{"outer": {"inner": 1}}]),
-        ("prefix {  } suffix", [{}]),
+        (
+            "raw object is not emitted twice",
+            '{"a": 1}',
+            [{"a": 1}],
+        ),
+        (
+            "embedded object is still extracted",
+            'prefix {"b": 2} suffix',
+            [{"b": 2}],
+        ),
+        (
+            "nested object is not re-emitted as a top-level object",
+            'prefix {"outer": {"inner": 1}} suffix',
+            [{"outer": {"inner": 1}}],
+        ),
+        (
+            "empty object is still extracted",
+            "prefix {  } suffix",
+            [{}],
+        ),
     ]
-    for text, expected in cases:
+    for _name, text, expected in cases:
         assert norm.iter_json_objects(text) == expected
 
     assert norm.iter_json_objects("prefix {not json}") == []
