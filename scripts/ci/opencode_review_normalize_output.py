@@ -339,11 +339,10 @@ def label_section(text: str, label: str) -> str:
         if candidate == label:
             continue
 
-        # Use find_label_starts to accurately find the first valid occurrence of this candidate after `start`
-        candidate_starts = find_label_starts(candidate)
-        valid_starts = [s for s in candidate_starts if s >= start]
-        if valid_starts:
-            next_starts.append(valid_starts[0])
+        for candidate_start in find_label_starts(candidate):
+            if candidate_start >= start:
+                next_starts.append(candidate_start)
+                break
 
     end = min(next_starts) if next_starts else len(text)
     return text[start:end]
