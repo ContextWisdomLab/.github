@@ -1028,18 +1028,6 @@ def inspect_pr(
         return finish(Decision(number, action, reason))
 
     merge_state = effective_merge_state(pr)
-    if merge_state == "UNKNOWN":
-        if pr.get("autoMergeRequest"):
-            return finish(
-                disable_auto_merge_decision(
-                    repo,
-                    pr,
-                    dry_run=dry_run,
-                    reason="mergeability is still being calculated; wait for GitHub mergeability evidence before re-enabling auto-merge",
-                )
-            )
-        return decide("wait", "mergeability is still being calculated")
-
     if merge_state in {"DIRTY", "CONFLICTING"}:
         if pr.get("autoMergeRequest"):
             return finish(
@@ -1108,6 +1096,18 @@ def inspect_pr(
             f"{freshness_reason}; branch update requested with workflow GH_TOKEN "
             f"(github-actions[bot] in GitHub Actions){suffix}",
         )
+
+    if merge_state == "UNKNOWN":
+        if pr.get("autoMergeRequest"):
+            return finish(
+                disable_auto_merge_decision(
+                    repo,
+                    pr,
+                    dry_run=dry_run,
+                    reason="mergeability is still being calculated and no branch freshness evidence is available; wait for GitHub mergeability evidence before re-enabling auto-merge",
+                )
+            )
+        return decide("wait", "mergeability is still being calculated and no branch freshness evidence is available")
 
     if current_head_approved:
         failed_checks = failed_status_checks(pr)
