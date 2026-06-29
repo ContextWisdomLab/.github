@@ -247,6 +247,37 @@ def test_rest_mergeable_state_helpers(monkeypatch):
     assert prs == [{"number": 9, "restMergeableStateError": "transient REST failure"}]
 
 
+def test_enrich_rest_mergeable_states_skips_executor_for_small_inputs(monkeypatch):
+    def fail_executor(*args, **kwargs):
+        raise AssertionError("single PR enrichment should not create an executor")
+
+    monkeypatch.setattr(sched.concurrent.futures, "ThreadPoolExecutor", fail_executor)
+    monkeypatch.setattr(sched, "fetch_rest_mergeable_state", lambda repo, number: f"{repo}:{number}")
+
+    empty_prs: list[dict[str, object]] = []
+    sched.enrich_rest_mergeable_states("owner/repo", empty_prs)
+    assert empty_prs == []
+
+    one_pr = [{"number": 10}]
+    sched.enrich_rest_mergeable_states("owner/repo", one_pr)
+    assert one_pr == [{"number": 10, "restMergeableState": "owner/repo:10"}]
+
+
+def test_enrich_rest_mergeable_states_attaches_state_and_errors(monkeypatch):
+    def mock_fetch(repo, number):
+        if number == 1:
+            return "CLEAN"
+        raise RuntimeError("API limit")
+
+    monkeypatch.setattr(sched, "fetch_rest_mergeable_state", mock_fetch)
+
+    prs = [{"number": 1}, {"number": 2}]
+    sched.enrich_rest_mergeable_states("owner/repo", prs)
+
+    assert prs[0]["restMergeableState"] == "CLEAN"
+    assert prs[1]["restMergeableStateError"] == "API limit"
+
+
 def test_context_review_and_check_helpers():
     assert sched.context_nodes({}) == []
     assert sched.context_nodes(make_pr()) == []
