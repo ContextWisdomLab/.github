@@ -418,7 +418,9 @@ def enrich_rest_mergeable_states(repo: str, prs: list[dict[str, Any]]) -> None:
         except RuntimeError as exc:
             pr["restMergeableStateError"] = bounded_error_summary(str(exc))
 
-    if not prs:
+    if len(prs) <= 1:
+        for pr in prs:
+            _fetch_state(pr)
         return
 
     # ⚡ Bolt Optimization: Use ThreadPoolExecutor to prevent N+1 HTTP request bottleneck

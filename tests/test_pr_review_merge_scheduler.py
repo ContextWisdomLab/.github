@@ -251,6 +251,53 @@ def test_rest_mergeable_state_helpers(monkeypatch):
     assert prs == [{"number": 9, "restMergeableStateError": "transient REST failure"}]
 
 
+def test_enrich_rest_mergeable_states_skips_executor_for_small_inputs(monkeypatch):
+    def fail_executor(*args, **kwargs):
+        raise AssertionError("small PR enrichment should not create an executor")
+
+    monkeypatch.setattr(sched, "ThreadPoolExecutor", fail_executor)
+    monkeypatch.setattr(sched, "fetch_rest_mergeable_state", lambda repo, number: f"{repo}:{number}")
+
+    empty_prs: list[dict[str, object]] = []
+    sched.enrich_rest_mergeable_states("owner/repo", empty_prs)
+    assert empty_prs == []
+
+    one_pr = [{"number": 10}]
+    sched.enrich_rest_mergeable_states("owner/repo", one_pr)
+    assert one_pr == [{"number": 10, "restMergeableState": "owner/repo:10"}]
+
+
+def test_enrich_rest_mergeable_states_uses_executor_for_multiple_inputs(monkeypatch):
+    class InlineExecutor:
+        def __init__(self, *, max_workers):
+            self.max_workers = max_workers
+            seen_workers.append(max_workers)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def map(self, func, items):
+            for item in items:
+                func(item)
+                yield None
+
+    seen_workers = []
+    monkeypatch.setattr(sched, "ThreadPoolExecutor", InlineExecutor)
+    monkeypatch.setattr(sched, "fetch_rest_mergeable_state", lambda repo, number: f"{repo}:{number}")
+
+    prs = [{"number": 1}, {"number": 2}]
+    sched.enrich_rest_mergeable_states("owner/repo", prs)
+
+    assert seen_workers == [2]
+    assert prs == [
+        {"number": 1, "restMergeableState": "owner/repo:1"},
+        {"number": 2, "restMergeableState": "owner/repo:2"},
+    ]
+
+
 def test_context_review_and_check_helpers():
     assert sched.context_nodes({}) == []
     assert sched.context_nodes(make_pr()) == []
