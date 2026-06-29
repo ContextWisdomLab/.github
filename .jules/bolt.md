@@ -10,3 +10,6 @@
 ## 2026-06-25 - Avoid N+1 API blocking in PR checks
 **Learning:** In backend processing scripts, synchronous iterations calling an external service, such as fetching `restMergeableState` per PR, cause N+1 API bottlenecks and stall pipeline execution linearly. This matters for PR schedulers handling multiple PRs.
 **Action:** Use `concurrent.futures.ThreadPoolExecutor` for independent network calls in a loop, and bound `max_workers` to avoid API rate limits.
+## 2024-06-25 - Prevent N+1 Subprocess Bottleneck with Memoization
+**Learning:** When invoking expensive operations like subprocess calls (e.g., `git diff`) within loops where the same parameters might be repeated (e.g., assessing multiple findings that point to the same file path), it causes an N+1 bottleneck.
+**Action:** Use `@functools.cache` to memoize the function mapping the resource. When returning collections from a memoized function, always use immutable types (like `frozenset` instead of `set`) to prevent callers from inadvertently corrupting the cached value.

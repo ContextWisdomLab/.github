@@ -139,6 +139,7 @@ SOURCE_ROOT="${OPENCODE_SOURCE_WORKDIR:-${GITHUB_WORKSPACE:-$PWD}}"
 if ! python3 - "$SOURCE_ROOT" "$TMP_JSON" <<'PY'
 from __future__ import annotations
 
+import functools
 import json
 import os
 import re
@@ -164,9 +165,13 @@ def normalized_line(value: str) -> str:
     return " ".join(value.strip().split())
 
 
-def changed_new_lines(path_value: str) -> set[int]:
+# ⚡ Bolt: Add memoization to avoid N+1 `git diff` shell calls when processing multiple
+# findings mapped to the same file path. Using frozenset ensures the cached return value
+# is immutable and hashable, preventing accidental cache corruption.
+@functools.cache
+def changed_new_lines(path_value: str) -> frozenset[int]:
     if not pr_base_sha or not pr_head_sha:
-        return set()
+        return frozenset()
     try:
         completed = subprocess.run(
             [
@@ -188,9 +193,9 @@ def changed_new_lines(path_value: str) -> set[int]:
             shell=False,
         )
     except OSError:
-        return set()
+        return frozenset()
     if completed.returncode not in {0, 1}:
-        return set()
+        return frozenset()
 
     line_numbers: set[int] = set()
     hunk_header = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
@@ -203,7 +208,7 @@ def changed_new_lines(path_value: str) -> set[int]:
         if count <= 0:
             continue
         line_numbers.update(range(start, start + count))
-    return line_numbers
+    return frozenset(line_numbers)
 
 
 def finding_is_source_backed(finding: dict[str, object]) -> bool:
