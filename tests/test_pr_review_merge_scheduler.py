@@ -1321,6 +1321,239 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert called == [("owner/repo", 1, True)]
 
 
+def test_inspect_pr_queues_auto_merge_for_approved_conflicts(monkeypatch):
+    auto_merges = []
+    disables = []
+    monkeypatch.setattr(
+        sched,
+        "enable_auto_merge",
+        lambda repo, pr, dry_run: auto_merges.append((repo, pr["number"], dry_run)),
+    )
+    monkeypatch.setattr(
+        sched,
+        "disable_auto_merge",
+        lambda repo, pr, dry_run: disables.append((repo, pr["number"], dry_run)),
+    )
+
+    approved_conflict = make_pr(
+        mergeStateStatus="DIRTY",
+        reviews={"nodes": [opencode_review("APPROVED", "head")]},
+    )
+    decision = inspect(approved_conflict)
+    assert decision.action == "auto_merge"
+    assert "auto-merge enabled and queued while conflict repair remains required" in decision.reason
+    assert "merge conflict: DIRTY" in decision.reason
+    assert "gh pr checkout 1" in decision.reason
+    assert auto_merges == [("owner/repo", 1, True)]
+    assert disables == []
+
+    already_queued = inspect(
+        make_pr(
+            mergeStateStatus="CONFLICTING",
+            reviews={"nodes": [opencode_review("APPROVED", "head")]},
+            autoMergeRequest={"enabledAt": "now"},
+        )
+    )
+    assert already_queued.action == "wait"
+    assert "auto-merge is already enabled" in already_queued.reason
+    assert "conflict repair is required" in already_queued.reason
+    assert "merge conflict: CONFLICTING" in already_queued.reason
+    assert auto_merges == [("owner/repo", 1, True)]
+    assert disables == []
+
+    disabled_by_inputs = inspect(
+        make_pr(
+            mergeStateStatus="DIRTY",
+            reviews={"nodes": [opencode_review("APPROVED", "head")]},
+        ),
+        enable_auto_merge_flag=False,
+    )
+    assert disabled_by_inputs.action == "wait"
+    assert "auto-merge is not queued" in disabled_by_inputs.reason
+    assert "merge conflict: DIRTY" in disabled_by_inputs.reason
+    assert auto_merges == [("owner/repo", 1, True)]
+
+    direct_mode = inspect(
+        make_pr(
+            mergeStateStatus="DIRTY",
+            reviews={"nodes": [opencode_review("APPROVED", "head")]},
+        ),
+        merge_mode="direct",
+    )
+    assert direct_mode.action == "wait"
+    assert "merge mode is direct" in direct_mode.reason
+    assert "merge conflict: DIRTY" in direct_mode.reason
+    assert auto_merges == [("owner/repo", 1, True)]
+
+
+def test_wait_for_updated_branch_head_polls_until_head_changes(monkeypatch):
+    fetches = []
+    sleeps = []
+    same_head = make_pr(
+        headRefOid="head",
+        mergeStateStatus="BLOCKED",
+        restMergeableState="BLOCKED",
+        compareBehindBy=1,
+    )
+    new_head = make_pr(headRefOid="new-head", mergeStateStatus="CLEAN", restMergeableState="CLEAN")
+
+    def fake_fetch_pr(repo, number):
+        fetches.append((repo, number))
+        return [same_head if len(fetches) == 1 else new_head]
+
+    monkeypatch.setattr(sched, "fetch_pr", fake_fetch_pr)
+    monkeypatch.setattr(sched.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    assert sched.wait_for_updated_branch_head("owner/repo", make_pr(), attempts=3, delay_seconds=0.25) == new_head
+    assert fetches == [("owner/repo", 1), ("owner/repo", 1)]
+    assert sleeps == [0.25]
+
+
+def test_wait_for_updated_branch_head_handles_empty_fetch_and_fresh_same_head(monkeypatch):
+    fetches = []
+    fresh_same_head = make_pr(headRefOid="head", mergeStateStatus="CLEAN", restMergeableState="CLEAN")
+
+    def fake_fetch_pr(repo, number):
+        fetches.append((repo, number))
+        return [] if len(fetches) == 1 else [fresh_same_head]
+
+    monkeypatch.setattr(sched, "fetch_pr", fake_fetch_pr)
+    monkeypatch.setattr(sched.time, "sleep", lambda seconds: None)
+
+    assert sched.short_sha(None) == "<unknown>"
+    assert sched.wait_for_updated_branch_head("owner/repo", make_pr(), attempts=2, delay_seconds=0) == fresh_same_head
+    assert fetches == [("owner/repo", 1), ("owner/repo", 1)]
+
+
+def test_wait_for_updated_branch_head_returns_none_when_still_outdated(monkeypatch):
+    stale_same_head = make_pr(
+        headRefOid="head",
+        mergeStateStatus="BLOCKED",
+        restMergeableState="BLOCKED",
+        compareBehindBy=2,
+    )
+
+    monkeypatch.setattr(sched, "fetch_pr", lambda repo, number: [stale_same_head])
+    monkeypatch.setattr(sched.time, "sleep", lambda seconds: None)
+
+    assert sched.wait_for_updated_branch_head("owner/repo", make_pr(), attempts=2, delay_seconds=0) is None
+
+
+def test_inspect_pr_dispatches_strix_after_update_branch_observes_new_head(monkeypatch):
+    updated = []
+    dispatched = []
+    old_head_pr = make_pr(
+        mergeStateStatus="BEHIND",
+        reviews={"nodes": [opencode_review("APPROVED", "head")]},
+        autoMergeRequest={"enabledAt": "now"},
+    )
+    new_head_pr = make_pr(headRefOid="new-head", reviews={"nodes": []})
+
+    monkeypatch.setattr(sched, "update_branch", lambda repo, pr, dry_run: updated.append((repo, pr["headRefOid"], dry_run)))
+    monkeypatch.setattr(sched, "wait_for_updated_branch_head", lambda repo, pr: new_head_pr)
+    monkeypatch.setattr(
+        sched,
+        "dispatch_strix_evidence",
+        lambda repo, workflow, pr, dry_run: dispatched.append((repo, workflow, pr["headRefOid"], dry_run)),
+    )
+
+    decision = inspect(old_head_pr, dry_run=False)
+
+    assert decision.action == "update_branch"
+    assert updated == [("owner/repo", "head", False)]
+    assert dispatched == [("owner/repo", "Strix Security Scan", "new-head", False)]
+    assert decision.notes == (
+        "updated head new-head observed after update-branch; same-head Strix evidence dispatched because workflow-token branch updates must not rely on a PR synchronize event to rerun evidence",
+    )
+
+
+def test_inspect_pr_notes_when_update_branch_head_is_not_observed(monkeypatch):
+    updated = []
+    pr = make_pr(
+        mergeStateStatus="BEHIND",
+        reviews={"nodes": [opencode_review("APPROVED", "head")]},
+    )
+
+    monkeypatch.setattr(sched, "update_branch", lambda repo, pr, dry_run: updated.append(pr["number"]))
+    monkeypatch.setattr(sched, "wait_for_updated_branch_head", lambda repo, pr: None)
+
+    decision = inspect(pr, dry_run=False)
+
+    assert decision.action == "update_branch"
+    assert updated == [1]
+    assert decision.notes == (
+        "update-branch was accepted, but the scheduler did not observe a refreshed PR head within the poll window; the next scheduler run must re-read the PR before review or merge",
+    )
+
+
+def test_post_update_branch_followup_covers_dispatch_boundaries(monkeypatch):
+    original = make_pr(headRefOid="old-head")
+    opencode_dispatched = []
+
+    def followup(updated_pr, **overrides):
+        monkeypatch.setattr(sched, "wait_for_updated_branch_head", lambda repo, pr: updated_pr)
+        kwargs = {
+            "dry_run": False,
+            "trigger_reviews": True,
+            "review_dispatch_allowed": True,
+            "workflow": "OpenCode Review",
+            "security_workflow": "Strix Security Scan",
+            "stale_opencode_minutes": 45,
+        }
+        kwargs.update(overrides)
+        return sched.post_update_branch_followup("owner/repo", original, **kwargs)
+
+    assert "without a new head SHA" in followup(make_pr(headRefOid="old-head"))
+    assert "review dispatch is disabled" in followup(make_pr(headRefOid="new-head"), trigger_reviews=False)
+    assert "review dispatch limit reached" in followup(
+        make_pr(headRefOid="new-head"),
+        review_dispatch_allowed=False,
+    )
+    assert "same-head Strix evidence is already running" in followup(
+        make_pr(
+            headRefOid="new-head",
+            statusCheckRollup={"contexts": {"nodes": [strix_check(status="IN_PROGRESS", conclusion="")]}},
+        )
+    )
+    assert "same-head OpenCode review is already running" in followup(
+        make_pr(
+            headRefOid="new-head",
+            statusCheckRollup={"contexts": {"nodes": [strix_check(), opencode_check()]}},
+        )
+    )
+
+    monkeypatch.setattr(
+        sched,
+        "dispatch_opencode_review",
+        lambda repo, workflow, pr, dry_run: opencode_dispatched.append((repo, workflow, pr["headRefOid"], dry_run)),
+    )
+    assert "OpenCode review was dispatched" in followup(
+        make_pr(
+            headRefOid="new-head",
+            statusCheckRollup={"contexts": {"nodes": [strix_check()]}},
+        )
+    )
+    assert opencode_dispatched == [("owner/repo", "OpenCode Review", "new-head", False)]
+
+
+def test_update_branch_summary_includes_followup_notes():
+    summary = "\n".join(
+        sched.update_branch_summary(
+            [
+                sched.Decision(
+                    12,
+                    "update_branch",
+                    "branch update requested",
+                    ("updated head abc123 observed after update-branch; same-head Strix evidence dispatched",),
+                )
+            ]
+        )
+    )
+
+    assert "Follow-up evidence" in summary
+    assert "PR #12: updated head abc123 observed after update-branch" in summary
+
+
 def test_inspect_pr_handles_approved_reviews_and_dispatch(monkeypatch):
     approved = make_pr(reviews={"nodes": [opencode_review("APPROVED", "head")]})
     failed = make_pr(
@@ -1453,6 +1686,7 @@ def test_main_limits_review_dispatches_without_blocking_branch_updates(monkeypat
         "update_branch",
         lambda repo, pr, dry_run: updated.append(pr["number"]),
     )
+    monkeypatch.setattr(sched, "wait_for_updated_branch_head", lambda repo, pr: None)
 
     assert (
         sched.main(
