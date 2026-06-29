@@ -503,6 +503,7 @@ def repair_approval_summary(reason: str, summary: str) -> str:
 def check_structural_approval(control_file: Path) -> int:
     """Validate an already-normalized control block before publishing approval."""
     def reject(reason: str) -> int:
+        """Reject approval with a stable no-conclusion reason."""
         print(f"NO_CONCLUSION: {reason}", file=sys.stderr)
         return 4
 

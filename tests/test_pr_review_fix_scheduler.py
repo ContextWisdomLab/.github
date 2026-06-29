@@ -1,4 +1,7 @@
 import json
+import runpy
+import subprocess
+import sys
 import time
 
 import pytest
@@ -24,14 +27,17 @@ def make_pr(**overrides):
 
 
 def test_recent_fix_marker_is_head_scoped():
+    """Fix markers are scoped to the exact PR head."""
     head = "a" * 40
     comments = [{"body": f"{fix.FIX_MARKER} head_sha={head} epoch={int(time.time())} -->"}]
 
     assert fix.recent_fix_marker_exists(comments, head, 24 * 3600)
     assert not fix.recent_fix_marker_exists(comments, "b" * 40, 24 * 3600)
+    assert not fix.recent_fix_marker_exists([{"body": f"{fix.FIX_MARKER} head_sha={head} epoch=oops -->"}], head, 24 * 3600)
 
 
 def test_needs_autofix_uses_current_head_evidence():
+    """Autofix only starts from current-head review or thread evidence."""
     head = "a" * 40
     pr = make_pr(
         headRefOid=head,
@@ -51,6 +57,7 @@ def test_needs_autofix_uses_current_head_evidence():
 
 
 def test_process_queue_dispatches_same_repo_current_head(monkeypatch, capsys):
+    """The queue path dispatches one same-repository autofix."""
     pr = make_pr()
     calls = []
 
@@ -71,6 +78,7 @@ def test_process_queue_dispatches_same_repo_current_head(monkeypatch, capsys):
 
 
 def test_autofix_context_filters_outdated_threads_and_renders_checks():
+    """The context helper filters stale threads and renders compact checks."""
     assert context.repo_parts("owner/repo") == ("owner", "repo")
     assert context.check_summary(
         [
@@ -80,3 +88,222 @@ def test_autofix_context_filters_outdated_threads_and_renders_checks():
     ) == ["- OpenCode Review/opencode-review: COMPLETED FAILURE", "- lint: SUCCESS"]
     with pytest.raises(SystemExit):
         context.parse_args(["--repo", "bad repo", "--pr-number", "1", "--head-sha", "a" * 40, "--output", "out.md"])
+
+
+def test_context_run_json_and_pr_fetch(monkeypatch):
+    """Context gh wrappers decode JSON and surface command errors."""
+    calls = []
+
+    def fake_run(argv, check, stdout, stderr, text):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout='{"ok": true}', stderr="")
+
+    monkeypatch.setattr(context.subprocess, "run", fake_run)
+    assert context.run_json(["api", "x"]) == {"ok": True}
+    assert context.pr_view("owner/repo", 3) == {"ok": True}
+    assert calls[1][:4] == ["gh", "pr", "view", "3"]
+
+    def failed_run(argv, check, stdout, stderr, text):
+        return subprocess.CompletedProcess(argv, 1, stdout="", stderr="bad gh")
+
+    monkeypatch.setattr(context.subprocess, "run", failed_run)
+    with pytest.raises(RuntimeError, match="bad gh"):
+        context.run_json(["api", "x"])
+
+
+def test_context_reviews_threads_and_writer(monkeypatch, tmp_path):
+    """Context writer includes current reviews, active threads, and checks."""
+    head = "a" * 40
+    pr = {
+        "number": 7,
+        "title": "Fix review",
+        "url": "https://example.test/pr/7",
+        "headRefName": "feature",
+        "baseRefName": "main",
+        "headRefOid": head,
+        "baseRefOid": "b" * 40,
+        "mergeStateStatus": "CLEAN",
+        "statusCheckRollup": [
+            {"__typename": "CheckRun", "name": "tests", "status": "COMPLETED", "conclusion": "SUCCESS"},
+            {"__typename": "StatusContext", "context": "lint", "state": "SUCCESS"},
+        ],
+    }
+    reviews = [
+        [
+            {"commit_id": "old", "state": "COMMENTED", "body": ""},
+            {"commit_id": head, "state": "COMMENTED", "body": "not a decision"},
+        ],
+        [
+            {"commit_id": head, "state": "APPROVED", "user": {"login": "opencode-agent"}, "body": "looks good"},
+            {"commit_id": "old", "state": "CHANGES_REQUESTED", "user": {"login": "opencode-agent"}, "body": head},
+        ],
+    ]
+    threads = [
+        {"id": "resolved", "isResolved": True, "isOutdated": False, "comments": {"nodes": []}},
+        {"id": "outdated", "isResolved": False, "isOutdated": True, "comments": {"nodes": []}},
+        {
+            "id": "active",
+            "isResolved": False,
+            "isOutdated": False,
+            "comments": {"nodes": [{"author": {"login": "reviewer"}, "path": "x.py", "line": 12, "body": "please fix"}]},
+        },
+    ]
+
+    def fake_run_json(args):
+        joined = " ".join(args)
+        if args[:2] == ["pr", "view"]:
+            return pr
+        if "pulls/7/reviews" in joined:
+            return reviews
+        if args[:2] == ["api", "graphql"]:
+            return {"data": {"repository": {"pullRequest": {"reviewThreads": {"nodes": threads}}}}}
+        raise AssertionError(args)
+
+    monkeypatch.setattr(context, "run_json", fake_run_json)
+    assert [r["state"] for r in context.current_reviews("owner/repo", 7, head)] == ["APPROVED", "CHANGES_REQUESTED"]
+    assert [t["id"] for t in context.review_threads("owner/repo", 7)] == ["active"]
+
+    output = tmp_path / "context.md"
+    context.write_context("owner/repo", 7, head, output)
+    body = output.read_text()
+    assert "APPROVED by opencode-agent" in body
+    assert "Thread active" in body
+    assert "- tests: COMPLETED SUCCESS" in body
+
+    monkeypatch.setattr(context, "pr_view", lambda repo, number: {**pr, "headRefOid": "c" * 40})
+    with pytest.raises(RuntimeError, match="live head"):
+        context.write_context("owner/repo", 7, head, output)
+
+
+def test_context_writer_empty_reviews_threads_and_validation(monkeypatch, tmp_path):
+    """Context writer handles empty bounded review evidence."""
+    head = "a" * 40
+    pr = {
+        "number": 7,
+        "title": "Fix review",
+        "url": "https://example.test/pr/7",
+        "headRefName": "feature",
+        "baseRefName": "main",
+        "headRefOid": head,
+        "baseRefOid": "b" * 40,
+        "mergeStateStatus": "CLEAN",
+        "statusCheckRollup": [],
+    }
+    monkeypatch.setattr(context, "pr_view", lambda repo, number: pr)
+    monkeypatch.setattr(context, "current_reviews", lambda repo, number, head_sha: [])
+    monkeypatch.setattr(context, "review_threads", lambda repo, number: [])
+
+    output = tmp_path / "context.md"
+    context.write_context("owner/repo", 7, head, output)
+    body = output.read_text()
+    assert "(no current-head review objects)" in body
+    assert "(no unresolved non-outdated review threads)" in body
+    assert context.current_reviews(
+        "owner/repo",
+        7,
+        head,
+    ) == []
+    with pytest.raises(ValueError):
+        context.repo_parts("owner")
+
+
+def test_context_parse_and_main(monkeypatch, tmp_path):
+    """Context CLI validates arguments and calls the writer."""
+    head = "a" * 40
+    output = tmp_path / "out.md"
+    called = []
+    monkeypatch.setattr(context, "write_context", lambda repo, number, head_sha, out: called.append((repo, number, head_sha, out)))
+
+    args = context.parse_args(["--repo", "owner/repo", "--pr-number", "1", "--head-sha", head, "--output", str(output)])
+    assert args.repo == "owner/repo"
+    assert context.main(["--repo", "owner/repo", "--pr-number", "1", "--head-sha", head, "--output", str(output)]) == 0
+    assert called == [("owner/repo", 1, head, output)]
+
+    for bad_args in (
+        ["--pr-number", "1", "--head-sha", head, "--output", str(output)],
+        ["--repo", "owner/repo", "--pr-number", "0", "--head-sha", head, "--output", str(output)],
+        ["--repo", "owner/repo", "--pr-number", "1", "--head-sha", "bad", "--output", str(output)],
+    ):
+        with pytest.raises(SystemExit):
+            context.parse_args(bad_args)
+
+    monkeypatch.setattr(sys, "argv", ["pr_review_autofix_context.py", "--repo", "bad repo", "--pr-number", "1", "--head-sha", head, "--output", str(output)])
+    with pytest.raises(SystemExit):
+        runpy.run_path("scripts/ci/pr_review_autofix_context.py", run_name="__main__")
+
+
+def test_fix_run_json_comment_marker_and_dispatch(monkeypatch, capsys):
+    """Fix scheduler gh wrappers and mutation helpers use plain argv."""
+    calls = []
+    monkeypatch.setattr(
+        fix,
+        "run",
+        lambda argv: calls.append(argv)
+        or ('[[{"id": 1}]]' if any("issues/7/comments" in item for item in argv) else '[{"id": 1}]'),
+    )
+    assert fix.run_json(["api", "x"]) == [{"id": 1}]
+    assert fix.issue_comments("owner/repo", 7) == [{"id": 1}]
+
+    pr = make_pr()
+    fix.create_fix_marker("owner/repo", pr, dry_run=True)
+    fix.dispatch_autofix("owner/repo", pr, workflow="fix.yml", dry_run=True)
+    assert "DRY-RUN: would create autofix marker" in capsys.readouterr().out
+
+    fix.create_fix_marker("owner/repo", pr, dry_run=False)
+    fix.dispatch_autofix("owner/repo", pr, workflow="fix.yml", dry_run=False)
+    assert calls[-2][:5] == ["gh", "api", "-X", "POST", "repos/owner/repo/issues/7/comments"]
+    assert calls[-1][:5] == ["gh", "workflow", "run", "fix.yml", "--repo"]
+
+
+def test_fix_inspect_skip_wait_and_error_paths(monkeypatch):
+    """Inspect and queue logic report skip, wait, dispatch-limit, and errors."""
+    args = fix.parse_args(["--repo", "owner/repo", "--base-branch", "main"])
+    assert fix.inspect_pr("owner/repo", make_pr(isDraft=True), args) == ("skip", ("draft PR",))
+    assert fix.inspect_pr("owner/repo", make_pr(baseRefName="develop"), args)[1][0].startswith("base branch")
+    assert fix.inspect_pr("owner/repo", make_pr(headRepository={"nameWithOwner": "fork/repo"}), args)[1] == (
+        "external PR head is not writable by repository workflow credentials",
+    )
+
+    monkeypatch.setattr(fix, "needs_autofix", lambda pr: (False, ()))
+    assert fix.inspect_pr("owner/repo", make_pr(), args) == ("skip", ("no current-head change request or active unresolved review thread",))
+
+    monkeypatch.setattr(fix, "needs_autofix", lambda pr: (True, ("reason",)))
+    monkeypatch.setattr(fix, "issue_comments", lambda repo, number: [{"body": f"{fix.FIX_MARKER} head_sha={'a' * 40} epoch={int(time.time())} -->"}])
+    assert fix.inspect_pr("owner/repo", make_pr(), args) == ("wait", ("recent autofix marker exists for this head",))
+
+    pr1 = make_pr(number=1)
+    pr2 = make_pr(number=2)
+    monkeypatch.setattr(fix, "fetch_open_prs", lambda repo, max_prs: [pr1, pr2])
+    monkeypatch.setattr(fix, "inspect_pr", lambda repo, pr, args: ("dispatch", ("reason",)))
+    payload_lines = []
+    monkeypatch.setattr("builtins.print", lambda *parts, **kwargs: payload_lines.append(" ".join(map(str, parts))))
+    assert fix.process_queue(args) == 0
+    assert "autofix dispatch limit reached" in payload_lines[-1]
+
+    monkeypatch.setattr(fix, "fetch_pr", lambda repo, number: [make_pr(number=number)])
+    monkeypatch.setattr(fix, "inspect_pr", lambda repo, pr, args: (_ for _ in ()).throw(RuntimeError("boom")))
+    args = fix.parse_args(["--repo", "owner/repo", "--base-branch", "main", "--pr-number", "3"])
+    payload_lines.clear()
+    assert fix.process_queue(args) == 0
+    assert '"action": "error"' in payload_lines[-1]
+
+
+def test_fix_parse_args_and_self_test(monkeypatch):
+    """Fix scheduler CLI validates inputs and exposes self-test."""
+    assert fix.main(["--self-test"]) == 0
+    assert fix.parse_args(["--self-test"]).self_test
+    monkeypatch.setattr(sys, "argv", ["pr_review_fix_scheduler.py", "--self-test"])
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_path("scripts/ci/pr_review_fix_scheduler.py", run_name="__main__")
+    assert exc.value.code == 0
+
+    for bad_args in (
+        ["--base-branch", "main"],
+        ["--repo", "owner/repo"],
+        ["--repo", "owner/repo", "--base-branch", "main", "--pr-number", "-1"],
+        ["--repo", "owner/repo", "--base-branch", "main", "--max-prs", "0"],
+        ["--repo", "owner/repo", "--base-branch", "main", "--max-dispatches", "0"],
+        ["--repo", "owner/repo", "--base-branch", "main", "--retry-hours", "0"],
+    ):
+        with pytest.raises(SystemExit):
+            fix.parse_args(bad_args)

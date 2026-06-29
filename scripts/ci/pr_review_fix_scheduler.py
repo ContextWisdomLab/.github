@@ -58,10 +58,7 @@ def recent_fix_marker_exists(
         match = FIX_MARKER_RE.search(str(comment.get("body") or ""))
         if not match or match.group(1).lower() != head_sha.lower():
             continue
-        try:
-            return now - int(match.group(2)) < min_interval_seconds
-        except ValueError:
-            continue
+        return now - int(match.group(2)) < min_interval_seconds
     return False
 
 
