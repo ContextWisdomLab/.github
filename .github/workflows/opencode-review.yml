@@ -294,12 +294,59 @@ jobs:
             done < <(tracked_python_projects_with_tests)
           }
 
+          configured_python_ci_test_commands() {
+            local project_dir="$1"
+            local workflow_dir="${project_dir}/.github/workflows"
+            [ -d "$workflow_dir" ] || return 0
+
+            python3 - "$workflow_dir" <<'PY'
+          import pathlib
+          import re
+          import shlex
+          import sys
+
+          workflow_dir = pathlib.Path(sys.argv[1])
+          commands = []
+          seen = set()
+          for path in sorted(workflow_dir.glob("ci.y*ml")):
+              for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                  match = re.match(r"\s*run:\s*(.+?)\s*$", line)
+                  if not match:
+                      continue
+                  command = match.group(1).strip()
+                  if "pytest" not in command:
+                      continue
+                  lowered = command.lower()
+                  if lowered.startswith(("pip install", "python -m pip install", "python3 -m pip install")):
+                      continue
+                  try:
+                      words = shlex.split(command)
+                  except ValueError:
+                      continue
+                  if "pytest" not in [pathlib.PurePosixPath(word).name for word in words]:
+                      continue
+                  if command not in seen:
+                      seen.add(command)
+                      commands.append(command)
+          print("\n".join(commands))
+          PY
+          }
+
           run_python_test_coverage() {
             local measured_projects=0
             while IFS= read -r project_dir; do
               measured_projects=1
-              run_and_capture "Python test suite (${project_dir})" \
-                bash -c 'cd "$1" && PYTHONPATH=. uv run pytest tests' bash "$project_dir"
+              configured_commands="$(configured_python_ci_test_commands "$project_dir")"
+              if [ -n "$configured_commands" ]; then
+                while IFS= read -r configured_command; do
+                  [ -n "$configured_command" ] || continue
+                  run_and_capture "Python configured CI test suite (${project_dir})" \
+                    bash -c 'cd "$1" && PYTHONPATH=. bash -lc "$2"' bash "$project_dir" "$configured_command"
+                done <<<"$configured_commands"
+              else
+                run_and_capture "Python test suite (${project_dir})" \
+                  bash -c 'cd "$1" && PYTHONPATH=. uv run pytest tests' bash "$project_dir"
+              fi
             done < <(tracked_python_projects_with_tests)
 
             if [ "$measured_projects" -eq 0 ]; then
