@@ -107,24 +107,6 @@
             "output": 100000
           }
         },
-        "openai/gpt-5-chat": {
-          "name": "OpenAI GPT-5 Chat",
-          "tool_call": true,
-          "reasoning": true,
-          "limit": {
-            "context": 200000,
-            "output": 100000
-          }
-        },
-        "openai/gpt-5-mini": {
-          "name": "OpenAI GPT-5 Mini",
-          "tool_call": true,
-          "reasoning": true,
-          "limit": {
-            "context": 200000,
-            "output": 100000
-          }
-        },
         "deepseek/deepseek-r1-0528": {
           "name": "DeepSeek R1 0528",
           "tool_call": true,
