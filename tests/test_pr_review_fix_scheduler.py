@@ -224,6 +224,7 @@ def test_context_parse_and_main(monkeypatch, tmp_path):
         ["--repo", "owner/repo", "--pr-number", "0", "--head-sha", head, "--output", str(output)],
         ["--repo", "owner/repo", "--pr-number", "1", "--head-sha", "bad", "--output", str(output)],
     ):
+        monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
         with pytest.raises(SystemExit):
             context.parse_args(bad_args)
 
@@ -305,5 +306,7 @@ def test_fix_parse_args_and_self_test(monkeypatch):
         ["--repo", "owner/repo", "--base-branch", "main", "--max-dispatches", "0"],
         ["--repo", "owner/repo", "--base-branch", "main", "--retry-hours", "0"],
     ):
+        monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
+        monkeypatch.delenv("DEFAULT_BRANCH", raising=False)
         with pytest.raises(SystemExit):
             fix.parse_args(bad_args)
