@@ -49,18 +49,13 @@ then dispatches OpenCode for the same PR head when review evidence is missing or
 stale.
 This avoids running PR-head review, CodeGraph, coverage, or PoC code as an
 unbounded local workflow copy.
-Scheduled review-feedback autofix is different: GitHub required workflows do
-not provide the target repository's push-capable `GITHUB_TOKEN` to an
-organization-only scheduler. Repositories that allow bot autofix therefore keep
-a tiny caller/worker surface, but the queue decision logic lives in the central
-`PR Review Fix Scheduler` reusable workflow and script.
 Strix keeps `cancel-in-progress: false` so old evidence is not cancelled by a
 force-push, but PR-scoped concurrency includes the head SHA so an obsolete scan
 does not serialize newer current-head evidence.
 
 OpenCode approval is evidence-gated. Before approval, the review summary must
 name changed files, CodeGraph or structural MCP evidence, a Change Flow DAG,
-passing supported test-suite evidence, configured docstring-gate evidence or advisory docstring status, and a concrete
+100% test coverage evidence, 100% docstring coverage evidence, and a concrete
 PoC/execution result. It must also split `Developer experience:` from
 `User experience:` so maintainability/review/CI friction is not confused with
 product, documentation, review-comment, or status-check reader outcomes. The PoC

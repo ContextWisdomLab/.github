@@ -10,7 +10,3 @@
 **Vulnerability:** Silent Failure / Secret Leakage Risk
 **Learning:** In `scripts/ci/opencode_review_approve_gate.sh`, `subprocess.run` dropped `stderr` entirely (`stderr=subprocess.DEVNULL`). This hides potential Git errors and causes maintainability regressions. Blindly logging `stderr` instead, however, risks leaking sensitive credentials injected by GitHub Actions.
 **Prevention:** Capture `stderr` and filter out known credential patterns (e.g., Bearer tokens, GitHub PATs) before writing errors to `sys.stderr`. Never drop `stderr` completely on subprocess failures.
-## 2026-06-25 - Prevent CI Logs Security Exposure and Explicit Shell Usage
-**Vulnerability:** Information Disclosure / Command Injection
-**Learning:** `subprocess.run` defaults to `shell=False`, but linters like Bandit require explicit `shell=False` to pass security checks. Furthermore, logging `process.stderr` or command arguments in CI tools can leak sensitive data (e.g., GitHub tokens or API keys passed to commands) if a command fails and dumps the context.
-**Prevention:** Always explicitly define `shell=False` when using `subprocess.run()`. Scrub secrets from both arguments and `stderr` before including them in error messages within CI scripts.
