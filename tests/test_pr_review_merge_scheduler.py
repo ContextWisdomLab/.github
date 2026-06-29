@@ -492,6 +492,35 @@ def test_review_state_and_failed_checks():
     assert sched.failed_status_checks(manual_strix_supersedes_pr_target_failure) == ["lint"]
 
 
+def test_run_command_failure_scrubs_secrets(monkeypatch):
+    import subprocess
+
+    class MockProcess:
+        def __init__(self, returncode, stdout, stderr):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def mock_run(args, **kwargs):
+        stderr_msg = "Error using Token secret_token_123 and bearer super_secret"
+        if "fail" in args:
+            raise subprocess.CalledProcessError(1, args, output="", stderr=stderr_msg)
+        return MockProcess(0, "success", "")
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+
+    assert sched.run(["success"]) == "success"
+
+    token_placeholder = "ghp_placeholder_token_with_underscores_123"
+    with pytest.raises(RuntimeError) as exc_info:
+        sched.run(["gh", "api", "fail", "-H", f"Authorization: token {token_placeholder}"])
+
+    error_msg = str(exc_info.value)
+    assert token_placeholder not in error_msg
+    assert "secret_token_123" not in error_msg
+    assert "super_secret" not in error_msg
+    assert "***" in error_msg
+
 def test_actions_call_gh_with_expected_arguments(monkeypatch):
     calls = []
 
@@ -1005,9 +1034,10 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
         statusCheckRollup={"contexts": {"nodes": [{"__typename": "CheckRun", "name": "strix", "conclusion": "FAILURE"}]}},
     )
     failed_decision = inspect(behind_failed)
-    assert failed_decision.action == "block"
-    assert failed_decision.reason == "failed check(s): strix"
-    assert called == []
+    assert failed_decision.action == "update_branch"
+    assert "workflow GH_TOKEN" in failed_decision.reason
+    assert called == [("owner/repo", 1, True)]
+    called.clear()
     mixed_failure_and_action_required = make_pr(
         reviews={"nodes": [opencode_review("APPROVED", "head")]},
         statusCheckRollup={
@@ -1033,16 +1063,21 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
         },
     )
     action_required_decision = inspect(behind_action_required)
-    assert action_required_decision.action == "wait"
-    assert "workflow action required: opencode-review" in action_required_decision.reason
-    assert called == []
+    assert action_required_decision.action == "update_branch"
+    assert "workflow GH_TOKEN" in action_required_decision.reason
+    assert called == [("owner/repo", 1, True)]
+    called.clear()
     behind_auto_merge_enabled = make_pr(
         mergeStateStatus="BEHIND",
         reviews={"nodes": [opencode_review("APPROVED", "head")]},
         autoMergeRequest={"enabledAt": "now"},
     )
-    assert inspect(behind_auto_merge_enabled).action == "update_branch"
+    disabled.clear()
+    behind_auto_merge_decision = inspect(behind_auto_merge_enabled)
+    assert behind_auto_merge_decision.action == "update_branch"
+    assert "existing auto-merge request remains queued" in behind_auto_merge_decision.reason
     assert called == [("owner/repo", 1, True)]
+    assert disabled == []
     called.clear()
     rest_behind = make_pr(
         mergeStateStatus="CLEAN",
@@ -1249,7 +1284,10 @@ def test_main_keeps_scanning_after_action_error(monkeypatch, capsys):
 def test_scrub_sensitive_data_and_run_error():
     assert sched.scrub_sensitive_data("Authorization: Bearer mytoken123") == "Authorization: Bearer ***"
     assert sched.scrub_sensitive_data("token mytoken123") == "token ***"
-    assert sched.scrub_sensitive_data("ghp_1234567890abcdef") == "***"
+    assert sched.scrub_sensitive_data("ghp_placeholder_token_with_underscores_123") == "***"
+    assert sched.scrub_sensitive_data("gho_installation_token_value") == "***"
+    assert sched.scrub_sensitive_data("ghu_user_token_value") == "***"
+    assert sched.scrub_sensitive_data("ghs_server_token_value") == "***"
     assert sched.scrub_sensitive_data("github_pat_11AAAAA_abcdefg") == "***"
     assert sched.scrub_sensitive_data("No secrets here") == "No secrets here"
     assert sched.scrub_sensitive_data("") == ""

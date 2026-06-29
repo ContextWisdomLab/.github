@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -148,7 +149,7 @@ def scrub_sensitive_data(text: str | None) -> str | None:
         return text
     text = re.sub(r'(?i)(bearer\s+)[^\s"\'\\]+', r'\1***', text)
     text = re.sub(r'(?i)(token\s+)[^\s"\'\\]+', r'\1***', text)
-    text = re.sub(r'(ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)', '***', text)
+    text = re.sub(r'(?i)(github_pat_[A-Za-z0-9_]+|gh[psuo]_[A-Za-z0-9_]+)', '***', text)
     return text
 
 
@@ -410,11 +411,16 @@ def fetch_rest_mergeable_state(repo: str, number: int) -> str:
 
 def enrich_rest_mergeable_states(repo: str, prs: list[dict[str, Any]]) -> None:
     """Attach REST mergeability evidence to GraphQL pull request payloads."""
-    for pr in prs:
+    def enrich(pr: dict[str, Any]) -> None:
+        """Attach REST mergeability evidence to one pull request payload."""
         try:
             pr["restMergeableState"] = fetch_rest_mergeable_state(repo, int(pr["number"]))
         except RuntimeError as exc:
             pr["restMergeableStateError"] = bounded_error_summary(str(exc))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(prs) or 1)) as executor:
+        for _ in executor.map(enrich, prs):
+            pass
 
 
 def effective_merge_state(pr: dict[str, Any]) -> str:
@@ -1022,6 +1028,19 @@ def inspect_pr(
         return decide("block", "current-head OpenCode review requested changes")
 
     current_head_approved = has_current_head_approval(pr)
+    if merge_state == "BEHIND" and current_head_approved:
+        if not update_branches:
+            return decide("wait", "current-head OpenCode review approved; branch update disabled")
+        if not can_update_pr_head(repo, pr):
+            return decide("wait", non_mutable_head_reason(repo, pr))
+        update_branch(repo, pr, dry_run=dry_run)
+        suffix = "; existing auto-merge request remains queued" if pr.get("autoMergeRequest") else ""
+        return decide(
+            "update_branch",
+            "current-head OpenCode review approved; branch update requested with workflow GH_TOKEN "
+            f"(github-actions[bot] in GitHub Actions){suffix}",
+        )
+
     if current_head_approved:
         failed_checks = failed_status_checks(pr)
         if failed_checks:
@@ -1049,21 +1068,6 @@ def inspect_pr(
                 )
             )
         return decide("wait", reason)
-
-    if merge_state == "BEHIND" and current_head_approved:
-        if not update_branches:
-            return decide("wait", "current-head OpenCode review approved; branch update disabled")
-        if not can_update_pr_head(repo, pr):
-            return decide("wait", non_mutable_head_reason(repo, pr))
-        had_auto_merge = bool(pr.get("autoMergeRequest"))
-        if had_auto_merge:
-            disable_auto_merge(repo, pr, dry_run=dry_run)
-        update_branch(repo, pr, dry_run=dry_run)
-        prefix = "auto-merge disabled before branch update; " if had_auto_merge else ""
-        return decide(
-            "update_branch",
-            f"{prefix}current-head OpenCode review approved; branch update requested with workflow GH_TOKEN (github-actions[bot] in GitHub Actions)",
-        )
 
     if current_head_approved:
         if pr.get("autoMergeRequest"):
@@ -1312,6 +1316,7 @@ def update_branch_summary(decisions: list[Decision]) -> list[str]:
         "",
         f"Requested `update-branch` for PR {pr_list} with the workflow `GITHUB_TOKEN`, guarded by the observed `expected_head_sha`.",
         "This is intentionally done inside GitHub Actions, not from a maintainer's local `gh` credential, so the mechanical update is attributable to the automation actor.",
+        "Existing native auto-merge requests stay queued; branch freshness should not be repaired by disabling auto-merge first.",
         "The scheduler refuses a non-dry-run `update-branch` outside GitHub Actions; dispatch the workflow instead of running the mutation locally.",
         "This branch-update API path needs `pull-requests: write`; it does not require the scheduler job to widen repository `contents` to write.",
         "When repository permissions allow the mutation, GitHub records the resulting branch update as `github-actions[bot]`.",
@@ -1713,11 +1718,24 @@ def self_test() -> None:
         base_branch="main",
     )
     assert decision.action == "update_branch"
-    assert "auto-merge disabled before branch update" in decision.reason
-    sample["autoMergeRequest"] = None
     sample["statusCheckRollup"]["contexts"]["nodes"] = [
         {"__typename": "CheckRun", "name": "strix", "status": "COMPLETED", "conclusion": "FAILURE"}
     ]
+    decision = inspect_pr(
+        "owner/repo",
+        sample,
+        dry_run=True,
+        trigger_reviews=True,
+        enable_auto_merge_flag=True,
+        update_branches=True,
+        workflow="OpenCode Review",
+        security_workflow="Strix Security Scan",
+        base_branch="main",
+    )
+    assert decision.action == "update_branch"
+    assert "existing auto-merge request remains queued" in decision.reason
+    sample["autoMergeRequest"] = None
+    sample["mergeStateStatus"] = "CLEAN"
     decision = inspect_pr(
         "owner/repo",
         sample,
