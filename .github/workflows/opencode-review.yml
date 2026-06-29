@@ -536,7 +536,7 @@ jobs:
     if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target')
     runs-on: ubuntu-latest
     permissions:
-      actions: read
+      actions: write
       checks: read
       id-token: write
       contents: read
@@ -4446,3 +4446,19 @@ jobs:
               ;;
           esac
           echo "::endgroup::"
+
+      - name: Dispatch merge scheduler after approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
+        run: |
+          set -euo pipefail
+          gh workflow run pr-review-merge-scheduler.yml \
+            --repo "$GH_REPOSITORY" \
+            --ref main \
+            -f dry_run=false \
+            -f max_prs=100 \
+            -f trigger_reviews=false \
+            -f enable_auto_merge=true \
+            -f merge_mode=auto \
+            -f update_branches=true
