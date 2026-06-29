@@ -1,6 +1,6 @@
 # ContextualWisdomLab central required workflow rollout
 
-Updated: 2026-06-28 20:09 KST
+Updated: 2026-06-29 16:33 KST
 
 ## Decision
 
@@ -17,8 +17,13 @@ Use an organization repository ruleset instead of copying workflow files into ea
   - `.github/workflows/opencode-review.yml`
   - `.github/workflows/pr-review-merge-scheduler.yml`
 - Required workflow ref: `refs/heads/main`
-- Required workflow SHA: `531482764986bf7da98c1317d59e6e51e7c61d02`
+- Required workflow head: `81408f3dbe0a3c43dc4b76133f72a5e314df8a10`
 - Required workflow trigger support: `pull_request_target`
+
+`.github` PR `#100` merged on 2026-06-29 05:45 KST. The required-workflow
+ruleset should now point back at `.github@main`; if live organization ruleset
+inspection reports another ref, treat that as an operations drift issue and
+restore ruleset `18156473` to the current `main` head.
 
 This keeps Strix security evidence, OpenCode review evidence, and merge/update automation sourced from the central `.github` repository. Target repositories do not need local copies of these workflows for the organization required workflow rule.
 
@@ -30,6 +35,7 @@ The central `.github/workflows/opencode-review.yml` is now part of the active or
 - Stable required check job name: `opencode-review`
 - Trusted source: `ContextualWisdomLab/.github`
 - PR-head handling: checkout or fetch PR head as review data only; trusted scripts come from the central `.github` ref
+- Manual target support: OpenCode and Strix `workflow_dispatch` runs can pass `target_repository` for repos such as private `aFIPC` whose PRs do not yet inherit the org required-workflow rule; org ruleset coverage is still the required steady state before draining that queue
 - Model token posture: use the organization `STRIX_GITHUB_MODELS_TOKEN` secret for GitHub Models calls, with `github.token` as the fallback; live workflow evidence showed `github.token` alone can return 403 from `models.github.ai/inference`
 - Write posture: OpenCode may create review/comment side effects through the OpenCode app token when available; `github.token` remains the last fallback and publication failures are soft-failed
 - Coverage execution posture: privileged `pull_request_target` coverage runs only for same-repository PR heads; fork PR heads must be covered by an unprivileged PR-side check or manually trusted dispatch before approval
@@ -49,27 +55,29 @@ The central `.github/workflows/pr-review-merge-scheduler.yml` is now part of the
 - Token posture: the workflow passes `GH_TOKEN: ${{ github.token }}` so stale-thread resolution, branch update, auto-merge, and direct merge mutations are attributed to the target repository's `github-actions[bot]`
 - Flow posture: default branches named `main` or `master` are treated as GitHub Flow; default branches named `develop` are treated as Git Flow unless a repository explicitly sets `PROJECT_FLOW`
 - Automation boundary: `update-branch` handles `BEHIND` PRs only after current-head OpenCode approval; `DIRTY` or `CONFLICTING` PRs still require author or maintainer conflict resolution guidance
+- Retry posture: before retrying OpenCode, the scheduler force-cancels older active OpenCode runs for the same PR number and a previous head SHA. It does not automatically cancel Strix runs because security evidence should not be silently discarded by force-push churn.
 
 Do not centralize the scheduler by running a `.github` scheduled job against other repositories with the `.github` repository token. That would either fail permission checks or use the wrong mutation actor. The central path is a required workflow executed in each target repository context.
 
 ## Scope
 
-The active ruleset targets the public, non-fork repositories found by live GitHub inventory on 2026-06-28.
+The active ruleset targets the public, non-fork repositories found by live GitHub inventory on 2026-06-29 02:34 KST.
 
 | Repository | Default branch | Flow | Open PRs | Default-branch workflow footprint | Local central-workflow copies | Rollout status |
 | --- | --- | --- | ---: | --- | --- | --- |
-| `ContextualWisdomLab/.github` | `main` | GitHub Flow | 32 | OpenCode, scheduler, Strix | central source; keep | central source repo |
-| `ContextualWisdomLab/ContextualWisdomLab.github.io` | `main` | GitHub Flow | 15 | none | none | migrated; re-verify before final closure |
-| `ContextualWisdomLab/appguardrail` | `develop` | Git Flow | 0 | security | none | migrated; re-verify before final closure |
-| `ContextualWisdomLab/bandscope` | `develop` | Git Flow | 92 | OpenCode, scheduler, security | OpenCode, scheduler | rewrite local workflow contracts before removal |
-| `ContextualWisdomLab/clearfolio` | `main` | GitHub Flow | 26 | none | none | migrated; re-verify before final closure |
-| `ContextualWisdomLab/codec-carver` | `main` | GitHub Flow | 19 | OpenCode, scheduler, Strix | OpenCode, scheduler, Strix | quality uplift first: 100% test/docstring coverage is not yet proven |
-| `ContextualWisdomLab/contextual-orchestrator` | `main` | GitHub Flow | 0 | security | none | no local central copies observed; verify inherited checks on next PR |
-| `ContextualWisdomLab/hyosung-itx-slogan-brief` | `main` | GitHub Flow | 0 | validation | none | migrated; re-verify before final closure |
-| `ContextualWisdomLab/naruon` | `develop` | Git Flow | 19 | OpenCode, scheduler, Strix, Pages/deploy, security | OpenCode, scheduler, Strix | complex local review/process contract; inspect #745-era behavior before removal |
-| `ContextualWisdomLab/newsdom-api` | `develop` | Git Flow | 21 | OpenCode, scheduler, Strix, Pages/deploy, security | OpenCode, scheduler, Strix | rewrite local workflow/runtime-env tests before removal |
-| `ContextualWisdomLab/pg-erd-cloud` | `main` | GitHub Flow | 25 | OpenCode, scheduler, Strix, security, autofix/fix | OpenCode, scheduler, Strix | preserve/autonomize autofix contract before removing local governance copies |
-| `ContextualWisdomLab/scopeweave` | `develop` | Git Flow | 22 | OpenCode, scheduler, Strix, Pages/deploy, security | OpenCode, scheduler, Strix | rewrite docs/tests that treat local Strix/OpenCode files as the contract |
+| `ContextualWisdomLab/.github` | `main` | GitHub Flow | 0 | OpenCode, scheduler, Strix | central source; keep | PR `#100` merged; verify ruleset `18156473` points at `.github@main` |
+| `ContextualWisdomLab/aFIPC` | `master` | GitHub Flow | 1 | local R/security checks only | none | drift: PR `#78` lacks inherited OpenCode, Strix, and scheduler required-workflow checks |
+| `ContextualWisdomLab/ContextualWisdomLab.github.io` | `main` | GitHub Flow | 1 | none | none | migrated; re-verify before final closure |
+| `ContextualWisdomLab/appguardrail` | `develop` | Git Flow | 1 | none | none | migrated; re-verify before final closure |
+| `ContextualWisdomLab/bandscope` | `develop` | Git Flow | 1 | none | none | no local central copies observed; verify inherited checks on next PR |
+| `ContextualWisdomLab/clearfolio` | `main` | GitHub Flow | 1 | none | none | migrated; re-verify before final closure |
+| `ContextualWisdomLab/codec-carver` | `main` | GitHub Flow | 1 | OpenCode, scheduler, Strix | OpenCode, scheduler, Strix | quality uplift first: 100% test/docstring coverage is not yet proven |
+| `ContextualWisdomLab/contextual-orchestrator` | `main` | GitHub Flow | 0 | none | none | no local central copies observed; verify inherited checks on next PR |
+| `ContextualWisdomLab/hyosung-itx-slogan-brief` | `main` | GitHub Flow | 0 | none | none | migrated; re-verify before final closure |
+| `ContextualWisdomLab/naruon` | `develop` | Git Flow | 1 | OpenCode, scheduler, Strix, PR governance, Strix self-test | OpenCode, scheduler, Strix | complex local review/process contract; inspect #745-era behavior before removal |
+| `ContextualWisdomLab/newsdom-api` | `develop` | Git Flow | 1 | OpenCode, scheduler, Strix | OpenCode, scheduler, Strix | rewrite local workflow/runtime-env tests before removal |
+| `ContextualWisdomLab/pg-erd-cloud` | `main` | GitHub Flow | 1 | OpenCode, scheduler, Strix, autofix/fix scheduler | OpenCode, scheduler, Strix | preserve/autonomize autofix contract before removing local governance copies |
+| `ContextualWisdomLab/scopeweave` | `develop` | Git Flow | 1 | OpenCode, scheduler, Strix, Strix self-test | OpenCode, scheduler, Strix | rewrite docs/tests that treat local Strix/OpenCode files as the contract |
 
 ## Current policy
 
@@ -102,6 +110,9 @@ The active ruleset targets the public, non-fork repositories found by live GitHu
 - `ContextualWisdomLab/naruon` reports inherited active ruleset `18156473` with all three required workflow paths, proving target-repository inheritance after the scheduler ruleset update.
 - `ContextualWisdomLab/ContextualWisdomLab.github.io` PR `#25` merged the thin central scheduler caller and repository-local bootstrap fixes. Its main Strix run `28217860369` passed.
 - The organization ruleset API reports the central required workflows ruleset as `active` and inherited by each public non-fork target repository.
+- `.github` PR `#100` added required-workflow job rerun support and cancels older same-PR OpenCode runs before retrying the current head. Local verification on head `3c62c37a4deabdb0c6ed4ddf0951c1987f09866b`: `pytest -q` passed 38 tests, `coverage report --fail-under=100` reported 100%, `interrogate --fail-under=100 .` reported 100%.
+- `.github` PR `#100` merged at 2026-06-29 05:45 KST with merge commit `81408f3dbe0a3c43dc4b76133f72a5e314df8a10`. A follow-up admin check should verify organization ruleset `18156473` is no longer pinned to `refs/heads/codex/rerun-required-opencode-job`.
+- On 2026-06-29 16:33 KST, `ContextualWisdomLab/aFIPC` PR `#78` proved a target coverage gap: the PR had local `check`, `quality`, and `secret-and-workflow-audit` check runs, but no inherited `opencode-review`, `strix`, or `scan-pr-queue` check runs. The repository ruleset `PR` (`12815994`) required only those three local checks and required zero approving reviews. Do not merge `aFIPC` PRs until current-head central review evidence is present.
 
 ## Good patterns to keep
 
@@ -119,3 +130,4 @@ The active ruleset targets the public, non-fork repositories found by live GitHu
 - Some repositories still have local Strix/OpenCode/scheduler workflows. Do not copy more workflows into repositories; retire local copies only after repository tests and docs are rewritten to the central required-workflow contract.
 - Repositories with local autofix/update workflows, especially `pg-erd-cloud`, need an explicit central autofix contract before local workflows are removed.
 - Some repositories use classic branch protection while others use rulesets. Normalize branch protection into rulesets without removing repository-specific required application checks.
+- `aFIPC` must be added to the organization required-workflow ruleset, or the ruleset target conditions must be repaired, before its PR queue can be drained under the central-review contract. The repository-local `PR` ruleset alone is insufficient because it does not create OpenCode/Strix/scheduler evidence and allows zero required approvals.

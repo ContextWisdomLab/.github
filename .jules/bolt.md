@@ -7,6 +7,6 @@
 ## 2024-11-20 - JSON Decoding Performance - Index Advancement
 **Learning:** Even when avoiding string slicing using `json.JSONDecoder().raw_decode(text, index)`, failing to correctly advance the index by ignoring the returned `end` index (`value, _ = decoder.raw_decode(...)`) forces the search loop to repeatedly attempt to decode nested JSON structures (e.g., inner braces `{`) sequentially. This leads to massive O(N^2) time complexity and redundant parsing for large, deeply nested JSON objects.
 **Action:** Always capture and use the new end index returned by `raw_decode` (e.g., `value, next_idx = decoder.raw_decode(text, index)`) to jump over the completely parsed object and proceed efficiently.
-## 2024-12-06 - gh api subprocess I/O latency optimization
-**Learning:** Sequential execution of subprocesses making network calls (e.g., `gh api`) inside loops causes significant O(N) I/O wait latency, becoming a major performance bottleneck for scripts handling multiple items (e.g. iterating over pull requests).
-**Action:** Always prefer using `concurrent.futures.ThreadPoolExecutor` to execute independent subprocess I/O calls concurrently. This allows parallel execution of I/O bound tasks and bypasses sequential waiting.
+## 2026-06-25 - Avoid N+1 API blocking in PR checks
+**Learning:** In backend processing scripts, synchronous iterations calling an external service, such as fetching `restMergeableState` per PR, cause N+1 API bottlenecks and stall pipeline execution linearly. Bounded parallelism reduces wall-clock latency toward O(ceil(N / max_workers)) batches, not O(1).
+**Action:** Use `concurrent.futures.ThreadPoolExecutor` for independent network calls in a loop, short-circuit empty inputs, and bound `max_workers` to avoid API rate limits.
