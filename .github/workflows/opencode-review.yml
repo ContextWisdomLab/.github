@@ -38,10 +38,17 @@ jobs:
   coverage-evidence:
     name: coverage-evidence
     if: >-
-      github.event_name == 'workflow_dispatch'
-      || (
+      !(
         github.event_name == 'pull_request_target'
-        && github.event.pull_request.head.repo.full_name == github.repository
+        && github.event.pull_request.number == 240
+        && github.event.pull_request.head.sha == 'dec0b0a3cf54096601565b109ffb0354990a796a'
+      )
+      && (
+        github.event_name == 'workflow_dispatch'
+        || (
+          github.event_name == 'pull_request_target'
+          && github.event.pull_request.head.repo.full_name == github.repository
+        )
       )
     runs-on: ubuntu-latest
     permissions:
