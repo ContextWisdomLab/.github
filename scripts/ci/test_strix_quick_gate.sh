@@ -709,6 +709,8 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" 'app_token_limited_check_lookup()' "opencode approval detects app-token-limited GitHub Checks lookups"
 	assert_file_contains "$workflow_file" 'branch protection remains authoritative for target-repository checks' "opencode approval documents branch protection authority when app-token check lookup is limited"
 	assert_file_contains "$workflow_file" 'approving based on source-backed OpenCode result and successful coverage evidence while branch protection remains authoritative' "opencode approval can approve source-backed reviews when app-token failed-check lookup is limited"
+	assert_file_contains "$workflow_file" 'during deterministic fallback approval; branch protection remains authoritative for target-repository checks' "opencode deterministic fallback tolerates app-token-limited pending-check lookup"
+	assert_file_contains "$workflow_file" 'during deterministic fallback approval; approving based on coverage evidence, mergeability, human-thread checks, and branch protection authority' "opencode deterministic fallback tolerates app-token-limited failed-check lookup"
 	assert_file_contains "$workflow_file" 'opencode-agent[bot]' "opencode review can find overview comments written by the OpenCode app token"
 	assert_file_contains "$workflow_file" 'update_review_overview()' "opencode approval step can rewrite the durable Review Overview after final gate decisions"
 	assert_file_contains "$workflow_file" 'update_review_overview "$event" "$body"' "opencode approval reviews refresh the durable overview with the actual approval-step event"
