@@ -1221,6 +1221,10 @@ EOF
 	assert_file_contains "$REPO_ROOT/.github/workflows/opencode-review.yml" 'A["text"]' "opencode prompt requires quoted Mermaid labels"
 	assert_file_contains "$REPO_ROOT/.github/workflows/opencode-review.yml" 'S%s["%s"]' "opencode generated Mermaid surface labels are quoted"
 	assert_file_contains "$REPO_ROOT/.github/workflows/opencode-review.yml" 'R%s["Review risk: %s"]' "opencode generated Mermaid risk labels are quoted"
+	assert_file_contains "$REPO_ROOT/.github/workflows/opencode-review.yml" 'emit_review_body_to_action_log "$event" "$body"' "opencode PR-level review bodies are mirrored to the Actions log"
+	assert_file_contains "$REPO_ROOT/.github/workflows/opencode-review.yml" 'emit_review_body_to_action_log "$event" "$body" "$review_payload_file"' "opencode inline review bodies are mirrored to the Actions log"
+	assert_file_contains "$REPO_ROOT/.github/workflows/opencode-review.yml" 'OpenCode is publishing this review content to PR #%s.' "opencode Actions log includes the review body that is being posted"
+	assert_file_contains "$REPO_ROOT/.github/workflows/opencode-review.yml" '## OpenCode %s review body' "opencode Step Summary includes the review body that is being posted"
 
 	cat >"$changed_files_file" <<'EOF'
 .github/workflows/opencode-review.yml
