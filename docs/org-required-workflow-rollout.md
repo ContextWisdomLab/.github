@@ -1,6 +1,6 @@
 # ContextualWisdomLab central required workflow rollout
 
-Updated: 2026-06-29 22:41 KST
+Updated: 2026-06-29 22:55 KST
 
 ## Decision
 
@@ -76,7 +76,7 @@ The active ruleset targets all non-fork repositories found by live GitHub invent
 | `ContextualWisdomLab/fast-mlsirm` | public | `main` | GitHub Flow | 0 | none | migrated; no open PR evidence to verify |
 | `ContextualWisdomLab/hyosung-itx-slogan-brief` | public | `main` | GitHub Flow | 0 | none | migrated; no open PR evidence to verify |
 | `ContextualWisdomLab/linux-cluster-ops` | private | `develop` | Git Flow | 65 | none | ruleset target now includes this repo; verify inherited checks on active PRs |
-| `ContextualWisdomLab/naruon` | public | `develop` | Git Flow | 91 | `opencode-review.yml`, `pr-review-merge-scheduler.yml`, `strix-selftest.yml`, `strix.yml` | local workflow contract remains; tests and docs read the repo-local files directly |
+| `ContextualWisdomLab/naruon` | public | `develop` | Git Flow | 92 | `opencode-review.yml`, `pr-review-merge-scheduler.yml`, `strix-selftest.yml`, `strix.yml` | local workflow contract remains; classic branch-protection status checks for `strix` and `opencode-review` were removed so the org required-workflow ruleset is the review/security gate source |
 | `ContextualWisdomLab/newsdom-api` | public | `develop` | Git Flow | 32 | none | local workflows already gone; verify inherited checks on active PRs |
 | `ContextualWisdomLab/pg-erd-cloud` | public | `main` | GitHub Flow | 112 | none | PR `#361` merged at `21cbc14`; default branch no longer has the local fix scheduler wrapper |
 | `ContextualWisdomLab/scopeweave` | public | `develop` | Git Flow | 58 | none | local workflows already gone; verify inherited checks on active PRs |
@@ -124,6 +124,7 @@ The active ruleset targets all non-fork repositories found by live GitHub invent
 - Organization ruleset `18156473` now targets all live non-fork repositories, including private `aFIPC`, `linux-cluster-ops`, and `xtrmLLMBatchPython`.
 - `ContextualWisdomLab/semantic-data-portal` PR `#3` removed repo-local OpenCode, Strix, and scheduler workflows; the default branch now has no `.github/workflows` directory.
 - `ContextualWisdomLab/pg-erd-cloud` PR `#361` removed the repo-local `pr-review-fix-scheduler.yml` wrapper after central `.github` gained target repository support. It merged at 2026-06-29 22:40 KST with merge commit `21cbc14b21d59ac28ac789de58502816cc8df6ad`; live default-branch content lookup returned 404 for that wrapper path after merge.
+- `ContextualWisdomLab/naruon` classic branch protection no longer requires direct `strix` or `opencode-review` status checks on `develop`; after deletion, `branches/develop/protection/required_status_checks` returns `404 Required status checks not enabled`, while org ruleset `18156473` remains `active` and still targets `naruon`.
 - `ContextualWisdomLab/naruon` remains the next complex local-contract repository: `backend/tests/test_release_governance.py` and `scripts/ci/test_strix_quick_gate.sh` read repo-local `.github/workflows/opencode-review.yml`, `strix.yml`, and `pr-review-merge-scheduler.yml` directly, so deletion must follow a test-contract rewrite.
 
 ## Good patterns to keep
