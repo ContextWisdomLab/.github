@@ -89,6 +89,7 @@ jobs:
       - name: Measure test and docstring coverage at 100 percent
         id: measure
         env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
           COVERAGE_SOURCE_WORKDIR: ${{ github.workspace }}/pr-head
         run: |
