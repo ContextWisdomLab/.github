@@ -589,7 +589,7 @@ def _get_valid_findings(
     result: str,
     reason: str,
     summary: str,
-) -> list[Any] | None:
+) -> tuple[list[Any], str] | None:
     findings = value.get("findings")
     if findings is None and result == "APPROVE":
         findings = []
@@ -618,7 +618,7 @@ def _get_valid_findings(
         if not _is_valid_finding(finding):
             return None
 
-    return findings
+    return findings, summary
 
 
 def valid_control(
@@ -651,9 +651,10 @@ def valid_control(
     reason = value["reason"].strip()
     summary = value["summary"].strip()
 
-    findings = _get_valid_findings(value, result, reason, summary)
-    if findings is None:
+    valid_findings = _get_valid_findings(value, result, reason, summary)
+    if valid_findings is None:
         return None
+    findings, summary = valid_findings
 
     return {
         "head_sha": value["head_sha"],
