@@ -273,6 +273,21 @@ def decision_guidance(decision: Decision) -> dict[str, Any] | None:
                 "zero active unresolved review threads",
             ],
         }
+    external_merge = parse_external_head_merge_reason(decision.reason)
+    if external_merge:
+        return {
+            "type": "external_head_merge_excluded",
+            "head_repository": external_merge,
+            "summary": "The PR can be reviewed centrally, but this external head is excluded from scheduler direct merge and auto-merge.",
+            "automation_limit": "The scheduler deliberately leaves fork or external-head merges to maintainers even when approval evidence is clean.",
+            "next_required_evidence": [
+                "same-head OpenCode approval",
+                "same-head Strix evidence",
+                "required GitHub Checks success",
+                "zero active unresolved review threads",
+                "maintainer manual merge decision",
+            ],
+        }
     if decision.action == "update_branch":
         return {
             "type": "github_actions_update_branch",
@@ -386,7 +401,7 @@ def gh_graphql(query: str, **fields: str | int) -> dict[str, Any]:
         flag = "-F" if isinstance(value, int) else "-f"
         cmd.extend([flag, f"{key}={value}"])
     max_attempts = 4
-    for attempt in range(1, max_attempts + 1):
+    for attempt in range(1, max_attempts + 1):  # pragma: no branch - last failed attempt always raises
         try:
             return json.loads(run(cmd, stdin=query))
         except RuntimeError as exc:
@@ -931,18 +946,34 @@ def post_update_branch_followup(
     return f"{head_note}; same-head Strix evidence is complete, so OpenCode review was dispatched"
 
 
+def same_repository_head(repo: str, pr: dict[str, Any]) -> bool:
+    """Return whether the PR head branch belongs to the repository being scanned."""
+    head_repo = (pr.get("headRepository") or {}).get("nameWithOwner")
+    return head_repo == repo
+
+
 def can_update_pr_head(repo: str, pr: dict[str, Any]) -> bool:
     """Return whether the scheduler may try to mutate the PR head branch."""
-    head_repo = (pr.get("headRepository") or {}).get("nameWithOwner")
-    if head_repo == repo:
+    if same_repository_head(repo, pr):
         return True
     return bool(pr.get("maintainerCanModify"))
+
+
+def external_head_merge_reason(repo: str, pr: dict[str, Any]) -> str:
+    """Explain why the scheduler will not merge or auto-merge an external PR head."""
+    head_repo = (pr.get("headRepository") or {}).get("nameWithOwner") or "<unknown>"
+    return (
+        f"current-head OpenCode review approved, but head repo {head_repo} is external; "
+        "fork or external PR heads are excluded from scheduler direct merge and auto-merge. "
+        "A maintainer must merge manually after required checks, same-head OpenCode approval, "
+        "same-head Strix evidence, and unresolved-thread checks stay clean"
+    )
 
 
 def non_mutable_head_reason(repo: str, pr: dict[str, Any]) -> str:
     """Explain why a PR can be reviewed but not mechanically updated."""
     head_repo = (pr.get("headRepository") or {}).get("nameWithOwner") or "<unknown>"
-    if head_repo == repo:
+    if same_repository_head(repo, pr):
         return "current-head OpenCode review approved, but same-repository head update permission is unavailable"
     return (
         f"current-head OpenCode review approved, but head repo {head_repo} is external and not writable by "
@@ -1134,7 +1165,7 @@ def inspect_pr(
     workflow: str,
     security_workflow: str,
     base_branch: str,
-    merge_mode: str = "auto",
+    merge_mode: str = "direct_or_auto",
     stale_opencode_minutes: int = DEFAULT_STALE_OPENCODE_MINUTES,
 ) -> Decision:
     """Decide and optionally act on one pull request's merge-readiness state."""
@@ -1193,7 +1224,9 @@ def inspect_pr(
         if current_head_approved:
             if auto_merge_enabled:
                 return decide("wait", f"{auto_merge_wait_reason(merge_state)}; {conflict_reason}")
-            if enable_auto_merge_flag and merge_mode == "auto":
+            if not same_repository_head(repo, pr):
+                return decide("wait", f"{external_head_merge_reason(repo, pr)}; {conflict_reason}")
+            if enable_auto_merge_flag and merge_mode in {"auto", "direct_or_auto"}:
                 enable_auto_merge(repo, pr, dry_run=dry_run)
                 return decide(
                     "auto_merge",
@@ -1218,6 +1251,54 @@ def inspect_pr(
                 )
             )
         return decide("block", conflict_reason)
+
+    if current_head_approved:
+        failed_checks = failed_status_checks(pr)
+        if failed_checks:
+            if pr.get("autoMergeRequest"):
+                return finish(
+                    disable_auto_merge_decision(
+                        repo,
+                        pr,
+                        dry_run=dry_run,
+                        reason=f"failed check(s): {', '.join(failed_checks[:5])}; fix or rerun checks before re-enabling auto-merge",
+                    )
+                )
+            return decide("block", f"failed check(s): {', '.join(failed_checks[:5])}")
+
+    workflow_action_required = action_required_checks(pr)
+    if workflow_action_required:
+        reason = workflow_action_required_reason(workflow_action_required)
+        if pr.get("autoMergeRequest"):
+            return finish(
+                disable_auto_merge_decision(
+                    repo,
+                    pr,
+                    dry_run=dry_run,
+                    reason=f"{reason}; wait for current-head checks to rerun before re-enabling auto-merge",
+                )
+            )
+        return decide("wait", reason)
+
+    if current_head_approved and merge_state == "CLEAN":
+        if pr.get("autoMergeRequest"):
+            return decide("wait", auto_merge_wait_reason(merge_state))
+        if not same_repository_head(repo, pr):
+            return decide("wait", external_head_merge_reason(repo, pr))
+        if not enable_auto_merge_flag:
+            return decide("wait", "current head is approved; auto-merge disabled by scheduler inputs")
+        if merge_mode == "disabled":
+            return decide("wait", "current head is approved; merge mode disabled by scheduler inputs")
+        if merge_mode in {"direct", "direct_or_auto"}:
+            merge_pr(repo, pr, dry_run=dry_run)
+            return decide(
+                "merge",
+                "current head is approved; direct merge requested with workflow GH_TOKEN and --match-head-commit",
+            )
+        if merge_mode != "auto":
+            return decide("wait", f"current head is approved; unsupported merge mode: {merge_mode}")
+        enable_auto_merge(repo, pr, dry_run=dry_run)
+        return decide("auto_merge", "current head is approved; auto-merge enabled")
 
     behind_by = branch_outdated_by_base(pr, merge_state)
     if behind_by and (current_head_approved or auto_merge_enabled):
@@ -1275,50 +1356,24 @@ def inspect_pr(
         return decide("wait", "mergeability is still being calculated and no branch freshness evidence is available")
 
     if current_head_approved:
-        failed_checks = failed_status_checks(pr)
-        if failed_checks:
-            if pr.get("autoMergeRequest"):
-                return finish(
-                    disable_auto_merge_decision(
-                        repo,
-                        pr,
-                        dry_run=dry_run,
-                        reason=f"failed check(s): {', '.join(failed_checks[:5])}; fix or rerun checks before re-enabling auto-merge",
-                    )
-                )
-            return decide("block", f"failed check(s): {', '.join(failed_checks[:5])}")
-
-    workflow_action_required = action_required_checks(pr)
-    if workflow_action_required:
-        reason = workflow_action_required_reason(workflow_action_required)
-        if pr.get("autoMergeRequest"):
-            return finish(
-                disable_auto_merge_decision(
-                    repo,
-                    pr,
-                    dry_run=dry_run,
-                    reason=f"{reason}; wait for current-head checks to rerun before re-enabling auto-merge",
-                )
-            )
-        return decide("wait", reason)
-
-    if current_head_approved:
         if pr.get("autoMergeRequest"):
             return decide("wait", auto_merge_wait_reason(merge_state))
+        if not same_repository_head(repo, pr):
+            return decide("wait", external_head_merge_reason(repo, pr))
         if not enable_auto_merge_flag:
             return decide("wait", "current head is approved; auto-merge disabled by scheduler inputs")
         if merge_mode == "disabled":
             return decide("wait", "current head is approved; merge mode disabled by scheduler inputs")
-        if merge_mode == "direct":
-            if merge_state != "CLEAN":
+        if merge_mode in {"direct", "direct_or_auto"}:
+            if merge_mode == "direct_or_auto":
+                enable_auto_merge(repo, pr, dry_run=dry_run)
                 return decide(
-                    "wait",
-                    f"current head is approved; direct merge waits for CLEAN mergeability, current merge state is {merge_state}",
+                    "auto_merge",
+                    f"current head is approved; auto-merge enabled while GitHub mergeability is {merge_state}",
                 )
-            merge_pr(repo, pr, dry_run=dry_run)
             return decide(
-                "merge",
-                "current head is approved; direct merge requested with workflow GH_TOKEN and --match-head-commit",
+                "wait",
+                f"current head is approved; direct merge waits for CLEAN mergeability, current merge state is {merge_state}",
             )
         if merge_mode != "auto":
             return decide("wait", f"current head is approved; unsupported merge mode: {merge_mode}")
@@ -1457,6 +1512,7 @@ def write_actions_summary(
     lines.extend(outdated_thread_cleanup_summary(decisions))
     lines.extend(update_branch_summary(decisions))
     lines.extend(external_head_update_summary(decisions))
+    lines.extend(external_head_merge_summary(decisions))
     lines.extend(workflow_action_required_summary(decisions))
     lines.extend(action_error_summary(decisions))
 
@@ -1585,6 +1641,14 @@ def parse_external_head_update_reason(reason: str) -> str | None:
     return match.group(1)
 
 
+def parse_external_head_merge_reason(reason: str) -> str | None:
+    """Extract the external head repository from merge-exclusion guidance."""
+    match = re.search(r"head repo ([^\s]+) is external; fork or external PR heads are excluded", reason)
+    if not match:
+        return None
+    return match.group(1)
+
+
 def external_head_update_summary(decisions: list[Decision]) -> list[str]:
     """Return a GitHub Actions Summary section for non-mutable external PR heads."""
     external_waits = [
@@ -1606,6 +1670,32 @@ def external_head_update_summary(decisions: list[Decision]) -> list[str]:
             [
                 "",
                 f"- PR #{decision.pr}: ask the author of `{head_repo}` to update the branch against the base branch, or enable maintainer edit permission and rerun the scheduler.",
+            ]
+        )
+    return lines
+
+
+def external_head_merge_summary(decisions: list[Decision]) -> list[str]:
+    """Return a GitHub Actions Summary section for fork/external PR heads excluded from merge."""
+    external_waits = [
+        (decision, parse_external_head_merge_reason(decision.reason))
+        for decision in decisions
+        if parse_external_head_merge_reason(decision.reason)
+    ]
+    if not external_waits:
+        return []
+
+    lines = [
+        "",
+        "### External head merge excluded",
+        "",
+        "These PRs remain reviewable, but the scheduler will not direct-merge or enable auto-merge for fork or external heads. A maintainer must make the final merge decision after the current head stays approved and all required evidence is green.",
+    ]
+    for decision, head_repo in external_waits:
+        lines.extend(
+            [
+                "",
+                f"- PR #{decision.pr}: `{head_repo}` is external; keep review evidence current, then merge manually if policy allows.",
             ]
         )
     return lines
@@ -1763,7 +1853,7 @@ def self_test() -> None:
         security_workflow="Strix Security Scan",
         base_branch="main",
     )
-    assert decision.action == "auto_merge"
+    assert decision.action == "merge"
     sample["restMergeableState"] = "BEHIND"
     decision = inspect_pr(
         "owner/repo",
@@ -2003,8 +2093,8 @@ def self_test() -> None:
         security_workflow="Strix Security Scan",
         base_branch="main",
     )
-    assert decision.action == "update_branch"
-    assert "existing auto-merge request remains queued" in decision.reason
+    assert decision.action == "disable_auto_merge"
+    assert "failed check(s): strix" in decision.reason
     sample["autoMergeRequest"] = None
     sample["mergeStateStatus"] = "CLEAN"
     decision = inspect_pr(
@@ -2144,8 +2234,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--enable-auto-merge", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
         "--merge-mode",
-        choices=("auto", "direct", "disabled"),
-        default=os.environ.get("MERGE_MODE", "auto"),
+        choices=("auto", "direct", "direct_or_auto", "disabled"),
+        default=os.environ.get("MERGE_MODE", "direct_or_auto"),
     )
     parser.add_argument("--update-branches", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--review-workflow", default="Required OpenCode Review")

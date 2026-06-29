@@ -92,6 +92,7 @@ def inspect(pr, **overrides):
         "workflow": "OpenCode Review",
         "security_workflow": "Strix Security Scan",
         "base_branch": "main",
+        "merge_mode": "auto",
     }
     kwargs.update(overrides)
     return sched.inspect_pr("owner/repo", pr, **kwargs)
@@ -176,6 +177,15 @@ def test_fetch_open_prs_paginates(monkeypatch):
     assert sched.fetch_open_prs("owner/repo", 3) == [{"number": 1}, {"number": 2}]
     assert seen[0]["pageSize"] == 3
     assert seen[1]["cursor"] == "cursor"
+
+
+def test_fetch_open_prs_zero_limit_skips_graphql(monkeypatch):
+    calls = []
+    monkeypatch.setattr(sched, "gh_graphql", lambda *args, **kwargs: calls.append((args, kwargs)))
+    monkeypatch.setattr(sched, "enrich_rest_mergeable_states", lambda repo, prs: calls.append((repo, prs)))
+
+    assert sched.fetch_open_prs("owner/repo", 0) == []
+    assert calls == [("owner/repo", [])]
 
 
 def test_fetch_open_prs_caps_page_size_to_avoid_graphql_resource_limits(monkeypatch):
@@ -386,6 +396,8 @@ def test_context_review_and_check_helpers():
     )
     assert sched.matching_actions_job_id(check_jobs, sched.is_opencode_context) == "11"
     assert sched.matching_actions_job_id(check_jobs, sched.is_strix_context) == "22"
+    no_job_url = make_pr(statusCheckRollup={"contexts": {"nodes": [opencode_check()]}})
+    assert sched.matching_actions_job_id(no_job_url, sched.is_opencode_context) is None
 
     assert sched.parse_github_datetime(None) is None
     assert sched.parse_github_datetime("not-a-date") is None
@@ -414,6 +426,23 @@ def test_context_review_and_check_helpers():
     running = make_pr(statusCheckRollup={"contexts": {"nodes": [opencode_check()]}})
     assert sched.opencode_in_progress(running)
     assert sched.opencode_progress_state(running, stale_after_minutes=45) == "running"
+    recent_running = make_pr(
+        statusCheckRollup={
+            "contexts": {
+                "nodes": [
+                    opencode_check(started_at="2026-06-25T07:30:00Z"),
+                ]
+            }
+        }
+    )
+    assert (
+        sched.opencode_progress_state(
+            recent_running,
+            stale_after_minutes=45,
+            now=datetime(2026, 6, 25, 8, 0, tzinfo=timezone.utc),
+        )
+        == "running"
+    )
     stale = make_pr(
         statusCheckRollup={
             "contexts": {
@@ -935,6 +964,7 @@ def test_summary_section_helpers_handle_empty_and_action_error_cases():
     assert sched.conflict_repair_summary(wait_decisions) == []
     assert sched.update_branch_summary(wait_decisions) == []
     assert sched.external_head_update_summary(wait_decisions) == []
+    assert sched.external_head_merge_summary(wait_decisions) == []
     assert sched.workflow_action_required_summary(wait_decisions) == []
     assert sched.outdated_thread_cleanup_summary(wait_decisions) == []
     assert sched.action_error_summary(wait_decisions) == []
@@ -970,6 +1000,18 @@ def test_summary_section_helpers_handle_empty_and_action_error_cases():
     assert "### Action errors" in lines
     assert "not source-code review findings" in "\n".join(lines)
     assert "- PR #2: permission failed" in lines
+
+    external_merge_lines = sched.external_head_merge_summary(
+        [
+            sched.Decision(
+                5,
+                "wait",
+                "current-head OpenCode review approved, but head repo fork/repo is external; fork or external PR heads are excluded from scheduler direct merge and auto-merge. A maintainer must merge manually after required checks, same-head OpenCode approval, same-head Strix evidence, and unresolved-thread checks stay clean",
+            )
+        ]
+    )
+    assert "### External head merge excluded" in external_merge_lines
+    assert "- PR #5: `fork/repo` is external" in "\n".join(external_merge_lines)
 
 
 def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
@@ -1110,6 +1152,17 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert "github-actions[bot]" in decision.reason
     assert called == [("owner/repo", 1, True)]
     called.clear()
+    blocked_behind = make_pr(
+        mergeStateStatus="BLOCKED",
+        compareBehindBy=2,
+        reviews={"nodes": [opencode_review("APPROVED", "head")]},
+    )
+    blocked_behind_decision = inspect(blocked_behind)
+    assert blocked_behind_decision.action == "update_branch"
+    assert "base branch is 2 commit(s) ahead" in blocked_behind_decision.reason
+    assert "GitHub mergeability is BLOCKED" in blocked_behind_decision.reason
+    assert called == [("owner/repo", 1, True)]
+    called.clear()
     external_behind = make_pr(
         mergeStateStatus="BEHIND",
         isCrossRepository=True,
@@ -1142,9 +1195,9 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
         statusCheckRollup={"contexts": {"nodes": [{"__typename": "CheckRun", "name": "strix", "conclusion": "FAILURE"}]}},
     )
     failed_decision = inspect(behind_failed)
-    assert failed_decision.action == "update_branch"
-    assert "workflow GH_TOKEN" in failed_decision.reason
-    assert called == [("owner/repo", 1, True)]
+    assert failed_decision.action == "block"
+    assert failed_decision.reason == "failed check(s): strix"
+    assert called == []
     called.clear()
     mixed_failure_and_action_required = make_pr(
         reviews={"nodes": [opencode_review("APPROVED", "head")]},
@@ -1171,9 +1224,9 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
         },
     )
     action_required_decision = inspect(behind_action_required)
-    assert action_required_decision.action == "update_branch"
-    assert "workflow GH_TOKEN" in action_required_decision.reason
-    assert called == [("owner/repo", 1, True)]
+    assert action_required_decision.action == "wait"
+    assert "workflow action required: opencode-review" in action_required_decision.reason
+    assert called == []
     called.clear()
     behind_auto_merge_enabled = make_pr(
         mergeStateStatus="BEHIND",
@@ -1212,12 +1265,10 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     )
     disabled.clear()
     blocked_failed_behind_decision = inspect(blocked_failed_behind_auto)
-    assert blocked_failed_behind_decision.action == "update_branch"
-    assert "base branch is 2 commit(s) ahead" in blocked_failed_behind_decision.reason
-    assert "GitHub mergeability is BLOCKED" in blocked_failed_behind_decision.reason
-    assert "existing auto-merge request remains queued" in blocked_failed_behind_decision.reason
-    assert called == [("owner/repo", 1, True)]
-    assert disabled == []
+    assert blocked_failed_behind_decision.action == "disable_auto_merge"
+    assert "failed check(s): strix" in blocked_failed_behind_decision.reason
+    assert called == []
+    assert disabled == [("owner/repo", 1, True)]
     called.clear()
     blocked_failed_behind_auto_without_opencode_approval = make_pr(
         mergeStateStatus="BLOCKED",
@@ -1321,6 +1372,19 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert called == [("owner/repo", 1, True)]
 
 
+def test_stale_opencode_run_ids_filters_current_head_and_missing_ids(monkeypatch):
+    runs = [
+        {"name": "Other", "id": 10, "head_sha": "old", "pull_requests": [{"number": 1}]},
+        {"name": "OpenCode Review", "id": 11, "head_sha": "head", "pull_requests": [{"number": 1}]},
+        {"name": "OpenCode Review", "id": None, "head_sha": "older", "pull_requests": [{"number": 1}]},
+        {"name": "OpenCode Review", "id": 12, "head_sha": "old", "pull_requests": [{"number": 2}]},
+        {"name": "OpenCode Review", "id": 13, "head_sha": "old", "pull_requests": [{"number": 1}]},
+    ]
+    monkeypatch.setattr(sched, "active_workflow_runs", lambda repo: runs)
+
+    assert sched.stale_opencode_run_ids("owner/repo", "OpenCode Review", make_pr()) == ["13"]
+
+
 def test_inspect_pr_queues_auto_merge_for_approved_conflicts(monkeypatch):
     auto_merges = []
     disables = []
@@ -1371,6 +1435,19 @@ def test_inspect_pr_queues_auto_merge_for_approved_conflicts(monkeypatch):
     assert disabled_by_inputs.action == "wait"
     assert "auto-merge is not queued" in disabled_by_inputs.reason
     assert "merge conflict: DIRTY" in disabled_by_inputs.reason
+    assert auto_merges == [("owner/repo", 1, True)]
+
+    external_conflict = inspect(
+        make_pr(
+            mergeStateStatus="DIRTY",
+            isCrossRepository=True,
+            headRepository={"nameWithOwner": "fork/repo"},
+            reviews={"nodes": [opencode_review("APPROVED", "head")]},
+        )
+    )
+    assert external_conflict.action == "wait"
+    assert "fork or external PR heads are excluded from scheduler direct merge and auto-merge" in external_conflict.reason
+    assert "merge conflict: DIRTY" in external_conflict.reason
     assert auto_merges == [("owner/repo", 1, True)]
 
     direct_mode = inspect(
@@ -1573,6 +1650,19 @@ def test_inspect_pr_handles_approved_reviews_and_dispatch(monkeypatch):
     assert inspect(approved, merge_mode="unknown").reason == (
         "current head is approved; unsupported merge mode: unknown"
     )
+    blocked_approved = make_pr(
+        mergeStateStatus="BLOCKED",
+        reviews={"nodes": [opencode_review("APPROVED", "head")]},
+    )
+    assert inspect(blocked_approved, enable_auto_merge_flag=False).reason == (
+        "current head is approved; auto-merge disabled by scheduler inputs"
+    )
+    assert inspect(blocked_approved, merge_mode="disabled").reason == (
+        "current head is approved; merge mode disabled by scheduler inputs"
+    )
+    assert inspect(blocked_approved, merge_mode="unknown").reason == (
+        "current head is approved; unsupported merge mode: unknown"
+    )
 
     direct_merges = []
     monkeypatch.setattr(
@@ -1597,10 +1687,63 @@ def test_inspect_pr_handles_approved_reviews_and_dispatch(monkeypatch):
     assert "--match-head-commit" in direct.reason
     assert direct_merges == [("owner/repo", 1, True)]
 
+    direct_or_auto = inspect(approved, merge_mode="direct_or_auto")
+    assert direct_or_auto.action == "merge"
+    assert "--match-head-commit" in direct_or_auto.reason
+    assert direct_merges == [("owner/repo", 1, True), ("owner/repo", 1, True)]
+
+    clean_but_compare_behind = inspect(
+        make_pr(
+            mergeStateStatus="CLEAN",
+            compareBehindBy=20,
+            reviews={"nodes": [opencode_review("APPROVED", "head")]},
+        ),
+        merge_mode="direct_or_auto",
+    )
+    assert clean_but_compare_behind.action == "merge"
+    assert "direct merge requested" in clean_but_compare_behind.reason
+    assert direct_merges == [("owner/repo", 1, True), ("owner/repo", 1, True), ("owner/repo", 1, True)]
+
     auto_merges = []
     monkeypatch.setattr(sched, "enable_auto_merge", lambda repo, pr, dry_run: auto_merges.append((repo, pr["number"], dry_run)))
     assert inspect(approved).action == "auto_merge"
     assert auto_merges == [("owner/repo", 1, True)]
+    blocked_direct_or_auto = inspect(
+        make_pr(
+            mergeStateStatus="BLOCKED",
+            reviews={"nodes": [opencode_review("APPROVED", "head")]},
+        ),
+        merge_mode="direct_or_auto",
+    )
+    assert blocked_direct_or_auto.action == "auto_merge"
+    assert "GitHub mergeability is BLOCKED" in blocked_direct_or_auto.reason
+    assert auto_merges == [("owner/repo", 1, True), ("owner/repo", 1, True)]
+    blocked_auto = inspect(blocked_approved, merge_mode="auto")
+    assert blocked_auto.action == "auto_merge"
+    assert auto_merges == [("owner/repo", 1, True), ("owner/repo", 1, True), ("owner/repo", 1, True)]
+
+    external_approved = inspect(
+        make_pr(
+            isCrossRepository=True,
+            headRepository={"nameWithOwner": "fork/repo"},
+            reviews={"nodes": [opencode_review("APPROVED", "head")]},
+        ),
+        merge_mode="direct_or_auto",
+    )
+    assert external_approved.action == "wait"
+    assert "fork or external PR heads are excluded from scheduler direct merge and auto-merge" in external_approved.reason
+    assert sched.decision_guidance(external_approved)["type"] == "external_head_merge_excluded"
+    external_blocked = inspect(
+        make_pr(
+            mergeStateStatus="BLOCKED",
+            isCrossRepository=True,
+            headRepository={"nameWithOwner": "fork/repo"},
+            reviews={"nodes": [opencode_review("APPROVED", "head")]},
+        ),
+        merge_mode="direct_or_auto",
+    )
+    assert external_blocked.action == "wait"
+    assert "fork or external PR heads are excluded from scheduler direct merge and auto-merge" in external_blocked.reason
 
     running = make_pr(statusCheckRollup={"contexts": {"nodes": [opencode_check()]}})
     assert inspect(running).reason == "OpenCode review is already in progress"
@@ -1782,6 +1925,7 @@ def test_print_summary_self_test_parse_args_and_main(monkeypatch, capsys):
     assert parsed.security_workflow == "Strix Security Scan"
     assert parsed.stale_opencode_minutes == 5
     assert parsed.pr_number == 12
+    assert parsed.merge_mode == "direct_or_auto"
 
     assert sched.main(["--self-test"]) == 0
     monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
