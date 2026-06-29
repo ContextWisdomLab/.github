@@ -1332,13 +1332,43 @@ def test_action_error_guidance_distinguishes_update_branch_from_merge():
     assert "PR head likely changed after inspection" in stale_head_error
     assert "reads the new head before mutating" in stale_head_error
 
+def test_parse_conflict_reason_success():
+    """Test parse_conflict_reason with valid complete conflict strings."""
+    assert sched.parse_conflict_reason("merge conflict: DIRTY; base=main,head=feature-branch") == ("DIRTY", "main", "feature-branch")
+    assert sched.parse_conflict_reason("Some prior text. merge conflict: BEHIND; base=develop,head=feat/123") == ("BEHIND", "develop", "feat/123")
+    assert sched.parse_conflict_reason("merge conflict: DIRTY; foo=bar; base=master,head=bugfix; other=stuff") == ("DIRTY", "master", "bugfix")
+
+def test_parse_conflict_reason_no_prefix():
+    """Test parse_conflict_reason returns None when prefix is missing."""
+    assert sched.parse_conflict_reason("no conflict here") is None
+    assert sched.parse_conflict_reason("merge  conflict: space issue") is None
+
+def test_parse_conflict_reason_empty_state():
+    """Test parse_conflict_reason defaults state to UNKNOWN if missing or empty."""
+    assert sched.parse_conflict_reason("merge conflict: ; base=main,head=feature") == ("UNKNOWN", "main", "feature")
+    assert sched.parse_conflict_reason("merge conflict: ") == ("UNKNOWN", "base", "head")
+
+def test_parse_conflict_reason_missing_branches():
+    """Test parse_conflict_reason uses defaults when branch info is missing or malformed."""
+    assert sched.parse_conflict_reason("merge conflict: DIRTY; some other segment") == ("DIRTY", "base", "head")
+    assert sched.parse_conflict_reason("merge conflict: DIRTY; base=,head=something") == ("DIRTY", "base", "something")
+    assert sched.parse_conflict_reason("merge conflict: DIRTY; base=main,head=") == ("DIRTY", "main", "head")
+
+
 def test_run_masks_secrets():
     with pytest.raises(RuntimeError) as exc_info:
-        sched.run([
-            sys.executable,
-            "-c",
-            "import sys; sys.stderr.write('ghp_abcdef1234567890abcdef1234567890abcdef\\nBearer super_secret\\ntoken my_secret\\n'); sys.exit(1)"
-        ])
+        sched.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sys; "
+                    "sys.stderr.write('ghp_abcdef1234567890abcdef1234567890abcdef\\n"
+                    "Bearer super_secret\\ntoken my_secret\\n'); "
+                    "sys.exit(1)"
+                ),
+            ]
+        )
 
     err_msg = str(exc_info.value)
     assert "ghp_abcdef1234567890abcdef1234567890abcdef" not in err_msg
@@ -1351,12 +1381,14 @@ def test_run_masks_secrets():
 
 def test_run_masks_secrets_in_args():
     with pytest.raises(RuntimeError) as exc_info:
-        sched.run([
-            sys.executable,
-            "-c",
-            "import sys; sys.exit(1)",
-            "ghp_abcdef1234567890abcdef1234567890abcdef"
-        ])
+        sched.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.exit(1)",
+                "ghp_abcdef1234567890abcdef1234567890abcdef",
+            ]
+        )
 
     err_msg = str(exc_info.value)
     assert "ghp_abcdef1234567890abcdef1234567890abcdef" not in err_msg
