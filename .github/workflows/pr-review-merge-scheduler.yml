@@ -101,12 +101,6 @@ concurrency:
 
 jobs:
   scan-pr-queue:
-    if: >-
-      !(
-        github.event_name == 'pull_request_target'
-        && github.event.pull_request.number == 240
-        && github.event.pull_request.head.sha == 'dec0b0a3cf54096601565b109ffb0354990a796a'
-      )
     runs-on: ubuntu-latest
     permissions:
       actions: write

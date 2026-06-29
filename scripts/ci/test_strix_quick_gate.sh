@@ -102,6 +102,7 @@ assert_strix_workflow_pr_trigger_hardened() {
 	assert_file_contains "$workflow_file" "|| github.ref" "strix workflow scopes non-PR concurrency to the current ref"
 	assert_file_contains "$workflow_file" "cancel-in-progress: false" "strix workflow never cancels in-progress security evidence"
 	assert_file_contains "$workflow_file" "head SHA in PR groups prevents stale scans from serializing newer evidence" "strix workflow documents stale scan queue avoidance"
+	assert_file_not_contains "$workflow_file" "github.event.pull_request.number == 240" "strix workflow must not hard-code repository-specific PR bypasses"
 	assert_file_contains "$workflow_file" "models: read" "strix workflow grants only the GitHub Models read permission needed for Strix"
 	assert_file_contains "$workflow_file" "actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6" "strix workflow pins actions/setup-python"
 	assert_file_contains "$workflow_file" 'python-version: "3.13"' "strix workflow runs Python steps on Python 3.13"
@@ -366,6 +367,7 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	fi
 	assert_file_not_contains "$workflow_file" "Wait for trusted OpenCode approval review" "opencode pull_request bridge was removed to avoid duplicate required-check resource use"
 	assert_file_not_contains "$workflow_file" "Trusted OpenCode requested changes for head" "opencode pull_request bridge no longer reconsumes stale trusted review state"
+	assert_file_not_contains "$workflow_file" "github.event.pull_request.number == 240" "opencode review workflow must not hard-code repository-specific PR bypasses"
 	assert_file_contains "$workflow_file" 'group: opencode-review-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.inputs.pr_number || github.run_id }}' "opencode review cancels stale runs per PR instead of preserving older review heads"
 	assert_file_contains "$workflow_file" 'cancel-in-progress: true' "opencode review cancels stale in-progress review attempts when a newer PR event arrives"
 	assert_file_contains "$workflow_file" "github.event.pull_request.head.repo.full_name == github.repository" "opencode pull_request_target coverage execution is limited to same-repository PR heads"
@@ -873,6 +875,7 @@ assert_pr_review_merge_scheduler_uses_github_actions_bot_token() {
 	assert_file_contains "$workflow_file" 'workflow_call:' "scheduler can run as the central reusable workflow contract"
 	assert_file_contains "$workflow_file" 'pull_request_target:' "scheduler can run as an organization required workflow without repository-local copies"
 	assert_file_contains "$workflow_file" 'workflows: ["Required OpenCode Review"]' "scheduler reruns after required OpenCode Review completion so approvals can trigger merge/update actions"
+	assert_file_not_contains "$workflow_file" "github.event.pull_request.number == 240" "scheduler must not hard-code repository-specific PR bypasses"
 	assert_file_contains "$workflow_file" 'cancel-in-progress: true' "scheduler cancels stale repository queue scans instead of accumulating merge/update attempts"
 	assert_file_contains "$workflow_file" 'github.event.workflow_run.pull_requests[0].number' "scheduler scopes OpenCode workflow_run events to the completed review PR"
 	assert_file_contains "$workflow_file" "github.event_name == 'pull_request_target' || inputs.trigger_reviews == true" "scheduler enables review dispatch by default for required-workflow PR events"
