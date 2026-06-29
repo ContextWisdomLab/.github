@@ -969,7 +969,9 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert "merge conflict: DIRTY" in rest_conflict.reason
     unknown_mergeability = inspect(make_pr(mergeStateStatus="CLEAN", restMergeableState="UNKNOWN"))
     assert unknown_mergeability.action == "wait"
-    assert unknown_mergeability.reason == "mergeability is still being calculated"
+    assert unknown_mergeability.reason == (
+        "mergeability is still being calculated and no branch freshness evidence is available"
+    )
     unknown_auto_merge = inspect(
         make_pr(
             mergeStateStatus="CLEAN",
@@ -1218,6 +1220,28 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert "auto-merge already enabled" in blocked_compare_behind_decision.reason
     assert "base branch is 1 commit(s) ahead" in blocked_compare_behind_decision.reason
     assert "existing auto-merge request remains queued" in blocked_compare_behind_decision.reason
+    assert called == [("owner/repo", 1, True)]
+    called.clear()
+    unknown_compare_behind_auto = make_pr(
+        mergeStateStatus="UNKNOWN",
+        restMergeableState="UNKNOWN",
+        compareStatus="behind",
+        autoMergeRequest={"enabledAt": "now"},
+        statusCheckRollup={
+            "contexts": {
+                "nodes": [
+                    {"__typename": "CheckRun", "name": "strix", "conclusion": "FAILURE"},
+                    {"__typename": "CheckRun", "name": "coverage-evidence", "conclusion": "FAILURE"},
+                ],
+            }
+        },
+    )
+    unknown_compare_behind_decision = inspect(unknown_compare_behind_auto)
+    assert unknown_compare_behind_decision.action == "update_branch"
+    assert "auto-merge already enabled" in unknown_compare_behind_decision.reason
+    assert "base branch is 1 commit(s) ahead" in unknown_compare_behind_decision.reason
+    assert "GitHub mergeability is UNKNOWN" in unknown_compare_behind_decision.reason
+    assert "existing auto-merge request remains queued" in unknown_compare_behind_decision.reason
     assert called == [("owner/repo", 1, True)]
     called.clear()
     disabled.clear()
