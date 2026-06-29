@@ -1034,6 +1034,7 @@ def inspect_pr(
     *,
     dry_run: bool,
     trigger_reviews: bool,
+    review_dispatch_allowed: bool = True,
     enable_auto_merge_flag: bool,
     update_branches: bool,
     workflow: str,
@@ -1207,6 +1208,11 @@ def inspect_pr(
             f"OpenCode review exceeded {stale_opencode_minutes} minute retry threshold; review dispatch disabled",
         )
     if opencode_state == "stale":
+        if not review_dispatch_allowed:
+            return decide(
+                "wait",
+                f"OpenCode review exceeded {stale_opencode_minutes} minute retry threshold; review dispatch limit reached",
+            )
         dispatch_opencode_review(repo, workflow, pr, dry_run=dry_run)
         return decide(
             "review_dispatch",
@@ -1216,6 +1222,11 @@ def inspect_pr(
     if trigger_reviews:
         strix_state = strix_evidence_state(pr)
         if strix_state == "missing":
+            if not review_dispatch_allowed:
+                return decide(
+                    "wait",
+                    "current head has no completed Strix evidence; review dispatch limit reached",
+                )
             dispatch_strix_evidence(repo, security_workflow, pr, dry_run=dry_run)
             return decide(
                 "security_dispatch",
@@ -1225,6 +1236,11 @@ def inspect_pr(
             return decide("wait", "same-head Strix evidence is still running")
         # Legacy trusted-base Strix self-test sentinel while this scheduler rollout lands:
         # same-head Strix and OpenCode dispatched
+        if not review_dispatch_allowed:
+            return decide(
+                "wait",
+                "current head has completed Strix evidence; review dispatch limit reached",
+            )
         dispatch_opencode_review(repo, workflow, pr, dry_run=dry_run)
         return decide(
             "review_dispatch",
@@ -1549,6 +1565,23 @@ def summarize_action_error(exc: RuntimeError) -> str:
 
 def self_test() -> None:
     """Exercise scheduler invariants without GitHub network access."""
+    assert split_repo("owner/name") == ("owner", "name")
+    assert split_repo("owner/name/extra") == ("owner", "name/extra")
+    try:
+        split_repo("owner")
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
+    try:
+        split_repo("/name")
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
+    try:
+        split_repo("owner/")
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
     sample = {
         "number": 1,
         "headRefOid": "abc",
@@ -1955,6 +1988,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--pr-number", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--trigger-reviews", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--review-dispatch-limit",
+        type=int,
+        default=int(os.environ.get("REVIEW_DISPATCH_LIMIT", "-1")),
+        help="Maximum OpenCode/Strix review dispatch actions per scheduler run; -1 means unlimited",
+    )
     parser.add_argument("--enable-auto-merge", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
         "--merge-mode",
@@ -1987,15 +2026,22 @@ def main(argv: list[str]) -> int:
         raise SystemExit("--project-flow is required")
     if args.pr_number < 0:
         raise SystemExit("--pr-number must not be negative")
+    if args.review_dispatch_limit < -1:
+        raise SystemExit("--review-dispatch-limit must be -1 or greater")
     prs = fetch_pr(args.repo, args.pr_number) if args.pr_number else fetch_open_prs(args.repo, args.max_prs)
     decisions = []
+    review_dispatches_used = 0
     for pr in prs:
+        review_dispatch_allowed = (
+            args.review_dispatch_limit < 0 or review_dispatches_used < args.review_dispatch_limit
+        )
         try:
             decision = inspect_pr(
                 args.repo,
                 pr,
                 dry_run=args.dry_run,
                 trigger_reviews=args.trigger_reviews,
+                review_dispatch_allowed=review_dispatch_allowed,
                 enable_auto_merge_flag=args.enable_auto_merge,
                 merge_mode=args.merge_mode,
                 update_branches=args.update_branches,
@@ -2011,6 +2057,8 @@ def main(argv: list[str]) -> int:
                 summarize_action_error(exc),
             )
         decisions.append(decision)
+        if decision.action in {"review_dispatch", "security_dispatch"}:
+            review_dispatches_used += 1
     print_summary(
         decisions,
         dry_run=args.dry_run,
