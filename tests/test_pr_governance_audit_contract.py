@@ -11,6 +11,23 @@ def test_html4tree_public_fork_queue_requires_central_review_gate():
     assert "temporary thin caller" in audit
     assert "same-head central review evidence" in audit
     assert "2026-06-29 KST `html4tree` onboarding gap" in audit
-    assert "PR #3 is the lowest open PR" in audit
-    assert "has no check runs and no reviews" in audit
+    assert "PR #20 is the lowest open PR" in audit
+    assert "real generated-HTML accessibility changes" in audit
+    assert "has no check runs" in audit
+    assert "no reviews from the central `.github` process" in audit
     assert "do not bypass the review gate" in audit
+
+
+def test_central_review_workflows_are_reusable_for_thin_callers():
+    """Temporary repo callers must delegate implementation to .github."""
+    strix = Path(".github/workflows/strix.yml").read_text(encoding="utf-8")
+    opencode = Path(".github/workflows/opencode-review.yml").read_text(encoding="utf-8")
+    scheduler = Path(".github/workflows/pr-review-merge-scheduler.yml").read_text(encoding="utf-8")
+
+    for workflow in (strix, opencode, scheduler):
+        assert "workflow_call:" in workflow
+
+    assert "inputs.pr_number || github.event.inputs.pr_number" in strix
+    assert "inputs.pr_head_sha || github.event.inputs.pr_head_sha" in strix
+    assert "github.event_name == 'workflow_call'" in opencode
+    assert "inputs.pr_number || github.event.inputs.pr_number" in opencode

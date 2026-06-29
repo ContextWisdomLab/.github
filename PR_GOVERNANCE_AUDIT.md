@@ -299,16 +299,18 @@ PR #381: wait: OpenCode review is already in progress
 
 ## Remaining Proof Gaps
 
-- 2026-06-29 KST `html4tree` onboarding gap: PR #3 is the lowest open PR and is
-  cleanly mergeable by GitHub, but current head
-  `d0c4cbc2bb267aed407e4bf6308f4f3cfd3b504c` has no check runs and no reviews.
-  The PR title claims an XSS/attribute-injection fix, while the diff only
-  changes indentation in `src/main/kotlin/html4tree/util.kt`. This proves that
-  `html4tree` cannot be merged by queue order until central Strix, OpenCode
-  Review, and scheduler evidence run on the same head and OpenCode either
-  requests changes or approves real code/test evidence. The required process
-  repair is to add `html4tree` to the organization required-workflow target set
-  or add a temporary thin caller that delegates to `.github`; do not bypass the review gate
+- 2026-06-29 KST `html4tree` onboarding gap: after obsolete/no-op PRs #3-#19
+  were closed with queue evidence, PR #20 is the lowest open PR. It is cleanly
+  mergeable by GitHub and contains real generated-HTML accessibility changes,
+  but current head `e5598f21cd6147b5fcc0e281d29866ae70bc77db` has no check runs
+  and no reviews from the central `.github` process. `html4tree` is a public
+  fork, and live repository ruleset lookup with inherited rules enabled returns
+  no applied organization rulesets. This proves that `html4tree` cannot be
+  merged by queue order until central Strix, OpenCode Review, and scheduler
+  evidence run on the same head and OpenCode either requests changes or
+  approves real code/test evidence. The required process repair is to add
+  `html4tree` to the organization required-workflow target set or add a
+  temporary thin caller that delegates to `.github`; do not bypass the review gate
   with a manual or forced merge.
 - 2026-06-26 17:53 KST continuation snapshot: `.github` PR #68 is merged at merge commit `590b4ecb2ac9eac700019a183081309e28d8f25b`; `bandscope` PR #459 is merged at merge commit `a7173e45304d8681f02fdf43e4de5a6b6540bb44`; `.github` PR #79 and #80 are merged, and organization ruleset `18156473` now requires central Strix, OpenCode, and scheduler workflows from `.github@807254a04efafd5f806e0f70cb067ecf050cfd11`. The live organization target inventory contains 12 public non-fork repositories and confirms `appguardrail` is present while `VibeSec` is not in that set.
 - PR #80 proved the no-copy required-workflow path after the ruleset update: `scan-pr-queue` ran as a required check in `ContextualWisdomLab/.github`, passed in 7s, used `PULL_REQUEST_NUMBER=80`, and reported `OpenCode review is already in progress` instead of scanning or mutating the entire queue. The same PR passed central Strix in 3m20s and OpenCode in 4m36s on current head `23ee41076b8f3cec21cff3afd3cd5b4380decf12`.

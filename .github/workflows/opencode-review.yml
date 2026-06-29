@@ -3,6 +3,29 @@ name: Required OpenCode Review
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
+  workflow_call:
+    inputs:
+      pr_number:
+        description: Pull request number to review
+        required: true
+        type: string
+      pr_base_ref:
+        description: Pull request base branch
+        required: true
+        type: string
+      pr_base_sha:
+        description: Pull request base SHA
+        required: true
+        type: string
+      pr_head_sha:
+        description: Pull request head SHA
+        required: true
+        type: string
+      canonical_ref:
+        description: Ref of ContextualWisdomLab/.github to use for trusted review scripts
+        required: false
+        default: main
+        type: string
   workflow_dispatch:
     inputs:
       pr_number:
@@ -28,7 +51,7 @@ on:
         type: string
 
 concurrency:
-  group: opencode-review-${{ github.event_name }}-${{ github.event.pull_request.number || github.event.inputs.pr_number || github.run_id }}
+  group: opencode-review-${{ github.event_name }}-${{ github.event.pull_request.number || inputs.pr_number || github.event.inputs.pr_number || github.run_id }}
   cancel-in-progress: true
 
 permissions:
@@ -54,7 +77,7 @@ jobs:
       - name: Resolve trusted OpenCode source ref
         id: trusted_source
         env:
-          INPUT_CANONICAL_REF: ${{ github.event.inputs.canonical_ref || '' }}
+          INPUT_CANONICAL_REF: ${{ inputs.canonical_ref || github.event.inputs.canonical_ref || '' }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
         run: |
           set -euo pipefail
@@ -80,7 +103,7 @@ jobs:
           repository: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
+          ref: ${{ github.event.pull_request.head.sha || inputs.pr_head_sha || github.event.inputs.pr_head_sha }}
           path: pr-head
 
       - name: Install Python coverage measurement tools
@@ -89,8 +112,8 @@ jobs:
       - name: Measure test and docstring coverage at 100 percent
         id: measure
         env:
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || inputs.pr_base_sha || github.event.inputs.pr_base_sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.pr_head_sha || github.event.inputs.pr_head_sha }}
           COVERAGE_SOURCE_WORKDIR: ${{ github.workspace }}/pr-head
         run: |
           set -euo pipefail
@@ -513,7 +536,7 @@ jobs:
   opencode-review-target:
     name: opencode-review
     needs: [coverage-evidence]
-    if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target')
+    if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target' || github.event_name == 'workflow_call')
     runs-on: ubuntu-latest
     permissions:
       actions: read
@@ -531,7 +554,7 @@ jobs:
       - name: Resolve trusted OpenCode source ref
         id: trusted_source
         env:
-          INPUT_CANONICAL_REF: ${{ github.event.inputs.canonical_ref || '' }}
+          INPUT_CANONICAL_REF: ${{ inputs.canonical_ref || github.event.inputs.canonical_ref || '' }}
           WORKFLOW_REF: ${{ github.workflow_ref }}
         run: |
           set -euo pipefail
@@ -555,10 +578,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
-          PR_BASE_REF: ${{ github.event.pull_request.base.ref || github.event.inputs.pr_base_ref }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number || github.event.inputs.pr_number }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref || inputs.pr_base_ref || github.event.inputs.pr_base_ref }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || inputs.pr_base_sha || github.event.inputs.pr_base_sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.pr_head_sha || github.event.inputs.pr_head_sha }}
           OPENCODE_SOURCE_WORKDIR: ${{ runner.temp }}/opencode-pr-head
         run: |
           set -euo pipefail
@@ -632,10 +655,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number || github.event.inputs.pr_number }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || inputs.pr_base_sha || github.event.inputs.pr_base_sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.pr_head_sha || github.event.inputs.pr_head_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.pr_head_sha || github.event.inputs.pr_head_sha }}
           OPENCODE_SOURCE_WORKDIR: ${{ runner.temp }}/opencode-pr-head
           OPENCODE_EVIDENCE_FILE: ${{ runner.temp }}/opencode-review-evidence.md
           OPENCODE_FAILED_CHECK_EVIDENCE_FILE: ${{ runner.temp }}/opencode-failed-check-evidence.md
@@ -1426,10 +1449,10 @@ jobs:
           OPENCODE_OUTPUT_FILE: ${{ runner.temp }}/opencode-review-primary.md
           OPENCODE_REVIEW_WORKDIR: ${{ runner.temp }}/opencode-review-project
           OPENCODE_SOURCE_WORKDIR: ${{ runner.temp }}/opencode-pr-head
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number || github.event.inputs.pr_number }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || inputs.pr_base_sha || github.event.inputs.pr_base_sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.pr_head_sha || github.event.inputs.pr_head_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.pr_head_sha || github.event.inputs.pr_head_sha }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
@@ -1552,10 +1575,10 @@ jobs:
           OPENCODE_OUTPUT_FILE: ${{ runner.temp }}/opencode-review-fallback.md
           OPENCODE_REVIEW_WORKDIR: ${{ runner.temp }}/opencode-review-project
           OPENCODE_SOURCE_WORKDIR: ${{ runner.temp }}/opencode-pr-head
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number || github.event.inputs.pr_number }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || inputs.pr_base_sha || github.event.inputs.pr_base_sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.pr_head_sha || github.event.inputs.pr_head_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.pr_head_sha || github.event.inputs.pr_head_sha }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
@@ -1679,10 +1702,10 @@ jobs:
           OPENCODE_OUTPUT_FILE: ${{ runner.temp }}/opencode-review-second-fallback.md
           OPENCODE_REVIEW_WORKDIR: ${{ runner.temp }}/opencode-review-project
           OPENCODE_SOURCE_WORKDIR: ${{ runner.temp }}/opencode-pr-head
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number || github.event.inputs.pr_number }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || inputs.pr_base_sha || github.event.inputs.pr_base_sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.pr_head_sha || github.event.inputs.pr_head_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.pr_head_sha || github.event.inputs.pr_head_sha }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
@@ -1807,10 +1830,10 @@ jobs:
           OPENCODE_OUTPUT_FILE: ${{ runner.temp }}/opencode-review-catalog-fallback.md
           OPENCODE_REVIEW_WORKDIR: ${{ runner.temp }}/opencode-review-project
           OPENCODE_SOURCE_WORKDIR: ${{ runner.temp }}/opencode-pr-head
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number || github.event.inputs.pr_number }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || inputs.pr_base_sha || github.event.inputs.pr_base_sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.pr_head_sha || github.event.inputs.pr_head_sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.pr_head_sha || github.event.inputs.pr_head_sha }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
@@ -1979,8 +2002,8 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.opencode_app_token.outputs.token || secrets.OPENCODE_APPROVE_TOKEN || github.token }}
           GH_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number || github.event.inputs.pr_number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.pr_head_sha || github.event.inputs.pr_head_sha }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
           OPENCODE_PRIMARY_OUTCOME: ${{ steps.opencode_review_primary.outputs.review_status }}
@@ -1993,8 +2016,8 @@ jobs:
           OPENCODE_CATALOG_FALLBACK_OUTPUT_FILE: ${{ runner.temp }}/opencode-review-catalog-fallback.md
           # The publish gate re-runs source-backed validation against PR-head data.
           OPENCODE_SOURCE_WORKDIR: ${{ runner.temp }}/opencode-pr-head
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || inputs.pr_base_sha || github.event.inputs.pr_base_sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.pr_head_sha || github.event.inputs.pr_head_sha }}
         run: |
           set -euo pipefail
 
@@ -2261,8 +2284,8 @@ jobs:
           USE_GITHUB_TOKEN: "true"
           NPM_CONFIG_IGNORE_SCRIPTS: "true"
           NO_COLOR: "1"
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number || github.event.inputs.pr_number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.pr_head_sha || github.event.inputs.pr_head_sha }}
           RUN_ID: ${{ github.run_id }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
           OPENCODE_PRIMARY_OUTCOME: ${{ steps.opencode_review_primary.outputs.review_status }}
@@ -2273,8 +2296,8 @@ jobs:
           OPENCODE_FALLBACK_OUTPUT_FILE: ${{ runner.temp }}/opencode-review-fallback.md
           OPENCODE_SECOND_FALLBACK_OUTPUT_FILE: ${{ runner.temp }}/opencode-review-second-fallback.md
           OPENCODE_CATALOG_FALLBACK_OUTPUT_FILE: ${{ runner.temp }}/opencode-review-catalog-fallback.md
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha || inputs.pr_base_sha || github.event.inputs.pr_base_sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || inputs.pr_head_sha || github.event.inputs.pr_head_sha }}
           APPROVAL_CHECK_WAIT_ATTEMPTS: "81"
           APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "30"
           CHECK_LOOKUP_RETRY_ATTEMPTS: "5"
@@ -3036,7 +3059,7 @@ jobs:
             }
 
             emit_known_missing_string_finding \
-              "github.event.inputs.strix_llm || 'openai/gpt-5'" \
+              "inputs.strix_llm || github.event.inputs.strix_llm || 'openai/gpt-5'" \
               "Strix PR scans must default to GitHub Models GPT-5" \
               ".github/workflows/strix.yml" \
               "scripts/ci/test_strix_quick_gate.sh"
