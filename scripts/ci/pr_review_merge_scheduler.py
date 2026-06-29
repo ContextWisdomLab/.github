@@ -1110,6 +1110,11 @@ def auto_merge_wait_reason(merge_state: str) -> str:
     """Explain why an approved PR with auto-merge enabled is still waiting."""
     if merge_state == "CLEAN":
         return "current head is approved; auto-merge already enabled"
+    if merge_state in {"DIRTY", "CONFLICTING"}:
+        return (
+            "current head is approved and auto-merge is already enabled, "
+            "but conflict repair is required before GitHub can merge it"
+        )
     return (
         "current head is approved and auto-merge is already enabled, "
         f"but GitHub mergeability is {merge_state}; wait for required workflows, rulesets, "
@@ -1156,18 +1161,6 @@ def inspect_pr(
         return finish(Decision(number, action, reason))
 
     merge_state = effective_merge_state(pr)
-    if merge_state in {"DIRTY", "CONFLICTING"}:
-        if pr.get("autoMergeRequest"):
-            return finish(
-                disable_auto_merge_decision(
-                    repo,
-                    pr,
-                    dry_run=dry_run,
-                    reason=f"{merge_conflict_guidance(pr, merge_state)}; repair the conflict before re-enabling auto-merge",
-                )
-            )
-        return decide("block", merge_conflict_guidance(pr, merge_state))
-
     unresolved = unresolved_thread_count(pr)
     if unresolved:
         if pr.get("autoMergeRequest"):
@@ -1195,6 +1188,37 @@ def inspect_pr(
 
     current_head_approved = has_current_head_approval(pr)
     auto_merge_enabled = bool(pr.get("autoMergeRequest"))
+    if merge_state in {"DIRTY", "CONFLICTING"}:
+        conflict_reason = merge_conflict_guidance(pr, merge_state)
+        if current_head_approved:
+            if auto_merge_enabled:
+                return decide("wait", f"{auto_merge_wait_reason(merge_state)}; {conflict_reason}")
+            if enable_auto_merge_flag and merge_mode == "auto":
+                enable_auto_merge(repo, pr, dry_run=dry_run)
+                return decide(
+                    "auto_merge",
+                    "current head is approved; auto-merge enabled and queued while conflict repair remains required; "
+                    f"{conflict_reason}",
+                )
+            return decide(
+                "wait",
+                "current head is approved; auto-merge is not queued because scheduler auto-merge "
+                f"is disabled or merge mode is {merge_mode}; {conflict_reason}",
+            )
+        if auto_merge_enabled:
+            return finish(
+                disable_auto_merge_decision(
+                    repo,
+                    pr,
+                    dry_run=dry_run,
+                    reason=(
+                        f"{conflict_reason}; current head has no OpenCode approval; "
+                        "repair the conflict and get same-head approval before re-enabling auto-merge"
+                    ),
+                )
+            )
+        return decide("block", conflict_reason)
+
     behind_by = branch_outdated_by_base(pr, merge_state)
     if behind_by and (current_head_approved or auto_merge_enabled):
         if not update_branches:
@@ -1766,7 +1790,8 @@ def self_test() -> None:
         security_workflow="Strix Security Scan",
         base_branch="main",
     )
-    assert decision.action == "disable_auto_merge"
+    assert decision.action == "wait"
+    assert "auto-merge is already enabled" in decision.reason
     assert "merge conflict: DIRTY" in decision.reason
     sample["restMergeableState"] = "UNKNOWN"
     sample["autoMergeRequest"] = None
@@ -2009,12 +2034,27 @@ def self_test() -> None:
         security_workflow="Strix Security Scan",
         base_branch="main",
     )
-    assert decision.action == "disable_auto_merge"
+    assert decision.action == "wait"
+    assert "auto-merge is already enabled" in decision.reason
     assert "merge conflict: DIRTY" in decision.reason
     conflict_guidance = decision_guidance(decision)
     assert conflict_guidance
     assert conflict_guidance["type"] == "merge_conflict_repair"
     sample["autoMergeRequest"] = None
+    decision = inspect_pr(
+        "owner/repo",
+        sample,
+        dry_run=True,
+        trigger_reviews=True,
+        enable_auto_merge_flag=True,
+        update_branches=True,
+        workflow="OpenCode Review",
+        security_workflow="Strix Security Scan",
+        base_branch="main",
+    )
+    assert decision.action == "auto_merge"
+    assert "auto-merge enabled and queued while conflict repair remains required" in decision.reason
+    sample["reviews"]["nodes"][0]["commit"]["oid"] = "old"
     decision = inspect_pr(
         "owner/repo",
         sample,
