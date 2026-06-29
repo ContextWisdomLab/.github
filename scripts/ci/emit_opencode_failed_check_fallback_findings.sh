@@ -455,31 +455,8 @@ emit_pytest_failure_findings() {
 		return 0
 	fi
 
-	check_label="$(
-		awk '
-			/^## Failed check: / {
-				sub(/^## Failed check: /, "")
-				print
-				exit
-			}
-		' "$clean_file"
-	)"
-	if [ -z "$check_label" ]; then
-		check_label="GitHub Check"
-	fi
-	step_label="$(
-		awk '
-			/^- step [0-9]+: / {
-				sub(/^- step [0-9]+: /, "")
-				sub(/ \(failure\)$/, "")
-				print
-				exit
-			}
-		' "$clean_file"
-	)"
-	if [ -z "$step_label" ]; then
-		step_label="test step"
-	fi
+	check_label="GitHub Check"
+	step_label="test step"
 	term="$(
 		perl -ne 'if (/assert [\x27"]([^\x27"]+)[\x27"] not in/) { print "$1\n"; exit }' "$clean_file"
 	)"
@@ -629,7 +606,7 @@ emit_strix_provider_failure_finding() {
 	local path=".github/workflows/strix.yml"
 	local line="1"
 
-	if ! grep -Eq "LLM CONNECTION FAILED|RateLimitError|Too many requests|For more on scraping GitHub|HTTPStatusError|401 Unauthorized|api\\.deepseek\\.com|Authentication Fails|DeepseekException|budget limit|Configured model and fallback models were unavailable|provider infrastructure|Below-threshold findings detected|Unable to map Strix findings" "$strix_evidence_file"; then
+	if ! grep -Eq "LLM CONNECTION FAILED|RateLimitError|Too many requests|HTTPStatusError|401 Unauthorized|api\\.deepseek\\.com|Authentication Fails|DeepseekException|budget limit|Configured model and fallback models were unavailable|provider infrastructure|Below-threshold findings detected|Unable to map Strix findings" "$strix_evidence_file"; then
 		return 0
 	fi
 
@@ -660,12 +637,12 @@ emit_strix_provider_failure_finding() {
 	else
 		printf '### %s. HIGH %s:%s - Strix provider failure blocked current-head security evidence\n' "$finding_index" "$path" "$line"
 		if grep -Eq "api\\.deepseek\\.com|401 Unauthorized|Authentication Fails|DeepseekException" "$strix_evidence_file"; then
-			printf -- '- Problem: Strix failed before producing vulnerability reports. The failed log reported `RateLimitError` / `Too many requests` (or `For more on scraping GitHub`) for the primary `openai/gpt-5` attempt, then fallback attempts reached direct DeepSeek (`api.deepseek.com`) and failed with `401 Unauthorized` or `Authentication Fails`, ending with `Configured model and fallback models were unavailable`.\n'
+			printf -- '- Problem: Strix failed before producing vulnerability reports. The failed log reported `RateLimitError` / `Too many requests` for the primary `openai/gpt-5` attempt, then fallback attempts reached direct DeepSeek (`api.deepseek.com`) and failed with `401 Unauthorized` or `Authentication Fails`, ending with `Configured model and fallback models were unavailable`.\n'
 			printf -- '- Root cause: The fallback model names were not routed through the GitHub Models endpoint for this failed PR check, so a GitHub Models token was used against direct DeepSeek instead of `https://models.github.ai/inference`; no Strix Vulnerability Report window was produced.\n'
 			printf -- '- Fix: Do not approve from this failed scan. Keep %s:%s using the GitHub Models-qualified fallback list (`github_models/deepseek/deepseek-v3-0324 github_models/deepseek/deepseek-r1-0528`) and keep the Strix gate mapping those values to `openai/deepseek/...` for the GitHub Models API base, then rerun the failed PR Strix check.\n' "$path" "$line"
 			printf -- '- Suggested edit: `%s:%s` must use `STRIX_FALLBACK_MODELS: ${{ steps.gate.outputs.provider_mode == '\''github_models'\'' && '\''github_models/deepseek/deepseek-v3-0324 github_models/deepseek/deepseek-r1-0528'\'' || '\'''\'' }}` instead of unqualified `deepseek/...` values that route to `api.deepseek.com`.\n' "$path" "$line"
 		else
-			printf -- '- Problem: Strix failed before producing vulnerability reports. The failed log reported LLM CONNECTION FAILED, RateLimitError, Too many requests, or For more on scraping GitHub for the primary model, provider/budget output for fallback models, and Configured model and fallback models were unavailable.\n'
+			printf -- '- Problem: Strix failed before producing vulnerability reports. The failed log reported LLM CONNECTION FAILED, RateLimitError or Too many requests for the primary model, provider/budget output for fallback models, and Configured model and fallback models were unavailable.\n'
 			printf -- '- Root cause: The configured GitHub Models primary/fallback provider capacity or provider route failed for this run; no Strix Vulnerability Report window was produced, so there is no application source line to patch from this evidence.\n'
 			printf -- '- Fix: Do not approve from this failed scan. Re-run Strix after GitHub Models capacity recovers or run an explicitly configured manual provider evidence scan with valid credentials; keep the configured fallback line at %s:%s aligned with the approved model list.\n' "$path" "$line"
 			printf -- '- Suggested edit: keep `%s:%s` on the approved GitHub Models fallback list and rerun the current-head Strix check; there is no application source patch until Strix emits a vulnerability Code Location.\n' "$path" "$line"

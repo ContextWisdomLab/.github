@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import concurrent.futures
 import json
 import os
 import re
@@ -149,7 +148,7 @@ def scrub_sensitive_data(text: str | None) -> str | None:
         return text
     text = re.sub(r'(?i)(bearer\s+)[^\s"\'\\]+', r'\1***', text)
     text = re.sub(r'(?i)(token\s+)[^\s"\'\\]+', r'\1***', text)
-    text = re.sub(r'(ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)', '***', text)
+    text = re.sub(r'(?i)(github_pat_[A-Za-z0-9_]+|gh[psuo]_[A-Za-z0-9_]+)', '***', text)
     return text
 
 
@@ -411,23 +410,11 @@ def fetch_rest_mergeable_state(repo: str, number: int) -> str:
 
 def enrich_rest_mergeable_states(repo: str, prs: list[dict[str, Any]]) -> None:
     """Attach REST mergeability evidence to GraphQL pull request payloads."""
-    def enrich(pr: dict[str, Any]) -> None:
-        """Fetch and attach REST mergeability for one PR."""
+    for pr in prs:
         try:
             pr["restMergeableState"] = fetch_rest_mergeable_state(repo, int(pr["number"]))
         except RuntimeError as exc:
             pr["restMergeableStateError"] = bounded_error_summary(str(exc))
-
-    if len(prs) <= 1:
-        for pr in prs:
-            enrich(pr)
-        return
-
-    # ⚡ Bolt: Execute gh api calls concurrently to prevent O(N) network latency accumulation
-    # ThreadPoolExecutor is safe here since subprocess.run drops the GIL during execution.
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(prs), 10)) as executor:
-        for _ in executor.map(enrich, prs):
-            pass
 
 
 def effective_merge_state(pr: dict[str, Any]) -> str:
@@ -1451,7 +1438,7 @@ def summarize_action_error(exc: RuntimeError) -> str:
 
 def self_test() -> None:
     """Exercise scheduler invariants without GitHub network access."""
-    sample: dict[str, Any] = {
+    sample = {
         "number": 1,
         "headRefOid": "abc",
         "baseRefName": "main",
@@ -1696,9 +1683,7 @@ def self_test() -> None:
     )
     assert decision.action == "wait"
     assert "external/repo" in decision.reason
-    wait_guidance = decision_guidance(decision)
-    assert wait_guidance is not None
-    assert wait_guidance["type"] == "external_head_update_required"
+    assert decision_guidance(decision)["type"] == "external_head_update_required"
     sample["maintainerCanModify"] = True
     decision = inspect_pr(
         "owner/repo",
