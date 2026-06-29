@@ -575,7 +575,13 @@ emit_cancelled_check_findings() {
 		if [ -z "$check_label" ]; then
 			continue
 		fi
-		printf 'Non-source-backed cancelled check queue state: %s reported %s. Wait for or rerun the newest same-head check; no repository source edit is justified by this cancelled check alone.\n' "$check_label" "$annotation" >&2
+		finding_index=$((finding_index + 1))
+		printf '### %s. MEDIUM GitHub Checks queue - %s was cancelled by a newer queued request\n' "$finding_index" "$check_label"
+		printf -- '- Problem: `%s` did not produce reviewable source evidence; GitHub reported `%s`.\n' "$check_label" "$annotation"
+		printf -- '- Root cause: GitHub Actions cancelled an older queued or running check because a higher-priority request for the same PR was waiting. This is a check orchestration state, not a source-code defect.\n'
+		printf -- '- Fix: Do not approve from this cancelled context and do not paste only the workflow URL. Wait for the newest same-head check run, or rerun the check after the queue settles, then review its actual logs.\n'
+		printf -- '- Regression test: Keep failed-check fallback reviews explaining cancelled check contexts separately from source-code findings so cancelled jobs cannot hide an actionable pytest or Strix failure.\n'
+		printf -- '- Suggested edit: no repository source edit is justified by this cancelled check alone; the actionable next step is to rerun or wait for the current-head check that superseded it.\n\n'
 	done <"$cancelled_file"
 }
 
