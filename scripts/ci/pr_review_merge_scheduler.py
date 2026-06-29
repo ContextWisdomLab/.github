@@ -15,6 +15,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import quote
 
 
 PULL_REQUEST_FIELDS_FRAGMENT = """\
@@ -409,6 +410,31 @@ def fetch_rest_mergeable_state(repo: str, number: int) -> str:
     return REST_MERGEABLE_STATE_MAP.get(raw_state.lower(), raw_state.upper())
 
 
+def compare_ref_for_pr_head(repo: str, pr: dict[str, Any]) -> str:
+    """Return the compare-API head ref for a PR branch."""
+    head_ref = pr.get("headRefName") or "HEAD"
+    head_repo = (pr.get("headRepository") or {}).get("nameWithOwner")
+    if not head_repo or head_repo == repo:
+        return head_ref
+    head_owner, _ = split_repo(head_repo)
+    return f"{head_owner}:{head_ref}"
+
+
+def fetch_compare_branch_freshness(repo: str, pr: dict[str, Any]) -> dict[str, Any]:
+    """Fetch compare evidence showing whether the PR head lacks base commits."""
+    base = quote(pr.get("baseRefName") or "base", safe="")
+    head = quote(compare_ref_for_pr_head(repo, pr), safe=":")
+    return json.loads(
+        run(
+            [
+                "gh",
+                "api",
+                f"repos/{repo}/compare/{base}...{head}",
+            ]
+        )
+    )
+
+
 def enrich_rest_mergeable_states(repo: str, prs: list[dict[str, Any]]) -> None:
     """Attach REST mergeability evidence to GraphQL pull request payloads."""
     def enrich(pr: dict[str, Any]) -> None:
@@ -417,6 +443,12 @@ def enrich_rest_mergeable_states(repo: str, prs: list[dict[str, Any]]) -> None:
             pr["restMergeableState"] = fetch_rest_mergeable_state(repo, int(pr["number"]))
         except RuntimeError as exc:
             pr["restMergeableStateError"] = bounded_error_summary(str(exc))
+        try:
+            compare = fetch_compare_branch_freshness(repo, pr)
+            pr["compareStatus"] = compare.get("status")
+            pr["compareBehindBy"] = compare.get("behind_by")
+        except RuntimeError as exc:
+            pr["compareBranchFreshnessError"] = bounded_error_summary(str(exc))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(prs) or 1)) as executor:
         for _ in executor.map(enrich, prs):
@@ -432,6 +464,23 @@ def effective_merge_state(pr: dict[str, Any]) -> str:
     if graph_state in {"BEHIND", "DIRTY", "CONFLICTING", "UNKNOWN"}:
         return graph_state
     return rest_state or graph_state
+
+
+def compare_behind_by(pr: dict[str, Any]) -> int:
+    """Return the compare API's behind_by count as a safe integer."""
+    behind_by = pr.get("compareBehindBy")
+    if isinstance(behind_by, int):
+        return max(0, behind_by)
+    if isinstance(behind_by, str) and behind_by.isdigit():
+        return int(behind_by)
+    return 0
+
+
+def branch_outdated_by_base(pr: dict[str, Any], merge_state: str) -> int:
+    """Return known count of base commits missing from the PR head."""
+    if merge_state == "BEHIND":
+        return max(1, compare_behind_by(pr))
+    return compare_behind_by(pr)
 
 
 def context_nodes(pr: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1028,16 +1077,34 @@ def inspect_pr(
         return decide("block", "current-head OpenCode review requested changes")
 
     current_head_approved = has_current_head_approval(pr)
-    if merge_state == "BEHIND" and current_head_approved:
+    auto_merge_enabled = bool(pr.get("autoMergeRequest"))
+    behind_by = branch_outdated_by_base(pr, merge_state)
+    if behind_by and (current_head_approved or auto_merge_enabled):
         if not update_branches:
-            return decide("wait", "current-head OpenCode review approved; branch update disabled")
+            if current_head_approved:
+                return decide("wait", "current-head OpenCode review approved; branch update disabled")
+            return decide("wait", "auto-merge already enabled; branch update disabled")
         if not can_update_pr_head(repo, pr):
             return decide("wait", non_mutable_head_reason(repo, pr))
         update_branch(repo, pr, dry_run=dry_run)
-        suffix = "; existing auto-merge request remains queued" if pr.get("autoMergeRequest") else ""
+        suffix = "; existing auto-merge request remains queued" if auto_merge_enabled else ""
+        if current_head_approved and merge_state == "BEHIND":
+            freshness_reason = "current-head OpenCode review approved"
+        elif current_head_approved:
+            freshness_reason = (
+                "current-head OpenCode review approved; "
+                f"base branch is {behind_by} commit(s) ahead even though GitHub mergeability is {merge_state}"
+            )
+        elif merge_state == "BEHIND":
+            freshness_reason = "auto-merge already enabled"
+        else:
+            freshness_reason = (
+                "auto-merge already enabled; "
+                f"base branch is {behind_by} commit(s) ahead even though GitHub mergeability is {merge_state}"
+            )
         return decide(
             "update_branch",
-            "current-head OpenCode review approved; branch update requested with workflow GH_TOKEN "
+            f"{freshness_reason}; branch update requested with workflow GH_TOKEN "
             f"(github-actions[bot] in GitHub Actions){suffix}",
         )
 
