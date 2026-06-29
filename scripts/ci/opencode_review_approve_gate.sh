@@ -164,32 +164,49 @@ def normalized_line(value: str) -> str:
     return " ".join(value.strip().split())
 
 
+def scrub_sensitive_data(text: str | None) -> str | None:
+    if not text:
+        return text
+    text = re.sub(r'(?i)(bearer\s+)[^\s"\'\\]+', r'\1***', text)
+    text = re.sub(r'(?i)(token\s+)[^\s"\'\\]+', r'\1***', text)
+    text = re.sub(r'(ghp_[A-Za-z0-9_]+|github_pat_[A-Za-z0-9_]+)', '***', text)
+    return text
+
+
 def changed_new_lines(path_value: str) -> set[int]:
     if not pr_base_sha or not pr_head_sha:
         return set()
+
+    cmd_args = [
+        "git",
+        "-C",
+        str(source_root),
+        "diff",
+        "--unified=0",
+        "--no-ext-diff",
+        pr_base_sha,
+        pr_head_sha,
+        "--",
+        path_value,
+    ]
     try:
         completed = subprocess.run(
-            [
-                "git",
-                "-C",
-                str(source_root),
-                "diff",
-                "--unified=0",
-                "--no-ext-diff",
-                pr_base_sha,
-                pr_head_sha,
-                "--",
-                path_value,
-            ],
+            cmd_args,
             check=False,
             text=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
             shell=False,
         )
-    except OSError:
+    except OSError as exc:
+        scrubbed_args = scrub_sensitive_data(' '.join(cmd_args))
+        scrubbed_stderr = scrub_sensitive_data(str(exc))
+        sys.stderr.write(f"Command failed ({type(exc).__name__}): {scrubbed_args}\n{scrubbed_stderr}\n")
         return set()
     if completed.returncode not in {0, 1}:
+        scrubbed_args = scrub_sensitive_data(' '.join(cmd_args))
+        scrubbed_stderr = scrub_sensitive_data(completed.stderr or "")
+        sys.stderr.write(f"Command failed ({completed.returncode}): {scrubbed_args}\n{scrubbed_stderr}\n")
         return set()
 
     line_numbers: set[int] = set()
