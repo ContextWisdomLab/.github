@@ -624,12 +624,15 @@ M\tscripts/ci/example.py
 
 
 def test_iter_json_objects_extracts_raw_and_embedded_json():
-    assert norm.iter_json_objects('{"a": 1}') == [{"a": 1}]
-    assert norm.iter_json_objects('prefix {"b": 2} suffix') == [{"b": 2}]
-    assert norm.iter_json_objects('prefix {"outer": {"inner": 1}} suffix') == [
-        {"outer": {"inner": 1}}
+    cases = [
+        ('{"a": 1}', [{"a": 1}]),
+        ('prefix {"b": 2} suffix', [{"b": 2}]),
+        ('prefix {"outer": {"inner": 1}} suffix', [{"outer": {"inner": 1}}]),
+        ("prefix {  } suffix", [{}]),
     ]
-    assert norm.iter_json_objects("prefix {  } suffix") == [{}]
+    for text, expected in cases:
+        assert norm.iter_json_objects(text) == expected
+
     assert norm.iter_json_objects("prefix {not json}") == []
     assert norm.iter_json_objects('prefix {"bad": } suffix') == []
     assert norm.iter_json_objects("no json here") == []
