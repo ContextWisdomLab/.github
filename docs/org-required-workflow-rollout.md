@@ -35,6 +35,7 @@ The central `.github/workflows/opencode-review.yml` is now part of the active or
 - Stable required check job name: `opencode-review`
 - Trusted source: `ContextualWisdomLab/.github`
 - PR-head handling: checkout or fetch PR head as review data only; trusted scripts come from the central `.github` ref
+- Manual target support: OpenCode and Strix `workflow_dispatch` runs can pass `target_repository` for repos such as private `aFIPC` whose PRs do not yet inherit the org required-workflow rule; org ruleset coverage is still the required steady state before draining that queue
 - Model token posture: use the organization `STRIX_GITHUB_MODELS_TOKEN` secret for GitHub Models calls, with `github.token` as the fallback; live workflow evidence showed `github.token` alone can return 403 from `models.github.ai/inference`
 - Write posture: OpenCode may create review/comment side effects through the OpenCode app token when available; `github.token` remains the last fallback and publication failures are soft-failed
 - Coverage execution posture: privileged `pull_request_target` coverage runs only for same-repository PR heads; fork PR heads must be covered by an unprivileged PR-side check or manually trusted dispatch before approval
