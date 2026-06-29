@@ -1034,9 +1034,10 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
         statusCheckRollup={"contexts": {"nodes": [{"__typename": "CheckRun", "name": "strix", "conclusion": "FAILURE"}]}},
     )
     failed_decision = inspect(behind_failed)
-    assert failed_decision.action == "block"
-    assert failed_decision.reason == "failed check(s): strix"
-    assert called == []
+    assert failed_decision.action == "update_branch"
+    assert "workflow GH_TOKEN" in failed_decision.reason
+    assert called == [("owner/repo", 1, True)]
+    called.clear()
     mixed_failure_and_action_required = make_pr(
         reviews={"nodes": [opencode_review("APPROVED", "head")]},
         statusCheckRollup={
@@ -1062,16 +1063,21 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
         },
     )
     action_required_decision = inspect(behind_action_required)
-    assert action_required_decision.action == "wait"
-    assert "workflow action required: opencode-review" in action_required_decision.reason
-    assert called == []
+    assert action_required_decision.action == "update_branch"
+    assert "workflow GH_TOKEN" in action_required_decision.reason
+    assert called == [("owner/repo", 1, True)]
+    called.clear()
     behind_auto_merge_enabled = make_pr(
         mergeStateStatus="BEHIND",
         reviews={"nodes": [opencode_review("APPROVED", "head")]},
         autoMergeRequest={"enabledAt": "now"},
     )
-    assert inspect(behind_auto_merge_enabled).action == "update_branch"
+    disabled.clear()
+    behind_auto_merge_decision = inspect(behind_auto_merge_enabled)
+    assert behind_auto_merge_decision.action == "update_branch"
+    assert "existing auto-merge request remains queued" in behind_auto_merge_decision.reason
     assert called == [("owner/repo", 1, True)]
+    assert disabled == []
     called.clear()
     rest_behind = make_pr(
         mergeStateStatus="CLEAN",
