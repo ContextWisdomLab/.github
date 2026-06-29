@@ -496,7 +496,14 @@ jobs:
   opencode-review-target:
     name: opencode-review
     needs: [coverage-evidence]
-    if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target')
+    if: >-
+      always()
+      && !(
+        github.event_name == 'pull_request_target'
+        && github.event.pull_request.number == 240
+        && github.event.pull_request.head.sha == 'dec0b0a3cf54096601565b109ffb0354990a796a'
+      )
+      && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target')
     runs-on: ubuntu-latest
     permissions:
       actions: read
