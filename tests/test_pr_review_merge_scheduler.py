@@ -497,7 +497,7 @@ def test_actions_call_gh_with_expected_arguments(monkeypatch):
 
     def fake_run(args, stdin=None):
         calls.append(args)
-        if args[:3] == ["gh", "api", "repos/owner/repo/actions/runs"]:
+        if args[:5] == ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs"]:
             return '{"workflow_runs": []}'
         return ""
 
@@ -521,14 +521,15 @@ def test_actions_call_gh_with_expected_arguments(monkeypatch):
     sched.dispatch_strix_evidence("owner/repo", "Strix Security Scan", pr, dry_run=False)
     sched.dispatch_opencode_review("owner/repo", "OpenCode Review", pr, dry_run=False)
     assert calls[0][:4] == ["gh", "pr", "merge", "1"]
+    assert "--squash" in calls[0]
     assert calls[0][-2:] == ["--match-head-commit", "head"]
-    assert calls[1] == ["gh", "pr", "merge", "1", "--repo", "owner/repo", "--merge", "--match-head-commit", "head"]
+    assert calls[1] == ["gh", "pr", "merge", "1", "--repo", "owner/repo", "--squash", "--match-head-commit", "head"]
     assert calls[2] == ["gh", "pr", "merge", "1", "--repo", "owner/repo", "--disable-auto"]
     assert calls[3][:4] == ["gh", "api", "-X", "PUT"]
     assert calls[3][-1] == "expected_head_sha=head"
     assert calls[4][:5] == ["gh", "workflow", "run", "Strix Security Scan", "--repo"]
-    assert calls[5][:3] == ["gh", "api", "repos/owner/repo/actions/runs"]
-    assert calls[6][:3] == ["gh", "api", "repos/owner/repo/actions/runs"]
+    assert calls[5][:5] == ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs"]
+    assert calls[6][:5] == ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs"]
     assert calls[7][:5] == ["gh", "workflow", "run", "OpenCode Review", "--repo"]
     calls.clear()
 
@@ -545,8 +546,8 @@ def test_actions_call_gh_with_expected_arguments(monkeypatch):
     sched.dispatch_opencode_review("owner/repo", "OpenCode Review", required_workflow_pr, dry_run=False)
     sched.dispatch_strix_evidence("owner/repo", "Strix Security Scan", required_workflow_pr, dry_run=False)
     assert calls[:2] == [
-        ["gh", "api", "repos/owner/repo/actions/runs", "-f", "status=queued", "-F", "per_page=100"],
-        ["gh", "api", "repos/owner/repo/actions/runs", "-f", "status=in_progress", "-F", "per_page=100"],
+        ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs", "-f", "status=queued", "-F", "per_page=100"],
+        ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs", "-f", "status=in_progress", "-F", "per_page=100"],
     ]
     assert calls[2:] == [
         ["gh", "api", "-X", "POST", "repos/owner/repo/actions/jobs/101/rerun"],
@@ -583,7 +584,7 @@ def test_dispatch_opencode_review_force_cancels_same_pr_old_head_runs(monkeypatc
 
     def fake_run(args, stdin=None):
         calls.append(args)
-        if args[:3] == ["gh", "api", "repos/owner/repo/actions/runs"]:
+        if args[:5] == ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs"]:
             if "status=queued" in args:
                 return json.dumps({"workflow_runs": [stale_same_pr, current_same_pr]})
             return json.dumps({"workflow_runs": [stale_other_pr, stale_strix]})
@@ -595,6 +596,7 @@ def test_dispatch_opencode_review_force_cancels_same_pr_old_head_runs(monkeypatc
 
     sched.dispatch_opencode_review("owner/repo", "OpenCode Review", make_pr(), dry_run=False)
 
+    assert ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs", "-f", "status=queued", "-F", "per_page=100"] in calls
     assert ["gh", "api", "-X", "POST", "repos/owner/repo/actions/runs/9001/force-cancel"] in calls
     assert not any("9002/force-cancel" in " ".join(call) for call in calls)
     assert not any("9003/force-cancel" in " ".join(call) for call in calls)
@@ -944,6 +946,15 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert same_head_auto_decision.action == "wait"
     assert same_head_auto_decision.reason == "current head is approved; auto-merge already enabled"
     assert disabled == []
+    blocked_auto = make_pr(
+        restMergeableState="blocked",
+        autoMergeRequest={"enabledAt": "now"},
+        reviews={"nodes": [opencode_review("APPROVED", "head")]},
+    )
+    blocked_auto_decision = inspect(blocked_auto)
+    assert blocked_auto_decision.action == "wait"
+    assert "GitHub mergeability is BLOCKED" in blocked_auto_decision.reason
+    assert "rerun the scheduler" in blocked_auto_decision.reason
 
     stale_behind = make_pr(mergeStateStatus="BEHIND", reviews={"nodes": [opencode_review("APPROVED", "old")]})
     dispatched = []
@@ -1295,7 +1306,7 @@ def test_action_error_guidance_distinguishes_update_branch_from_merge():
 
     merge_error = sched.summarize_action_error(
         RuntimeError(
-            "Command failed (1): gh pr merge 7 --auto --merge\n"
+            "Command failed (1): gh pr merge 7 --auto --squash\n"
             "GraphQL: Resource not accessible by integration (mergePullRequest)"
         )
     )
@@ -1319,3 +1330,25 @@ def test_action_error_guidance_distinguishes_update_branch_from_merge():
     )
     assert "PR head likely changed after inspection" in stale_head_error
     assert "reads the new head before mutating" in stale_head_error
+
+def test_parse_conflict_reason_success():
+    """Test parse_conflict_reason with valid complete conflict strings."""
+    assert sched.parse_conflict_reason("merge conflict: DIRTY; base=main,head=feature-branch") == ("DIRTY", "main", "feature-branch")
+    assert sched.parse_conflict_reason("Some prior text. merge conflict: BEHIND; base=develop,head=feat/123") == ("BEHIND", "develop", "feat/123")
+    assert sched.parse_conflict_reason("merge conflict: DIRTY; foo=bar; base=master,head=bugfix; other=stuff") == ("DIRTY", "master", "bugfix")
+
+def test_parse_conflict_reason_no_prefix():
+    """Test parse_conflict_reason returns None when prefix is missing."""
+    assert sched.parse_conflict_reason("no conflict here") is None
+    assert sched.parse_conflict_reason("merge  conflict: space issue") is None
+
+def test_parse_conflict_reason_empty_state():
+    """Test parse_conflict_reason defaults state to UNKNOWN if missing or empty."""
+    assert sched.parse_conflict_reason("merge conflict: ; base=main,head=feature") == ("UNKNOWN", "main", "feature")
+    assert sched.parse_conflict_reason("merge conflict: ") == ("UNKNOWN", "base", "head")
+
+def test_parse_conflict_reason_missing_branches():
+    """Test parse_conflict_reason uses defaults when branch info is missing or malformed."""
+    assert sched.parse_conflict_reason("merge conflict: DIRTY; some other segment") == ("DIRTY", "base", "head")
+    assert sched.parse_conflict_reason("merge conflict: DIRTY; base=,head=something") == ("DIRTY", "base", "something")
+    assert sched.parse_conflict_reason("merge conflict: DIRTY; base=main,head=") == ("DIRTY", "main", "head")

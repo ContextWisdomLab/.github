@@ -1,8 +1,11 @@
-name: PR Review Merge Scheduler
+name: Required PR Review Merge Scheduler
 
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
+  workflow_run:
+    workflows: ["Required OpenCode Review"]
+    types: [completed]
   workflow_call:
     inputs:
       dry_run:
@@ -93,8 +96,8 @@ on:
         default: "45"
 
 concurrency:
-  group: central-pr-review-merge-scheduler-${{ github.repository }}
-  cancel-in-progress: false
+  group: central-pr-review-merge-scheduler-${{ github.repository }}-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.ref || github.run_id }}
+  cancel-in-progress: true
 
 jobs:
   scan-pr-queue:
@@ -111,19 +114,33 @@ jobs:
       DRY_RUN: ${{ inputs.dry_run == true }}
       MAX_PRS: ${{ inputs.max_prs || '100' }}
       PROJECT_FLOW_INPUT: ${{ inputs.project_flow || vars.PROJECT_FLOW || '' }}
-      PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number || '' }}
+      PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || '' }}
       TRIGGER_REVIEWS: ${{ github.event_name == 'schedule' || github.event_name == 'pull_request_target' || inputs.trigger_reviews == true }}
-      ENABLE_AUTO_MERGE: ${{ github.event_name == 'schedule' || github.event_name == 'pull_request_target' || inputs.enable_auto_merge == true }}
+      ENABLE_AUTO_MERGE: ${{ github.event_name == 'schedule' || github.event_name == 'pull_request_target' || github.event_name == 'workflow_run' || inputs.enable_auto_merge == true }}
       MERGE_MODE: ${{ inputs.merge_mode || vars.PR_MERGE_MODE || 'auto' }}
-      UPDATE_BRANCHES: ${{ github.event_name == 'schedule' || github.event_name == 'pull_request_target' || inputs.update_branches == true }}
+      UPDATE_BRANCHES: ${{ github.event_name == 'schedule' || github.event_name == 'pull_request_target' || github.event_name == 'workflow_run' || inputs.update_branches == true }}
       STALE_OPENCODE_MINUTES: ${{ inputs.stale_opencode_minutes || vars.STALE_OPENCODE_MINUTES || '45' }}
-      CANONICAL_REF: ${{ inputs.canonical_ref || 'main' }}
     steps:
+      - name: Resolve trusted scheduler source ref
+        id: trusted_source
+        env:
+          INPUT_CANONICAL_REF: ${{ inputs.canonical_ref || '' }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          trusted_ref="${INPUT_CANONICAL_REF:-main}"
+          case "$WORKFLOW_REF" in
+            ContextualWisdomLab/.github/.github/workflows/pr-review-merge-scheduler.yml@*)
+              trusted_ref="${WORKFLOW_REF##*@}"
+              ;;
+          esac
+          printf 'ref=%s\n' "$trusted_ref" >>"$GITHUB_OUTPUT"
+
       - name: Checkout trusted scheduler
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ContextualWisdomLab/.github
-          ref: ${{ env.CANONICAL_REF }}
+          ref: ${{ steps.trusted_source.outputs.ref }}
           fetch-depth: 1
 
       - name: Self-test scheduler
@@ -145,7 +162,7 @@ jobs:
             --base-branch "$DEFAULT_BRANCH"
             --max-prs "$MAX_PRS"
             --project-flow "$project_flow"
-            --review-workflow "OpenCode Review"
+            --review-workflow "Required OpenCode Review"
             --stale-opencode-minutes "$STALE_OPENCODE_MINUTES"
           )
           if [ -n "$PULL_REQUEST_NUMBER" ]; then
