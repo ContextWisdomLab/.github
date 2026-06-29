@@ -30,7 +30,9 @@ OpenCode decides; GitHub Actions mutates.
 - Thin callers must not define a matching scheduler concurrency group. GitHub
   treats a caller workflow and its reusable callee as separate workflow scopes;
   if both use the same group, the run fails before jobs start with a concurrency
-  deadlock. The central reusable workflow owns queue serialization.
+  deadlock. The central reusable workflow owns concurrency: required-workflow
+  PR events are isolated by pull request number, while scheduled full-queue
+  scans stay serialized by repository/ref.
 - Live organization state at the 2026-06-26 17:53 KST check: Actions are
   enabled for the public non-fork target repositories, and organization ruleset
   `18156473` (`CWL Central required workflows`) is active. It requires Strix,

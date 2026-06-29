@@ -93,7 +93,12 @@ on:
         default: "45"
 
 concurrency:
-  group: central-pr-review-merge-scheduler-${{ github.repository }}
+  group: >-
+    central-pr-review-merge-scheduler-${{ github.repository }}-${{
+    github.event_name == 'pull_request_target' && format('pr-{0}', github.event.pull_request.number) ||
+    github.event_name == 'workflow_call' && inputs.base_branch != '' && format('call-{0}', inputs.base_branch) ||
+    github.event_name == 'workflow_dispatch' && github.run_id ||
+    github.ref }}
   cancel-in-progress: false
 
 jobs:

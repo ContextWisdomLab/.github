@@ -861,6 +861,7 @@ assert_pr_review_merge_scheduler_uses_github_actions_bot_token() {
 	assert_file_contains "$workflow_file" 'repository: ContextualWisdomLab/.github' "scheduler checks out the canonical implementation instead of relying on repo-local copies"
 	assert_file_contains "$workflow_file" "contents: write" "scheduler has write permission for GitHub Actions bot branch updates"
 	assert_file_contains "$workflow_file" "pull-requests: write" "scheduler has pull-request write permission for update-branch and auto-merge"
+	assert_file_contains "$workflow_file" "format('pr-{0}', github.event.pull_request.number)" "scheduler scopes required-workflow concurrency to the active pull request"
 	assert_file_contains "$scheduler_file" "update-branch" "scheduler calls the GitHub update-branch API for outdated approved PRs"
 	assert_file_contains "$scheduler_file" "expected_head_sha={head}" "scheduler guards branch updates with the current PR head SHA"
 	assert_file_contains "$scheduler_file" "shell=False" "scheduler subprocess wrapper forbids shell command execution"
