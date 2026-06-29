@@ -580,6 +580,8 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" 'COVERAGE_EVIDENCE_RESULT: ${{ needs.coverage-evidence.result || '\''skipped'\'' }}' "opencode approval receives the coverage-evidence job conclusion"
 	assert_file_contains "$workflow_file" "Dispatch merge scheduler after approval" "opencode approval wakes the merge scheduler after current-head approval"
 	assert_file_contains "$workflow_file" "gh workflow run pr-review-merge-scheduler.yml" "opencode approval dispatches the central merge scheduler workflow"
+	assert_file_contains "$workflow_file" "continue-on-error: true" "opencode post-approval scheduler dispatch failure does not fail a completed approval check"
+	assert_file_contains "$workflow_file" "Merge scheduler dispatch failed after approval; leaving OpenCode approval intact." "opencode post-approval scheduler dispatch failure is reported as a warning"
 	assert_file_contains "$workflow_file" "-f trigger_reviews=false" "opencode post-approval scheduler dispatch avoids duplicate OpenCode review runs"
 	assert_file_contains "$workflow_file" "-f enable_auto_merge=true" "opencode post-approval scheduler dispatch enables approved-head merge handling"
 	assert_file_contains "$workflow_file" 'build_coverage_evidence_check_failure_body()' "opencode approval can describe a coverage-evidence blocker without publishing a review"
