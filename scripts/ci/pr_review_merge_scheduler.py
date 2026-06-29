@@ -478,7 +478,8 @@ def compare_behind_by(pr: dict[str, Any]) -> int:
 
 def branch_outdated_by_base(pr: dict[str, Any], merge_state: str) -> int:
     """Return known count of base commits missing from the PR head."""
-    if merge_state == "BEHIND":
+    compare_status = (pr.get("compareStatus") or "").lower()
+    if merge_state == "BEHIND" or compare_status == "behind":
         return max(1, compare_behind_by(pr))
     return compare_behind_by(pr)
 
