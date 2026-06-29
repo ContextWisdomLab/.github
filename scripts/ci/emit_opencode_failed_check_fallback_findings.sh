@@ -455,31 +455,8 @@ emit_pytest_failure_findings() {
 		return 0
 	fi
 
-	check_label="$(
-		awk '
-			/^## Failed check: / {
-				sub(/^## Failed check: /, "")
-				print
-				exit
-			}
-		' "$clean_file"
-	)"
-	if [ -z "$check_label" ]; then
-		check_label="GitHub Check"
-	fi
-	step_label="$(
-		awk '
-			/^- step [0-9]+: / {
-				sub(/^- step [0-9]+: /, "")
-				sub(/ \(failure\)$/, "")
-				print
-				exit
-			}
-		' "$clean_file"
-	)"
-	if [ -z "$step_label" ]; then
-		step_label="test step"
-	fi
+	check_label="GitHub Check"
+	step_label="test step"
 	term="$(
 		perl -ne 'if (/assert [\x27"]([^\x27"]+)[\x27"] not in/) { print "$1\n"; exit }' "$clean_file"
 	)"
