@@ -139,6 +139,7 @@ still remain PR-head capability checks.
 | Bucket | Repositories | Scheduler implication |
 |---|---|---|
 | Public target repos with central required Strix, OpenCode, and scheduler | `.github`, `ContextualWisdomLab.github.io`, `appguardrail`, `bandscope`, `clearfolio`, `codec-carver`, `contextual-orchestrator`, `hyosung-itx-slogan-brief`, `naruon`, `newsdom-api`, `pg-erd-cloud`, `scopeweave` | Treat central required workflows as the rollout mechanism. Do not add repo-local copies only to satisfy governance. |
+| Public target repos missing central required Strix, OpenCode, and scheduler | `aFIPC` | Do not drain or merge the PR queue until organization ruleset `18156473` targets the default branch and produces current-head central review evidence. |
 | Public target repos with repo-local Strix/OpenCode/scheduler copies | `.github`, `ContextualWisdomLab.github.io`, `appguardrail`, `clearfolio`, `codec-carver`, `naruon`, `newsdom-api`, `pg-erd-cloud`, `scopeweave` | Retire thick local copies only after central required workflow runs prove stable for that repo's current heads. |
 | Public target repos with partial or no local governance workflow footprint | `bandscope`, `contextual-orchestrator`, `hyosung-itx-slogan-brief` | They are still centrally governed by ruleset `18156473`; local absence is not a required-workflow gap. |
 | Public forks | `argos`, `html4tree`, `nonnest2`, `seedream_evasepic`, `vooster`, `vooster-v2-mvp` | Fork status is not a categorical exclusion; onboarding is an explicit repository decision, and PR mutation remains capability-gated per head. |
@@ -146,6 +147,7 @@ still remain PR-head capability checks.
 | Repo | Flow | Default | Auto | Central required workflows | Repo rules/protection | Repo required checks | Stale dismissal | Open PRs | Local workflow footprint | Recent merged actor |
 |---|---:|---:|---:|---|---|---|---:|---:|---|---|
 | `ContextualWisdomLab/.github` | GitHub Flow | `main` | on | Strix; OpenCode; scheduler | `Lock default branch` | none | ruleset true | 25 | Copilot; OpenCode Review; PR Review Merge Scheduler; Strix Security Scan | #80 `seonghobae`; #79 `seonghobae`; #78 `seonghobae` |
+| `ContextualWisdomLab/aFIPC` | GitHub Flow | `master` | off | missing on PR #78 | repo ruleset `PR` only | `check`, `quality`, `secret-and-workflow-audit` | ruleset false | 1 | CodeQL; Dependency Review; R-CMD-check; quality/security audit | #45 `seonghobae`; #43 `seonghobae`; #38 `seonghobae` |
 | `ContextualWisdomLab/ContextualWisdomLab.github.io` | GitHub Flow | `main` | on | Strix; OpenCode; scheduler | `Lock default branch` | none | ruleset true | 9 | Copilot; OpenCode Review; PR Review Merge Scheduler; Strix Security Scan; Pages | #25 `seonghobae`; #15 `seonghobae`; #14 `seonghobae` |
 | `ContextualWisdomLab/appguardrail` | Git Flow | `develop` | on | Strix; OpenCode; scheduler | `Lock default branch`, `PR` | none | mixed: true/false by repo ruleset | 0 | CodeQL; OpenCode Review; PR Review Merge Scheduler; release/security; Strix Security Scan | #133 `seonghobae`; #131 `seonghobae`; #115 `seonghobae` |
 | `ContextualWisdomLab/bandscope` | Git Flow | `develop` | on | Strix; OpenCode; scheduler | `Lock default branch`; classic branch protection | `CodeQL`, `ci / build-and-test`, `dependency-review`, `gate / build / macos`, `gate / build / windows`, `release-preflight`, `sbom`, `security-audit`, `trivy-fs-scan` | ruleset true; classic false | 81 | OpenCode Review; PR Review Merge Scheduler; many app/security workflows | #451 `github-actions`; #459 `seonghobae`; #458 `seonghobae` |
@@ -206,6 +208,7 @@ both separately; a change can improve one while harming the other.
 | `ContextualWisdomLab.github.io` | Site and documentation changes make reader-facing UX review concrete. | Review comments that say only that a check failed do not help the site reader or maintainer understand the issue. | Treat documentation clarity, homepage behavior, and status-check explanations as UX surfaces. |
 | `hyosung-itx-slogan-brief` | The repo now inherits the central required workflows and has local review/merge workflow names without heavier required checks, which makes it a lightweight GitHub Flow fixture. | It lacks the default-branch lock/stale-dismissal policy used by most organization repos. | Leave autonomous merge disabled unless that policy gap is intentional; otherwise add the standard default-branch lock before relying on autonomous merge. |
 | `contextual-orchestrator` | It now inherits central required workflows without carrying local governance workflow copies, which is the desired no-copy posture. | With no local branch lock, no stale-dismissal policy, no auto-merge, and no open PRs, inherited checks alone do not prove useful runtime behavior. | Use the next real PR as a proof fixture; add a default-branch lock only if autonomous merge is desired. |
+| `aFIPC` | It has real PR pressure and a domain-specific requirement: fixed parameter item calibration changes must reproduce true parameters before estimates can be trusted. | PR #78 shows the central required workflows are absent; the repo ruleset requires only local checks and zero approvals, so a direct merge would bypass the central review contract. | Add or repair the organization required-workflow ruleset target for `master`, then require current-head OpenCode approval, Strix, scheduler, and the true-parameter FIPC test before merging lower-number PRs. |
 
 ## Current Scheduler Contract
 
@@ -281,17 +284,35 @@ PR #381: wait: OpenCode review is already in progress
 4. Treat fork and non-fork repositories uniformly for onboarding. At runtime,
    classify only the PR head mutation capability: observable/reviewable,
    updateable, auto-mergeable, or mergeable.
-5. Keep repo-specific product/build/autofix/security workflows repo-local only
+5. Do not leave an active public fork PR queue in the inventory-only state.
+   When a public fork such as `html4tree` has open PRs targeting the
+   organization-owned fork, it must either be included in the organization required-workflow ruleset
+   for Strix, OpenCode Review, and PR Review Merge
+   Scheduler, or carry a temporary thin caller that invokes the central
+   `.github` workflows until the ruleset can cover it. The fork label is not a
+   reason to merge without same-head central review evidence.
+6. Keep repo-specific product/build/autofix/security workflows repo-local only
    when they are not part of the governance contract. `pg-erd-cloud` autofix
    stays repo-local; Strix, OpenCode review, and PR review/merge governance
    should not.
-6. Use `contextual-orchestrator` as the no-copy onboarding fixture when it next
+7. Use `contextual-orchestrator` as the no-copy onboarding fixture when it next
    has a real PR. It now inherits central required workflows, but lacks
    repo-local branch-lock/stale-dismissal policy and has no open PR to prove
    runtime behavior.
 
 ## Remaining Proof Gaps
 
+- 2026-06-29 KST `html4tree` onboarding gap: PR #3 is the lowest open PR and is
+  cleanly mergeable by GitHub, but current head
+  `d0c4cbc2bb267aed407e4bf6308f4f3cfd3b504c` has no check runs and no reviews.
+  The PR title claims an XSS/attribute-injection fix, while the diff only
+  changes indentation in `src/main/kotlin/html4tree/util.kt`. This proves that
+  `html4tree` cannot be merged by queue order until central Strix, OpenCode
+  Review, and scheduler evidence run on the same head and OpenCode either
+  requests changes or approves real code/test evidence. The required process
+  repair is to add `html4tree` to the organization required-workflow target set
+  or add a temporary thin caller that delegates to `.github`; do not bypass the review gate
+  with a manual or forced merge.
 - 2026-06-26 17:53 KST continuation snapshot: `.github` PR #68 is merged at merge commit `590b4ecb2ac9eac700019a183081309e28d8f25b`; `bandscope` PR #459 is merged at merge commit `a7173e45304d8681f02fdf43e4de5a6b6540bb44`; `.github` PR #79 and #80 are merged, and organization ruleset `18156473` now requires central Strix, OpenCode, and scheduler workflows from `.github@807254a04efafd5f806e0f70cb067ecf050cfd11`. The live organization target inventory contains 12 public non-fork repositories and confirms `appguardrail` is present while `VibeSec` is not in that set.
 - PR #80 proved the no-copy required-workflow path after the ruleset update: `scan-pr-queue` ran as a required check in `ContextualWisdomLab/.github`, passed in 7s, used `PULL_REQUEST_NUMBER=80`, and reported `OpenCode review is already in progress` instead of scanning or mutating the entire queue. The same PR passed central Strix in 3m20s and OpenCode in 4m36s on current head `23ee41076b8f3cec21cff3afd3cd5b4380decf12`.
 - `bandscope` scheduler run `28192186833` is the current live fixture. PR #450 produced conflict guidance with `gh pr checkout 450`, `git fetch origin develop`, merge-or-rebase, `git status --short`, same-branch push, and `--force-with-lease` only for rebase. PR #451 and PR #446 were updated through the workflow `GITHUB_TOKEN`; the resulting head commits were authored by `github-actions[bot]`.
@@ -310,6 +331,7 @@ PR #381: wait: OpenCode review is already in progress
 - `naruon` PR #756 completed the repo-local rollout for the scheduler contract. Its initial head failed backend governance and Scorecard because `actions: write`/`contents: write` were broader than the repo policy allows; the amended and merged head restores minimal `GITHUB_TOKEN` permissions, keeps `trigger_reviews` and `enable_auto_merge` defaulted off, keeps `update_branches` defaulted on, and still dry-runs PR #694/#721 as `update_branch`.
 - `update-branch` `422/403` now has a safe fixture: unit tests simulate both permission-denied and stale `expected_head_sha` failures, assert they become `action_error`, and assert later PRs are still inspected. A real live `422/403` case is still useful as operational evidence, but it is no longer missing from the decision contract test surface.
 - `bandscope` PR #378 exposed a self-referential failed-check loop after manual retry run `28155083916`: the retry run succeeded and approved step execution, but the check rollup still contained the cancelled older `OpenCode Review/opencode-review` run `28152862698`, so OpenCode posted current-head `CHANGES_REQUESTED` review `4569063977` with the banned generic `No deterministic missing-string markers...` text. The collector now excludes OpenCode's own check by check name and by both actual (`OpenCode Review`) and legacy (`OpenCode PR Review`) workflow names before failed-check fallback evidence is built.
+- `aFIPC` PR #78 is the current negative fixture for target coverage drift: head `bc78373f59310b6fbee76d1a5a72fb3d84fc84eb` has local `check`, `quality`, and `secret-and-workflow-audit` checks, but no central `opencode-review`, `strix`, or `scan-pr-queue`; repository ruleset `12815994` requires zero approving reviews. This PR must not be merged until organization required-workflow evidence exists on the current head.
 - Public repo drift is real, not hypothetical: only `.github` matched the central scheduler/workflow byte-for-byte in the 2026-06-26 scan. Some drift is policy-specific and should not be overwritten blindly, but `bandscope` had behaviorally unsafe drift and now has PR #459 merged downstream.
 - The previous drift response still over-indexed on copying. `bandscope` PR
   #460 proved the correction: even when the copied scheduler produced the right
