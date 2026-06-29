@@ -664,6 +664,49 @@ def test_iter_json_objects_extracts_raw_and_embedded_json():
     assert norm.iter_json_objects("no json here") == []
 
 
+def test_escapes_html_comment_breakout(tmp_path):
+    output = tmp_path / "opencode.txt"
+    control_data = control(
+        result="REQUEST_CHANGES",
+        findings=[
+            {
+                "path": "test.py",
+                "line": 1,
+                "severity": "high",
+                "title": "Test finding",
+                "problem": "--> injected string with < and > and &",
+                "root_cause": "test",
+                "fix_direction": "test",
+                "regression_test_direction": "test",
+                "suggested_diff": "test",
+            }
+        ],
+    )
+    output.write_text("prefix\n" + json.dumps(control_data) + "\nsuffix", encoding="utf-8")
+    assert norm.main(["prog", "head", "run", "attempt", str(output)]) == 0
+    text = output.read_text(encoding="utf-8")
+
+    control_block_marker = "<!-- opencode-review-control-v1\n"
+    control_block_start = text.find(control_block_marker)
+    control_block_end = text.rfind("\n-->")
+    assert control_block_start != -1
+    assert control_block_end != -1
+    assert control_block_start < control_block_end
+
+    # Extract the JSON control block itself to ensure no unescaped `<, >, &` exists.
+    control_block_start += len(control_block_marker)
+    json_text = text[control_block_start:control_block_end]
+
+    escaped_fragments = ("\\u003c", "\\u003e", "\\u0026")
+    raw_comment_breakout_fragments = ("-->", "<", ">", "&")
+
+    assert all(fragment in json_text for fragment in escaped_fragments)
+    assert all(fragment not in json_text for fragment in raw_comment_breakout_fragments)
+
+    parsed_control = json.loads(json_text)
+    assert parsed_control["findings"][0]["problem"] == "--> injected string with < and > and &"
+
+
 def test_main_normalizes_valid_output_and_reports_failures(tmp_path, capsys):
     output = tmp_path / "opencode.txt"
     output.write_text("prefix\n" + json.dumps(control()) + "\nsuffix", encoding="utf-8")
