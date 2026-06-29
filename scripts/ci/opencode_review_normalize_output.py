@@ -192,7 +192,6 @@ EVIDENCE_REPAIR_ENV_VARS = (
     "OPENCODE_EVIDENCE_FILE",
 )
 
-
 def admits_missing_structural_review(reason: str, summary: str) -> bool:
     """Return whether an approval admits it did not inspect required structure."""
     combined = f"{reason}\n{summary}".casefold()
@@ -200,6 +199,9 @@ def admits_missing_structural_review(reason: str, summary: str) -> bool:
         pattern.search(combined) for pattern in STRUCTURAL_FAILURE_PATTERNS
     )
 
+_COMPILED_LABELS = {
+    label: re.compile(re.escape(label)) for label in APPROVAL_VERIFICATION_LABELS
+}
 
 def control_review_text(value: dict[str, Any]) -> str:
     """Return human review text from a control block for policy validation."""
@@ -317,7 +319,10 @@ def label_section(text: str, label: str) -> str:
     def label_matches(candidate: str) -> list[re.Match[str]]:
         """Return exact verification-label matches without suffix collisions."""
         matches = []
-        for match in re.finditer(re.escape(candidate), text):
+        pattern = _COMPILED_LABELS.get(candidate)
+        if pattern is None:
+            pattern = re.compile(re.escape(candidate))
+        for match in pattern.finditer(text):
             if candidate == "coverage:" and text[max(0, match.start() - 10) : match.start()] == "docstring ":
                 continue
             matches.append(match)
