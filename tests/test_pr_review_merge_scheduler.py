@@ -1199,6 +1199,27 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert "existing auto-merge request remains queued" in blocked_without_opencode_decision.reason
     assert called == [("owner/repo", 1, True)]
     called.clear()
+    blocked_compare_behind_auto = make_pr(
+        mergeStateStatus="BLOCKED",
+        restMergeableState="BLOCKED",
+        compareStatus="behind",
+        autoMergeRequest={"enabledAt": "now"},
+        statusCheckRollup={
+            "contexts": {
+                "nodes": [
+                    {"__typename": "CheckRun", "name": "strix", "conclusion": "FAILURE"},
+                    {"__typename": "CheckRun", "name": "coverage-evidence", "conclusion": "FAILURE"},
+                ],
+            }
+        },
+    )
+    blocked_compare_behind_decision = inspect(blocked_compare_behind_auto)
+    assert blocked_compare_behind_decision.action == "update_branch"
+    assert "auto-merge already enabled" in blocked_compare_behind_decision.reason
+    assert "base branch is 1 commit(s) ahead" in blocked_compare_behind_decision.reason
+    assert "existing auto-merge request remains queued" in blocked_compare_behind_decision.reason
+    assert called == [("owner/repo", 1, True)]
+    called.clear()
     disabled.clear()
     assert (
         inspect(blocked_failed_behind_auto_without_opencode_approval, update_branches=False).reason
