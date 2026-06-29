@@ -4448,17 +4448,38 @@ jobs:
           echo "::endgroup::"
 
       - name: Dispatch merge scheduler after approval
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref || github.event.inputs.pr_base_ref || '' }}
         run: |
           set -euo pipefail
-          gh workflow run pr-review-merge-scheduler.yml \
-            --repo "$GH_REPOSITORY" \
-            --ref main \
-            -f dry_run=false \
-            -f max_prs=100 \
-            -f trigger_reviews=false \
-            -f enable_auto_merge=true \
-            -f merge_mode=auto \
-            -f update_branches=true
+          scheduler_ref="$(
+            gh api "repos/${GH_REPOSITORY}" --jq '.default_branch // empty' 2>/dev/null || true
+          )"
+          scheduler_ref="${scheduler_ref:-${PR_BASE_REF:-main}}"
+
+          dispatch_status=1
+          dispatch_error="$(mktemp)"
+          for attempt in 1 2 3; do
+            : >"$dispatch_error"
+            if gh workflow run pr-review-merge-scheduler.yml \
+              --repo "$GH_REPOSITORY" \
+              --ref "$scheduler_ref" \
+              -f dry_run=false \
+              -f max_prs=100 \
+              -f trigger_reviews=false \
+              -f enable_auto_merge=true \
+              -f merge_mode=auto \
+              -f update_branches=true 2>"$dispatch_error"; then
+              dispatch_status=0
+              break
+            fi
+            sed 's/^/scheduler dispatch: /' "$dispatch_error" >&2 || true
+            sleep "$((attempt * 5))"
+          done
+
+          if [ "$dispatch_status" -ne 0 ]; then
+            printf '::warning::Merge scheduler dispatch failed after approval; leaving OpenCode approval intact. Repository=%s ref=%s. The scheduled and workflow_run scheduler paths remain authoritative.\n' "$GH_REPOSITORY" "$scheduler_ref"
+          fi
