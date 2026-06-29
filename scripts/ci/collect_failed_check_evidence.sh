@@ -295,7 +295,6 @@ gh api graphql \
 				| select(((.conclusion // "" | ascii_downcase) == "cancelled" and (.name // "") == "metadata-only gate evaluation" and (.checkSuite.workflowRun.workflow.name // "") == "PR Governance") | not)
 				| select((.name // "") != "opencode-review")
 				| select((.checkSuite.workflowRun.workflow.name // "") != "OpenCode Review")
-				| select((.checkSuite.workflowRun.workflow.name // "") != "Required OpenCode Review")
 				| select((.checkSuite.workflowRun.workflow.name // "") != "OpenCode PR Review")
 				| [
 					"check_run",
