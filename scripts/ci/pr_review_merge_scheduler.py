@@ -104,6 +104,7 @@ query($owner: String!, $name: String!, $number: Int!) {
 
 OPEN_PRS_PAGE_SIZE = 25
 DEFAULT_STALE_OPENCODE_MINUTES = 45
+OPENCODE_WORKFLOW_NAMES = {"OpenCode Review", "Required OpenCode Review"}
 RUNNING_CHECK_STATES = {"PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"}
 FAILED_CHECK_CONCLUSIONS = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "STARTUP_FAILURE"}
 ACTION_REQUIRED_CONCLUSIONS = {"ACTION_REQUIRED"}
@@ -441,7 +442,7 @@ def is_opencode_context(node: dict[str, Any]) -> bool:
             ((node.get("checkSuite") or {}).get("workflowRun") or {}).get("workflow")
             or {}
         )
-        return node.get("name") == "opencode-review" or workflow.get("name") == "OpenCode Review"
+        return node.get("name") == "opencode-review" or workflow.get("name") in OPENCODE_WORKFLOW_NAMES
     return node.get("context") == "opencode-review"
 
 
@@ -1825,7 +1826,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=os.environ.get("MERGE_MODE", "auto"),
     )
     parser.add_argument("--update-branches", action=argparse.BooleanOptionalAction, default=True)
-    parser.add_argument("--review-workflow", default="OpenCode Review")
+    parser.add_argument("--review-workflow", default="Required OpenCode Review")
     parser.add_argument("--security-workflow", default="Strix Security Scan")
     parser.add_argument(
         "--stale-opencode-minutes",

@@ -4,7 +4,7 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_run:
-    workflows: ["OpenCode Review"]
+    workflows: ["Required OpenCode Review"]
     types: [completed]
   workflow_call:
     inputs:
@@ -148,7 +148,7 @@ jobs:
             --base-branch "$DEFAULT_BRANCH"
             --max-prs "$MAX_PRS"
             --project-flow "$project_flow"
-            --review-workflow "OpenCode Review"
+            --review-workflow "Required OpenCode Review"
             --stale-opencode-minutes "$STALE_OPENCODE_MINUTES"
           )
           if [ -n "$PULL_REQUEST_NUMBER" ]; then
