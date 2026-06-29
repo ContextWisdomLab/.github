@@ -120,26 +120,13 @@ jobs:
       MERGE_MODE: ${{ inputs.merge_mode || vars.PR_MERGE_MODE || 'auto' }}
       UPDATE_BRANCHES: ${{ github.event_name == 'schedule' || github.event_name == 'pull_request_target' || github.event_name == 'workflow_run' || inputs.update_branches == true }}
       STALE_OPENCODE_MINUTES: ${{ inputs.stale_opencode_minutes || vars.STALE_OPENCODE_MINUTES || '45' }}
-      CANONICAL_REF_INPUT: ${{ inputs.canonical_ref || '' }}
-      WORKFLOW_REF: ${{ github.workflow_ref }}
+      CANONICAL_REF: ${{ inputs.canonical_ref || 'main' }}
     steps:
-      - name: Resolve trusted scheduler source ref
-        id: trusted_source
-        run: |
-          set -euo pipefail
-          trusted_ref="${CANONICAL_REF_INPUT:-main}"
-          case "$WORKFLOW_REF" in
-            ContextualWisdomLab/.github/.github/workflows/pr-review-merge-scheduler.yml@*)
-              trusted_ref="${WORKFLOW_REF##*@}"
-              ;;
-          esac
-          printf 'ref=%s\n' "$trusted_ref" >>"$GITHUB_OUTPUT"
-
       - name: Checkout trusted scheduler
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ContextualWisdomLab/.github
-          ref: ${{ steps.trusted_source.outputs.ref }}
+          ref: ${{ env.CANONICAL_REF }}
           fetch-depth: 1
 
       - name: Self-test scheduler
