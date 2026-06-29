@@ -247,6 +247,54 @@ def test_rest_mergeable_state_helpers(monkeypatch):
     assert prs == [{"number": 9, "restMergeableStateError": "transient REST failure"}]
 
 
+def test_enrich_rest_mergeable_states_skips_executor_for_small_inputs(monkeypatch):
+    class ExplodingExecutor:
+        def __init__(self, **kwargs):
+            raise AssertionError("executor should not be used for small inputs")
+
+    calls = []
+    monkeypatch.setattr(sched.concurrent.futures, "ThreadPoolExecutor", ExplodingExecutor)
+    monkeypatch.setattr(
+        sched,
+        "fetch_rest_mergeable_state",
+        lambda repo, number: calls.append((repo, number)) or "CLEAN",
+    )
+
+    sched.enrich_rest_mergeable_states("owner/repo", [])
+    prs = [{"number": 10}]
+    sched.enrich_rest_mergeable_states("owner/repo", prs)
+
+    assert calls == [("owner/repo", 10)]
+    assert prs == [{"number": 10, "restMergeableState": "CLEAN"}]
+
+
+def test_enrich_rest_mergeable_states_caps_executor_workers(monkeypatch):
+    seen_workers = []
+
+    class FakeExecutor:
+        def __init__(self, *, max_workers):
+            seen_workers.append(max_workers)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def map(self, func, items):
+            return [func(item) for item in items]
+
+    monkeypatch.setattr(sched.concurrent.futures, "ThreadPoolExecutor", FakeExecutor)
+    monkeypatch.setattr(sched, "fetch_rest_mergeable_state", lambda repo, number: f"{repo}:{number}")
+
+    prs = [{"number": number} for number in range(1, sched.REST_MERGEABLE_STATE_WORKERS + 3)]
+    sched.enrich_rest_mergeable_states("owner/repo", prs)
+
+    assert seen_workers == [sched.REST_MERGEABLE_STATE_WORKERS]
+    assert prs[0]["restMergeableState"] == "owner/repo:1"
+    assert prs[-1]["restMergeableState"] == f"owner/repo:{sched.REST_MERGEABLE_STATE_WORKERS + 2}"
+
+
 def test_context_review_and_check_helpers():
     assert sched.context_nodes({}) == []
     assert sched.context_nodes(make_pr()) == []

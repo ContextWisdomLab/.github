@@ -122,6 +122,7 @@ REST_MERGEABLE_STATE_MAP = {
     "unstable": "UNSTABLE",
 }
 REST_MERGEABLE_STATES = set(REST_MERGEABLE_STATE_MAP.values())
+REST_MERGEABLE_STATE_WORKERS = 4
 
 
 @dataclass
@@ -419,8 +420,13 @@ def enrich_rest_mergeable_states(repo: str, prs: list[dict[str, Any]]) -> None:
         except RuntimeError as exc:
             pr["restMergeableStateError"] = bounded_error_summary(str(exc))
 
-    # ⚡ Bolt: Execute independent subprocess network calls concurrently to avoid O(N) I/O wait latency
-    with concurrent.futures.ThreadPoolExecutor() as executor:
+    if len(prs) <= 1:
+        for pr in prs:
+            enrich_pr(pr)
+        return
+
+    max_workers = min(REST_MERGEABLE_STATE_WORKERS, len(prs))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         list(executor.map(enrich_pr, prs))
 
 
