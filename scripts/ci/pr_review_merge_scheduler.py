@@ -11,6 +11,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -318,7 +319,7 @@ def decision_guidance(decision: Decision) -> dict[str, Any] | None:
 
 
 def run(args: Sequence[str], *, stdin: str | None = None) -> str:
-    """Run a command and return stdout, raising with stderr on failure."""
+    """Run a command and return stdout, raising a scrubbed summary on failure."""
     if isinstance(args, str) or not all(isinstance(arg, str) for arg in args):
         raise TypeError("run() requires a sequence of argv strings; shell command strings are not allowed")
     argv = list(args)
@@ -351,13 +352,50 @@ def split_repo(repo: str) -> tuple[str, str]:
     return owner, name
 
 
+TRANSIENT_GITHUB_API_ERRORS = (
+    "HTTP 500",
+    "HTTP 502",
+    "HTTP 503",
+    "HTTP 504",
+    "connection reset",
+    "connection refused",
+    "connection timed out",
+    "context deadline exceeded",
+    "gateway timeout",
+    "i/o timeout",
+    "server error",
+    "service unavailable",
+    "temporary failure",
+    "timeout",
+)
+
+
+def is_transient_github_api_error(exc: RuntimeError) -> bool:
+    """Return whether a GitHub API failure is worth retrying in the same run."""
+    message = str(exc)
+    folded = message.lower()
+    return any(marker in message or marker.lower() in folded for marker in TRANSIENT_GITHUB_API_ERRORS)
+
+
 def gh_graphql(query: str, **fields: str | int) -> dict[str, Any]:
     """Run a GitHub GraphQL query through gh and decode the JSON response."""
     cmd = ["gh", "api", "graphql", "-F", "query=@-"]
     for key, value in fields.items():
         flag = "-F" if isinstance(value, int) else "-f"
         cmd.extend([flag, f"{key}={value}"])
-    return json.loads(run(cmd, stdin=query))
+    max_attempts = 4
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return json.loads(run(cmd, stdin=query))
+        except RuntimeError as exc:
+            if attempt >= max_attempts or not is_transient_github_api_error(exc):
+                raise
+            delay = min(2 ** (attempt - 1), 8)
+            print(
+                f"Transient GitHub GraphQL error on attempt {attempt}/{max_attempts}; retrying in {delay}s",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
 
 
 def fetch_open_prs(repo: str, max_prs: int) -> list[dict[str, Any]]:
@@ -996,6 +1034,7 @@ def inspect_pr(
     *,
     dry_run: bool,
     trigger_reviews: bool,
+    review_dispatch_allowed: bool = True,
     enable_auto_merge_flag: bool,
     update_branches: bool,
     workflow: str,
@@ -1028,18 +1067,6 @@ def inspect_pr(
         return finish(Decision(number, action, reason))
 
     merge_state = effective_merge_state(pr)
-    if merge_state == "UNKNOWN":
-        if pr.get("autoMergeRequest"):
-            return finish(
-                disable_auto_merge_decision(
-                    repo,
-                    pr,
-                    dry_run=dry_run,
-                    reason="mergeability is still being calculated; wait for GitHub mergeability evidence before re-enabling auto-merge",
-                )
-            )
-        return decide("wait", "mergeability is still being calculated")
-
     if merge_state in {"DIRTY", "CONFLICTING"}:
         if pr.get("autoMergeRequest"):
             return finish(
@@ -1109,6 +1136,18 @@ def inspect_pr(
             f"(github-actions[bot] in GitHub Actions){suffix}",
         )
 
+    if merge_state == "UNKNOWN":
+        if pr.get("autoMergeRequest"):
+            return finish(
+                disable_auto_merge_decision(
+                    repo,
+                    pr,
+                    dry_run=dry_run,
+                    reason="mergeability is still being calculated and no branch freshness evidence is available; wait for GitHub mergeability evidence before re-enabling auto-merge",
+                )
+            )
+        return decide("wait", "mergeability is still being calculated and no branch freshness evidence is available")
+
     if current_head_approved:
         failed_checks = failed_status_checks(pr)
         if failed_checks:
@@ -1169,6 +1208,11 @@ def inspect_pr(
             f"OpenCode review exceeded {stale_opencode_minutes} minute retry threshold; review dispatch disabled",
         )
     if opencode_state == "stale":
+        if not review_dispatch_allowed:
+            return decide(
+                "wait",
+                f"OpenCode review exceeded {stale_opencode_minutes} minute retry threshold; review dispatch limit reached",
+            )
         dispatch_opencode_review(repo, workflow, pr, dry_run=dry_run)
         return decide(
             "review_dispatch",
@@ -1178,6 +1222,11 @@ def inspect_pr(
     if trigger_reviews:
         strix_state = strix_evidence_state(pr)
         if strix_state == "missing":
+            if not review_dispatch_allowed:
+                return decide(
+                    "wait",
+                    "current head has no completed Strix evidence; review dispatch limit reached",
+                )
             dispatch_strix_evidence(repo, security_workflow, pr, dry_run=dry_run)
             return decide(
                 "security_dispatch",
@@ -1187,6 +1236,11 @@ def inspect_pr(
             return decide("wait", "same-head Strix evidence is still running")
         # Legacy trusted-base Strix self-test sentinel while this scheduler rollout lands:
         # same-head Strix and OpenCode dispatched
+        if not review_dispatch_allowed:
+            return decide(
+                "wait",
+                "current head has completed Strix evidence; review dispatch limit reached",
+            )
         dispatch_opencode_review(repo, workflow, pr, dry_run=dry_run)
         return decide(
             "review_dispatch",
@@ -1511,6 +1565,23 @@ def summarize_action_error(exc: RuntimeError) -> str:
 
 def self_test() -> None:
     """Exercise scheduler invariants without GitHub network access."""
+    assert split_repo("owner/name") == ("owner", "name")
+    assert split_repo("owner/name/extra") == ("owner", "name/extra")
+    try:
+        split_repo("owner")
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
+    try:
+        split_repo("/name")
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
+    try:
+        split_repo("owner/")
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
     sample = {
         "number": 1,
         "headRefOid": "abc",
@@ -1917,6 +1988,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--pr-number", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--trigger-reviews", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--review-dispatch-limit",
+        type=int,
+        default=int(os.environ.get("REVIEW_DISPATCH_LIMIT", "-1")),
+        help="Maximum OpenCode/Strix review dispatch actions per scheduler run; -1 means unlimited",
+    )
     parser.add_argument("--enable-auto-merge", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
         "--merge-mode",
@@ -1949,15 +2026,22 @@ def main(argv: list[str]) -> int:
         raise SystemExit("--project-flow is required")
     if args.pr_number < 0:
         raise SystemExit("--pr-number must not be negative")
+    if args.review_dispatch_limit < -1:
+        raise SystemExit("--review-dispatch-limit must be -1 or greater")
     prs = fetch_pr(args.repo, args.pr_number) if args.pr_number else fetch_open_prs(args.repo, args.max_prs)
     decisions = []
+    review_dispatches_used = 0
     for pr in prs:
+        review_dispatch_allowed = (
+            args.review_dispatch_limit < 0 or review_dispatches_used < args.review_dispatch_limit
+        )
         try:
             decision = inspect_pr(
                 args.repo,
                 pr,
                 dry_run=args.dry_run,
                 trigger_reviews=args.trigger_reviews,
+                review_dispatch_allowed=review_dispatch_allowed,
                 enable_auto_merge_flag=args.enable_auto_merge,
                 merge_mode=args.merge_mode,
                 update_branches=args.update_branches,
@@ -1973,6 +2057,8 @@ def main(argv: list[str]) -> int:
                 summarize_action_error(exc),
             )
         decisions.append(decision)
+        if decision.action in {"review_dispatch", "security_dispatch"}:
+            review_dispatches_used += 1
     print_summary(
         decisions,
         dry_run=args.dry_run,

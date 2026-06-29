@@ -653,7 +653,7 @@ jobs:
     if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target')
     runs-on: ubuntu-latest
     permissions:
-      actions: read
+      actions: write
       checks: read
       id-token: write
       contents: read
@@ -688,9 +688,75 @@ jobs:
           persist-credentials: false
           ref: ${{ steps.trusted_source.outputs.ref }}
 
+      - name: Exchange OpenCode app token for target repository review reads
+        id: review_read_app_token
+        env:
+          OIDC_AUDIENCE: opencode-github-action
+          OPENCODE_API_BASE_URL: https://api.opencode.ai
+        run: |
+          set -euo pipefail
+
+          mark_unavailable() {
+            echo "available=false" >>"$GITHUB_OUTPUT"
+          }
+
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "OpenCode app token exchange unavailable: OIDC request environment is missing."
+            mark_unavailable
+            exit 0
+          fi
+
+          request_url="${ACTIONS_ID_TOKEN_REQUEST_URL}"
+          separator="&"
+          case "$request_url" in
+            *\?*) ;;
+            *) separator="?" ;;
+          esac
+
+          if ! oidc_response="$(
+            curl -fsS \
+              -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+              "${request_url}${separator}audience=${OIDC_AUDIENCE}"
+          )"; then
+            echo "OpenCode app token exchange unavailable: OIDC token request did not complete."
+            mark_unavailable
+            exit 0
+          fi
+
+          oidc_token="$(jq -r '.value // empty' <<<"$oidc_response")"
+          if [ -z "$oidc_token" ]; then
+            echo "OpenCode app token exchange unavailable: OIDC token response was empty."
+            mark_unavailable
+            exit 0
+          fi
+
+          if ! token_response="$(
+            curl -fsS \
+              -X POST \
+              -H "Authorization: Bearer ${oidc_token}" \
+              "${OPENCODE_API_BASE_URL}/exchange_github_app_token"
+          )"; then
+            echo "OpenCode app token exchange unavailable: app token request did not complete."
+            mark_unavailable
+            exit 0
+          fi
+
+          app_token="$(jq -r '.token // empty' <<<"$token_response")"
+          if [ -z "$app_token" ]; then
+            echo "OpenCode app token exchange unavailable: app token response was empty."
+            mark_unavailable
+            exit 0
+          fi
+
+          echo "::add-mask::$app_token"
+          {
+            echo "available=true"
+            echo "token=$app_token"
+          } >>"$GITHUB_OUTPUT"
+
       - name: Materialize pull request head for OpenCode review data
         env:
-          GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.review_read_app_token.outputs.token || secrets.OPENCODE_APPROVE_TOKEN || github.token }}
           GH_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
           PR_BASE_REF: ${{ github.event.pull_request.base.ref || github.event.inputs.pr_base_ref }}
@@ -767,7 +833,7 @@ jobs:
       - name: Prepare bounded OpenCode review evidence
         timeout-minutes: 40
         env:
-          GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || steps.review_read_app_token.outputs.token || github.token }}
           GH_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
@@ -1595,8 +1661,8 @@ jobs:
           {"head_sha":"${HEAD_SHA}","run_id":"${RUN_ID}","run_attempt":"${RUN_ATTEMPT}","result":"APPROVE or REQUEST_CHANGES","reason":"short reason","summary":"short review summary with concrete evidence and Verification posture labels","findings":[]}
           -->
           Do not include analysis, planning, tool-call narration, placeholders, or prose before the sentinel.
-          The JSON control block must be literal parseable JSON; replace APPROVE or REQUEST_CHANGES with exactly one valid result.
-          APPROVE only for no blockers. REQUEST_CHANGES findings require path,line,severity,title,problem,root_cause,fix_direction,regression_test_direction,suggested_diff. The line must be a positive line number from an actual changed or relevant local file; never use line 0. Failed-check findings must be line-specific and concrete; include the failed check label, exact failed log phrase, observable impact, and trigger condition that led to the line, then provide a minimal suggested diff that changes the identified line. The regression_test_direction should name an exact test target or verification command when the repository already provides one. The suggested_diff must be source-backed and GitHub suggestion-ready when possible: every removed line in the diff must exist in the cited current local file, so do not request changes for code you did not verify in the current source. Multiple Strix model reports must not be collapsed; preserve the model name, report title, severity, endpoint, and Code Locations/path:line evidence in each finding's problem or root_cause when present. One Strix model vulnerability report requires one distinct finding; do not combine duplicate titles or matching locations from different models into one finding. Unrelated speculative findings are invalid when failed-check evidence is present.
+          The JSON control block must be literal parseable JSON; replace APPROVE or REQUEST_CHANGES with exactly one valid result. Put all required Verification posture labels inside the JSON summary string itself, not only in prose after the control block.
+          APPROVE only for no blockers, and when result is APPROVE the JSON findings value must be exactly [] with no advisory, informational, already-fixed, or positive findings. REQUEST_CHANGES findings require path,line,severity,title,problem,root_cause,fix_direction,regression_test_direction,suggested_diff. The line must be a positive line number from an actual changed or relevant local file; never use line 0. Failed-check findings must be line-specific and concrete; include the failed check label, exact failed log phrase, observable impact, and trigger condition that led to the line, then provide a minimal suggested diff that changes the identified line. The regression_test_direction should name an exact test target or verification command when the repository already provides one. The suggested_diff must be source-backed and GitHub suggestion-ready when possible: every removed line in the diff must exist in the cited current local file, so do not request changes for code you did not verify in the current source. Multiple Strix model reports must not be collapsed; preserve the model name, report title, severity, endpoint, and Code Locations/path:line evidence in each finding's problem or root_cause when present. One Strix model vulnerability report requires one distinct finding; do not combine duplicate titles or matching locations from different models into one finding. Unrelated speculative findings are invalid when failed-check evidence is present.
           Return only the review body.
           EOF
           cd "$OPENCODE_REVIEW_WORKDIR"
@@ -1721,8 +1787,8 @@ jobs:
           {"head_sha":"${HEAD_SHA}","run_id":"${RUN_ID}","run_attempt":"${RUN_ATTEMPT}","result":"APPROVE or REQUEST_CHANGES","reason":"short reason","summary":"short review summary with concrete evidence and Verification posture labels","findings":[]}
           -->
           Do not include analysis, planning, tool-call narration, placeholders, or prose before the sentinel.
-          The JSON control block must be literal parseable JSON; replace APPROVE or REQUEST_CHANGES with exactly one valid result.
-          APPROVE only for no blockers. REQUEST_CHANGES findings require path,line,severity,title,problem,root_cause,fix_direction,regression_test_direction,suggested_diff. The line must be a positive line number from an actual changed or relevant local file; never use line 0. Failed-check findings must be line-specific and concrete; include the failed check label, exact failed log phrase, observable impact, and trigger condition that led to the line, then provide a minimal suggested diff that changes the identified line. The regression_test_direction should name an exact test target or verification command when the repository already provides one. The suggested_diff must be source-backed and GitHub suggestion-ready when possible: every removed line in the diff must exist in the cited current local file, so do not request changes for code you did not verify in the current source. Multiple Strix model reports must not be collapsed; preserve the model name, report title, severity, endpoint, and Code Locations/path:line evidence in each finding's problem or root_cause when present. One Strix model vulnerability report requires one distinct finding; do not combine duplicate titles or matching locations from different models into one finding. Unrelated speculative findings are invalid when failed-check evidence is present.
+          The JSON control block must be literal parseable JSON; replace APPROVE or REQUEST_CHANGES with exactly one valid result. Put all required Verification posture labels inside the JSON summary string itself, not only in prose after the control block.
+          APPROVE only for no blockers, and when result is APPROVE the JSON findings value must be exactly [] with no advisory, informational, already-fixed, or positive findings. REQUEST_CHANGES findings require path,line,severity,title,problem,root_cause,fix_direction,regression_test_direction,suggested_diff. The line must be a positive line number from an actual changed or relevant local file; never use line 0. Failed-check findings must be line-specific and concrete; include the failed check label, exact failed log phrase, observable impact, and trigger condition that led to the line, then provide a minimal suggested diff that changes the identified line. The regression_test_direction should name an exact test target or verification command when the repository already provides one. The suggested_diff must be source-backed and GitHub suggestion-ready when possible: every removed line in the diff must exist in the cited current local file, so do not request changes for code you did not verify in the current source. Multiple Strix model reports must not be collapsed; preserve the model name, report title, severity, endpoint, and Code Locations/path:line evidence in each finding's problem or root_cause when present. One Strix model vulnerability report requires one distinct finding; do not combine duplicate titles or matching locations from different models into one finding. Unrelated speculative findings are invalid when failed-check evidence is present.
           Return only the review body.
           EOF
           cd "$OPENCODE_REVIEW_WORKDIR"
@@ -1848,8 +1914,8 @@ jobs:
           {"head_sha":"${HEAD_SHA}","run_id":"${RUN_ID}","run_attempt":"${RUN_ATTEMPT}","result":"APPROVE or REQUEST_CHANGES","reason":"short reason","summary":"short review summary with concrete evidence and Verification posture labels","findings":[]}
           -->
           Do not include analysis, planning, tool-call narration, placeholders, or prose before the sentinel.
-          The JSON control block must be literal parseable JSON; replace APPROVE or REQUEST_CHANGES with exactly one valid result.
-          APPROVE only for no blockers. REQUEST_CHANGES findings require path,line,severity,title,problem,root_cause,fix_direction,regression_test_direction,suggested_diff. The line must be a positive line number from an actual changed or relevant local file; never use line 0. Failed-check findings must be line-specific and concrete; include the failed check label, exact failed log phrase, observable impact, and trigger condition that led to the line, then provide a minimal suggested diff that changes the identified line. The regression_test_direction should name an exact test target or verification command when the repository already provides one. The suggested_diff must be source-backed and GitHub suggestion-ready when possible: every removed line in the diff must exist in the cited current local file, so do not request changes for code you did not verify in the current source. Multiple Strix model reports must not be collapsed; preserve the model name, report title, severity, endpoint, and Code Locations/path:line evidence in each finding's problem or root_cause when present. One Strix model vulnerability report requires one distinct finding; do not combine duplicate titles or matching locations from different models into one finding. Unrelated speculative findings are invalid when failed-check evidence is present.
+          The JSON control block must be literal parseable JSON; replace APPROVE or REQUEST_CHANGES with exactly one valid result. Put all required Verification posture labels inside the JSON summary string itself, not only in prose after the control block.
+          APPROVE only for no blockers, and when result is APPROVE the JSON findings value must be exactly [] with no advisory, informational, already-fixed, or positive findings. REQUEST_CHANGES findings require path,line,severity,title,problem,root_cause,fix_direction,regression_test_direction,suggested_diff. The line must be a positive line number from an actual changed or relevant local file; never use line 0. Failed-check findings must be line-specific and concrete; include the failed check label, exact failed log phrase, observable impact, and trigger condition that led to the line, then provide a minimal suggested diff that changes the identified line. The regression_test_direction should name an exact test target or verification command when the repository already provides one. The suggested_diff must be source-backed and GitHub suggestion-ready when possible: every removed line in the diff must exist in the cited current local file, so do not request changes for code you did not verify in the current source. Multiple Strix model reports must not be collapsed; preserve the model name, report title, severity, endpoint, and Code Locations/path:line evidence in each finding's problem or root_cause when present. One Strix model vulnerability report requires one distinct finding; do not combine duplicate titles or matching locations from different models into one finding. Unrelated speculative findings are invalid when failed-check evidence is present.
           Return only the review body.
           EOF
           cd "$OPENCODE_REVIEW_WORKDIR"
@@ -1988,7 +2054,7 @@ jobs:
           <!-- opencode-review-control-v1
           {"head_sha":"${HEAD_SHA}","run_id":"${RUN_ID}","run_attempt":"${RUN_ATTEMPT}","result":"APPROVE or REQUEST_CHANGES","reason":"short reason","summary":"short review summary with concrete evidence and Verification posture labels","findings":[]}
           -->
-          APPROVE only for no blockers. REQUEST_CHANGES findings require path,line,severity,title,problem,root_cause,fix_direction,regression_test_direction,suggested_diff. Use line-specific, source-backed findings only. Return only the review body.
+          APPROVE only for no blockers, and when result is APPROVE the JSON findings value must be exactly [] with no advisory, informational, already-fixed, or positive findings. Put all required Verification posture labels inside the JSON summary string itself, not only in prose after the control block. REQUEST_CHANGES findings require path,line,severity,title,problem,root_cause,fix_direction,regression_test_direction,suggested_diff. Use line-specific, source-backed findings only. Return only the review body.
           EOF
 
             for opencode_attempt in $(seq 1 "$opencode_attempts"); do
@@ -2383,7 +2449,7 @@ jobs:
         if: always()
         timeout-minutes: 45
         env:
-          GH_TOKEN: ${{ steps.opencode_app_token.outputs.token || secrets.OPENCODE_APPROVE_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || steps.opencode_app_token.outputs.token || github.token }}
           GH_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
           STRIX_GITHUB_MODELS_TOKEN: ${{ secrets.STRIX_GITHUB_MODELS_TOKEN || github.token }}
           OPENCODE_APP_TOKEN: ${{ steps.opencode_app_token.outputs.token }}
@@ -2420,13 +2486,18 @@ jobs:
           set -euo pipefail
           echo "::group::OpenCode Review Approval Gate"
           echo "PR=#${PR_NUMBER} head_sha=${HEAD_SHA} run_id=${RUN_ID} run_attempt=${RUN_ATTEMPT}"
-          approval_token_source="configured"
-          if [ -n "${OPENCODE_APP_TOKEN:-}" ]; then
-            export GH_TOKEN="$OPENCODE_APP_TOKEN"
-            approval_token_source="opencode-app"
+          check_lookup_token_source="configured"
+          if [ -n "${OPENCODE_APP_TOKEN:-}" ] && [ "${GH_TOKEN:-}" = "${OPENCODE_APP_TOKEN:-}" ]; then
+            check_lookup_token_source="opencode-app"
           fi
-          overview_comment_token="$GH_TOKEN"
-          echo "approval token source=${approval_token_source}"
+          review_write_token="${OPENCODE_APP_TOKEN:-$GH_TOKEN}"
+          review_write_token_source="configured"
+          if [ -n "${OPENCODE_APP_TOKEN:-}" ]; then
+            review_write_token_source="opencode-app"
+          fi
+          overview_comment_token="$review_write_token"
+          echo "check lookup token source=${check_lookup_token_source}"
+          echo "review write token source=${review_write_token_source}"
 
           warn_gh_publication_failure() {
             local action="$1" error_file="$2"
@@ -2646,7 +2717,7 @@ jobs:
               --arg body "$body" \
               --arg commit_id "$HEAD_SHA" \
               '{event: $event, body: $body, commit_id: $commit_id}' >"$review_payload_file"
-            if ! gh api -X POST "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}/reviews" --input "$review_payload_file" >/dev/null 2>"$gh_error_file"; then
+            if ! env GH_TOKEN="$review_write_token" gh api -X POST "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}/reviews" --input "$review_payload_file" >/dev/null 2>"$gh_error_file"; then
               warn_gh_publication_failure "pull review" "$gh_error_file"
               rm -f "$gh_error_file" "$review_payload_file"
               update_review_overview "$event" "$body"
@@ -2876,24 +2947,24 @@ jobs:
               "- Workflow attempt: ${RUN_ATTEMPT}" >"$body_file"
           }
 
-          build_coverage_evidence_failure_body() {
+          build_coverage_evidence_check_failure_body() {
             local body_file="$1"
 
             {
               printf '%s\n' \
                 "## Pull request overview" \
                 "" \
-                "OpenCode reviewed the current-head evidence but cannot approve because required coverage evidence did not pass." \
+                "OpenCode cannot approve yet because required coverage evidence did not pass." \
                 "" \
-                "## Findings" \
+                "## Check outcome" \
                 "" \
                 "### 1. HIGH .github/workflows/opencode-review.yml:1 - Coverage evidence did not prove required test/docstring evidence" \
                 "- Problem: The OpenCode approval path reached an APPROVE control result while the separate coverage-evidence job result was \`${COVERAGE_EVIDENCE_RESULT:-unknown}\`." \
                 "- Root cause: Automated approval is only valid when the same-head coverage-evidence job proves supported repository test suites passed and configured docstring gates passed or were advisory, or reports not applicable because no supported source files or package manifests exist. Missing, failed, skipped, unavailable, or unsupported-tooling test evidence is a blocker." \
                 "- Fix: Install or configure the repository test/docstring evidence tooling when source files or package manifests exist, rerun the current-head coverage-evidence job, and approve only after it reports \`success\` with required evidence or explicit no-source not-applicable evidence." \
-                "- Regression test: Keep the approval branch checking \`needs.coverage-evidence.result == success\` before posting APPROVE." \
+                "- Regression test: Keep the approval branch checking \`needs.coverage-evidence.result == success\` before posting APPROVE, but leave the PR review unchanged for coverage-evidence blocker states such as cancelled, skipped, failed, unsupported-tooling, or below-100 evidence." \
                 "" \
-                "- Result: REQUEST_CHANGES" \
+                "- Result: CHECK_FAILED" \
                 "- Reason: coverage-evidence result was \`${COVERAGE_EVIDENCE_RESULT:-unknown}\`, so required test/docstring evidence was not proven for current head \`${HEAD_SHA}\`." \
                 "- Head SHA: \`${HEAD_SHA}\`" \
                 "- Workflow run: ${RUN_ID}" \
@@ -2905,44 +2976,15 @@ jobs:
             } >"$body_file"
           }
 
-          build_coverage_evidence_unavailable_body() {
-            local body_file="$1"
-
-            {
-              printf '%s\n' \
-                "coverage-evidence did not complete, so OpenCode cannot approve this head yet." \
-                "" \
-                "- Result: COVERAGE_EVIDENCE_UNAVAILABLE" \
-                "- Reason: coverage-evidence result was \`${COVERAGE_EVIDENCE_RESULT:-unknown}\`; rerun the current-head coverage-evidence job and approve only after it reports \`success\`." \
-                "- Head SHA: \`${HEAD_SHA}\`" \
-                "- Workflow run: ${RUN_ID}" \
-                "- Workflow attempt: ${RUN_ATTEMPT}" \
-                "" \
-                "No PR review was posted because cancelled or skipped coverage evidence is review-tool state, not a source-code finding."
-            } >"$body_file"
-          }
-
-          require_successful_coverage_evidence() {
-            local coverage_body_file
-
-            case "${COVERAGE_EVIDENCE_RESULT:-skipped}" in
-              success)
-                return 0
-                ;;
-              failure)
-                coverage_body_file="$(mktemp)"
-                build_coverage_evidence_failure_body "$coverage_body_file"
-                create_pull_review "REQUEST_CHANGES" "$(cat "$coverage_body_file")"
-                rm -f "$coverage_body_file"
-                echo "::endgroup::"
-                exit 0
-                ;;
-              *)
-                coverage_body_file="$(mktemp)"
-                build_coverage_evidence_unavailable_body "$coverage_body_file"
-                stop_approval_without_review "COVERAGE_EVIDENCE_UNAVAILABLE" "$(cat "$coverage_body_file")"
-                ;;
-            esac
+          fail_for_coverage_evidence_without_review() {
+            local body_file
+            body_file="$(mktemp)"
+            build_coverage_evidence_check_failure_body "$body_file"
+            emit_review_body_to_action_log "CHECK_FAILED" "$(cat "$body_file")"
+            update_review_overview "CHECK_FAILED" "$(cat "$body_file")"
+            rm -f "$body_file"
+            echo "::endgroup::"
+            exit 1
           }
 
           create_pull_review_with_payload() {
@@ -2958,7 +3000,7 @@ jobs:
               rm -f "$rewritten_payload_file"
             fi
             emit_review_body_to_action_log "$event" "$body" "$review_payload_file"
-            if ! gh api -X POST "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}/reviews" --input "$review_payload_file" >/dev/null 2>"$gh_error_file"; then
+            if ! env GH_TOKEN="$review_write_token" gh api -X POST "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}/reviews" --input "$review_payload_file" >/dev/null 2>"$gh_error_file"; then
               warn_gh_publication_failure "pull review inline comments" "$gh_error_file"
               rm -f "$gh_error_file"
               if [ -s "$fallback_body_file" ]; then
@@ -3853,6 +3895,7 @@ jobs:
                       | select((.conclusion // "" | ascii_upcase) as $c | ["FAILURE","TIMED_OUT","ACTION_REQUIRED","CANCELLED","STARTUP_FAILURE"] | index($c))
                       | select(((.conclusion // "" | ascii_downcase) == "cancelled" and (.name // "") == "metadata-only gate evaluation" and (.checkSuite.workflowRun.workflow.name // "") == "PR Governance") | not)
                       | select(((.conclusion // "" | ascii_downcase) == "cancelled" and ((.isRequired // false) | not) and (.checkSuite.workflowRun.workflow.name // "") == "CodeQL") | not)
+                      | select(((.conclusion // "" | ascii_downcase) == "cancelled" and (.name // "") == "scan-pr-queue" and ((.checkSuite.workflowRun.workflow.name // "") == "PR Review Merge Scheduler" or (.checkSuite.workflowRun.workflow.name // "") == "Required PR Review Merge Scheduler")) | not)
                       | "- " + ((.checkSuite.workflowRun.workflow.name // "") + "/" + (.name // "check") | gsub("^/"; "")) + ": " + (.conclusion // "unknown") + (if (.detailsUrl // "") != "" then " (" + .detailsUrl + ")" else "" end)
                     elif .__typename == "StatusContext" then
                       select(((.context // "") | ascii_downcase | contains("opencode-review")) | not)
@@ -4010,6 +4053,126 @@ jobs:
             return 2
           }
 
+          approve_after_model_failure_when_current_head_gates_pass() {
+            local pending_file="$1"
+            local failed_file="$2"
+            local unresolved_threads_file="$3"
+            local human_thread_body_file="$4"
+            local wait_status=0
+            local changed_files_summary body
+
+            wait_for_peer_github_checks "$pending_file" || wait_status=$?
+            if [ "$wait_status" -eq 1 ]; then
+              body="$(printf '%s\n' \
+                "OpenCode could not validate deterministic fallback approval because current-head checks were unavailable." \
+                "" \
+                "- Result: CHECKS_LOOKUP_FAILED" \
+                "- Reason: GitHub Checks statusCheckRollup could not be read after all model attempts failed." \
+                "- Required next evidence: readable current-head statusCheckRollup plus a rerun of the OpenCode approval gate." \
+                "- Head SHA: \`${HEAD_SHA}\`" \
+                "- Workflow run: ${RUN_ID}" \
+                "- Workflow attempt: ${RUN_ATTEMPT}" \
+                "" \
+                "No PR review was posted because check lookup failure is a review-tool state, not a source finding.")"
+              stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
+            elif [ "$wait_status" -eq 2 ]; then
+              build_waiting_for_checks_body "$pending_file" "$human_thread_body_file"
+              stop_approval_without_review "WAITING_FOR_CHECKS" "$(cat "$human_thread_body_file")"
+            fi
+
+            if ! collect_github_checks_with_retry collect_failed_github_checks "$failed_file"; then
+              body="$(printf '%s\n' \
+                "OpenCode could not validate deterministic fallback approval because current-head failed checks were unavailable." \
+                "" \
+                "- Result: CHECKS_LOOKUP_FAILED" \
+                "- Reason: GitHub Checks statusCheckRollup could not be read after peer checks completed." \
+                "- Required next evidence: readable current-head statusCheckRollup plus a rerun of the OpenCode approval gate." \
+                "- Head SHA: \`${HEAD_SHA}\`" \
+                "- Workflow run: ${RUN_ID}" \
+                "- Workflow attempt: ${RUN_ATTEMPT}" \
+                "" \
+                "No PR review was posted because check lookup failure is a review-tool state, not a source finding.")"
+              stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
+            fi
+            if [ -s "$failed_file" ]; then
+              local failed_check_evidence_file failed_check_review_body_file failed_check_review_payload_file failed_check_inline_failure_body_file
+              failed_check_evidence_file="$(mktemp)"
+              failed_check_review_body_file="$(mktemp)"
+              failed_check_review_payload_file="$(mktemp)"
+              failed_check_inline_failure_body_file="$(mktemp)"
+              if ! collect_failed_check_evidence_or_note "$failed_check_evidence_file"; then
+                printf "Failed GitHub Check evidence could not be collected for current head \`%s\`.\n" "$HEAD_SHA" >"$failed_check_evidence_file"
+              fi
+
+              if leave_review_unchanged_for_self_modifying_strix_if_present "$failed_check_evidence_file"; then
+                return 1
+              fi
+
+              if comment_for_billing_lock_if_present "$failed_file" "$failed_check_evidence_file" "$failed_check_review_body_file"; then
+                return 0
+              fi
+
+              if run_failed_check_diagnosis "$failed_file" "$failed_check_evidence_file" "$failed_check_review_body_file" "$failed_check_review_payload_file" "$failed_check_inline_failure_body_file"; then
+                create_pull_review_with_payload "REQUEST_CHANGES" "$(cat "$failed_check_review_body_file")" "$failed_check_review_payload_file" "$failed_check_inline_failure_body_file"
+              elif build_failed_check_fallback_body "$failed_file" "$failed_check_evidence_file" "$failed_check_review_body_file"; then
+                create_pull_review "REQUEST_CHANGES" "$(cat "$failed_check_review_body_file")"
+              else
+                stop_failed_check_fallback_unavailable
+              fi
+              return 0
+            fi
+
+            if request_changes_for_merge_conflict_if_present; then
+              return 0
+            fi
+
+            if ! collect_unresolved_human_review_threads "$unresolved_threads_file"; then
+              build_human_thread_lookup_failure_body "$human_thread_body_file"
+              create_pull_review "REQUEST_CHANGES" "$(cat "$human_thread_body_file")"
+              return 0
+            fi
+            if [ -s "$unresolved_threads_file" ]; then
+              build_unresolved_human_threads_body "$unresolved_threads_file" "$human_thread_body_file"
+              create_pull_review "REQUEST_CHANGES" "$(cat "$human_thread_body_file")"
+              return 0
+            fi
+
+            if [ -s "${OPENCODE_CHANGED_FILES_FILE:-}" ]; then
+              changed_files_summary="$(
+                sed -n '1,8p' "$OPENCODE_CHANGED_FILES_FILE" |
+                  awk 'BEGIN { first=1 } { if (!first) printf ", "; printf "%s", $0; first=0 }'
+              )"
+            else
+              changed_files_summary="bounded current-head evidence"
+            fi
+            if [ -z "$changed_files_summary" ]; then
+              changed_files_summary="bounded current-head evidence"
+            fi
+
+            body="$(printf '%s\n' \
+              "## Pull request overview" \
+              "" \
+              "OpenCode model attempts did not emit a usable current-head control block, so the approval gate used deterministic current-head evidence instead of model prose." \
+              "" \
+              "## Findings" \
+              "" \
+              "No blocking findings." \
+              "" \
+              "## Summary" \
+              "" \
+              "- Result: APPROVE" \
+              "- Reason: coverage-evidence passed, peer GitHub Checks completed without failures, mergeability was clean, and no unresolved human review threads remained." \
+              "- Deterministic evidence: current-head changed-file evidence (${changed_files_summary}); coverage-evidence result ${COVERAGE_EVIDENCE_RESULT:-unknown}; peer checks from statusCheckRollup excluding this OpenCode check." \
+              "- Model outcomes: primary=${OPENCODE_PRIMARY_OUTCOME:-unknown}, fallback=${OPENCODE_FALLBACK_OUTCOME:-unknown}, second_fallback=${OPENCODE_SECOND_FALLBACK_OUTCOME:-unknown}, catalog_fallback=${OPENCODE_CATALOG_FALLBACK_OUTCOME:-unknown}." \
+              "- Head SHA: \`${HEAD_SHA}\`" \
+              "- Workflow run: ${RUN_ID}" \
+              "- Workflow attempt: ${RUN_ATTEMPT}" \
+              "" \
+              "Deterministic fallback approval was used only after model-output instability and did not bypass coverage, failed-check, mergeability, or human-review gates.")"
+            create_pull_review "APPROVE" "$body"
+            return 0
+          }
+
                     request_changes_for_merge_conflict_if_present() {
                       local pr_json merge_state mergeable base_ref head_ref body change_graph
 
@@ -4151,7 +4314,9 @@ jobs:
             exit 0
           fi
 
-          require_successful_coverage_evidence
+          if [ "${COVERAGE_EVIDENCE_RESULT:-skipped}" != "success" ]; then
+            fail_for_coverage_evidence_without_review
+          fi
 
           opencode_review_outcome="${OPENCODE_PRIMARY_OUTCOME:-unknown}"
           if [ "$opencode_review_outcome" != "success" ]; then
@@ -4170,14 +4335,12 @@ jobs:
             failed_check_review_body_file="$(mktemp)"
             failed_check_review_payload_file="$(mktemp)"
             failed_check_inline_failure_body_file="$(mktemp)"
-            pending_checks_file=""
-            fallback_changed_files_file=""
-            fallback_approval_body_file=""
-            unresolved_human_threads_file=""
-            human_thread_review_body_file=""
+            pending_checks_file="$(mktemp)"
+            unresolved_human_threads_file="$(mktemp)"
+            human_thread_review_body_file="$(mktemp)"
             # shellcheck disable=SC2329
             cleanup_failed_outcome_files() {
-              rm -f "$failed_checks_file" "$failed_check_evidence_file" "$failed_check_review_body_file" "$failed_check_review_payload_file" "$failed_check_inline_failure_body_file" "$pending_checks_file" "$fallback_changed_files_file" "$fallback_approval_body_file" "$unresolved_human_threads_file" "$human_thread_review_body_file"
+              rm -f "$failed_checks_file" "$failed_check_evidence_file" "$failed_check_review_body_file" "$failed_check_review_payload_file" "$failed_check_inline_failure_body_file" "$pending_checks_file" "$unresolved_human_threads_file" "$human_thread_review_body_file"
             }
             trap cleanup_failed_outcome_files EXIT
             if collect_github_checks_with_retry collect_failed_github_checks "$failed_checks_file" && [ -s "$failed_checks_file" ]; then
@@ -4209,63 +4372,22 @@ jobs:
             if request_changes_for_merge_conflict_if_present; then
               :
             else
-              pending_checks_file="$(mktemp)"
-              set +e
-              wait_for_peer_github_checks "$pending_checks_file"
-              pending_wait_status=$?
-              set -e
-              if [ "$pending_wait_status" -eq 1 ]; then
-                body="$(printf '%s\n' \
-                  "all configured OpenCode model attempts failed to produce a usable current-head control block, and GitHub Checks statusCheckRollup could not be read." \
-                  "" \
-                  "- Result: CHECKS_LOOKUP_FAILED" \
-                  "- Reason: GitHub Checks statusCheckRollup could not be read before considering deterministic review-process fallback." \
-                  "- Required next evidence: readable current-head statusCheckRollup plus a valid OpenCode control block or eligible fallback evidence." \
-                  "- Head SHA: \`${HEAD_SHA}\`" \
-                  "- Workflow run: ${RUN_ID}" \
-                  "- Workflow attempt: ${RUN_ATTEMPT}")"
-                stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
-              fi
-              if [ "$pending_wait_status" -ne 0 ]; then
-                build_pending_check_body "$pending_checks_file" "$failed_check_review_body_file"
-                stop_approval_without_review "WAITING_FOR_CHECKS" "$(cat "$failed_check_review_body_file")"
-              fi
-
-              unresolved_human_threads_file="$(mktemp)"
-              human_thread_review_body_file="$(mktemp)"
-              if ! collect_unresolved_human_review_threads "$unresolved_human_threads_file"; then
-                build_human_thread_lookup_failure_body "$human_thread_review_body_file"
-                create_pull_review "REQUEST_CHANGES" "$(cat "$human_thread_review_body_file")"
+              if approve_after_model_failure_when_current_head_gates_pass "$pending_checks_file" "$failed_checks_file" "$unresolved_human_threads_file" "$human_thread_review_body_file"; then
                 echo "::endgroup::"
                 exit 0
               fi
-              if [ -s "$unresolved_human_threads_file" ]; then
-                build_unresolved_human_threads_body "$unresolved_human_threads_file" "$human_thread_review_body_file"
-                create_pull_review "REQUEST_CHANGES" "$(cat "$human_thread_review_body_file")"
-                echo "::endgroup::"
-                exit 0
-              fi
-
-              fallback_changed_files_file="$(mktemp)"
-              fallback_approval_body_file="$(mktemp)"
-              if collect_changed_files_for_review_fallback "$fallback_changed_files_file" &&
-                central_review_process_only_change "$fallback_changed_files_file"; then
-                build_central_review_process_fallback_approval_body "$fallback_changed_files_file" "$fallback_approval_body_file"
-                create_pull_review "APPROVE" "$(cat "$fallback_approval_body_file")"
-              else
-                body="$(printf '%s\n' \
-                  "all configured OpenCode model attempts failed to produce a usable current-head control block." \
-                  "" \
-                  "- Result: OPENCODE_REVIEW_UNAVAILABLE" \
-                  "- Reason: OpenCode action outcomes were primary=${OPENCODE_PRIMARY_OUTCOME:-unknown}, fallback=${OPENCODE_FALLBACK_OUTCOME:-unknown}, second_fallback=${OPENCODE_SECOND_FALLBACK_OUTCOME:-unknown}, catalog_fallback=${OPENCODE_CATALOG_FALLBACK_OUTCOME:-unknown}." \
-                  "- Required next evidence: rerun OpenCode with a model/tooling attempt that emits a valid source-backed control block for this head." \
-                  "- Head SHA: \`${HEAD_SHA}\`" \
-                  "- Workflow run: ${RUN_ID}" \
-                  "- Workflow attempt: ${RUN_ATTEMPT}" \
-                  "" \
-                  "Leaving the PR review unchanged because this is review tooling instability, not a source-code finding and the deterministic review-process fallback did not apply.")"
-                stop_approval_without_review "OPENCODE_REVIEW_UNAVAILABLE" "$body"
-              fi
+              body="$(printf '%s\n' \
+                "all configured OpenCode model attempts failed to produce a usable current-head control block." \
+                "" \
+                "- Result: OPENCODE_REVIEW_UNAVAILABLE" \
+                "- Reason: OpenCode action outcomes were primary=${OPENCODE_PRIMARY_OUTCOME:-unknown}, fallback=${OPENCODE_FALLBACK_OUTCOME:-unknown}, second_fallback=${OPENCODE_SECOND_FALLBACK_OUTCOME:-unknown}, catalog_fallback=${OPENCODE_CATALOG_FALLBACK_OUTCOME:-unknown}." \
+                "- Required next evidence: rerun OpenCode with a model/tooling attempt that emits a valid source-backed control block for this head." \
+                "- Head SHA: \`${HEAD_SHA}\`" \
+                "- Workflow run: ${RUN_ID}" \
+                "- Workflow attempt: ${RUN_ATTEMPT}" \
+                "" \
+                "Leaving the PR review unchanged because this is review tooling instability, not a source-code finding.")"
+              stop_approval_without_review "OPENCODE_REVIEW_UNAVAILABLE" "$body"
             fi
             echo "::endgroup::"
             exit 0
@@ -4349,7 +4471,9 @@ jobs:
 
           case "$gate_result" in
             APPROVE)
-              require_successful_coverage_evidence
+              if [ "${COVERAGE_EVIDENCE_RESULT:-skipped}" != "success" ]; then
+                fail_for_coverage_evidence_without_review
+              fi
               if request_changes_for_merge_conflict_if_present; then
                 echo "::endgroup::"
                 exit 0
@@ -4578,3 +4702,40 @@ jobs:
               ;;
           esac
           echo "::endgroup::"
+
+      - name: Dispatch merge scheduler after approval
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref || github.event.inputs.pr_base_ref || '' }}
+        run: |
+          set -euo pipefail
+          scheduler_ref="$(
+            gh api "repos/${GH_REPOSITORY}" --jq '.default_branch // empty' 2>/dev/null || true
+          )"
+          scheduler_ref="${scheduler_ref:-${PR_BASE_REF:-main}}"
+
+          dispatch_status=1
+          dispatch_error="$(mktemp)"
+          for attempt in 1 2 3; do
+            : >"$dispatch_error"
+            if gh workflow run pr-review-merge-scheduler.yml \
+              --repo "$GH_REPOSITORY" \
+              --ref "$scheduler_ref" \
+              -f dry_run=false \
+              -f max_prs=100 \
+              -f trigger_reviews=false \
+              -f enable_auto_merge=true \
+              -f merge_mode=auto \
+              -f update_branches=true 2>"$dispatch_error"; then
+              dispatch_status=0
+              break
+            fi
+            sed 's/^/scheduler dispatch: /' "$dispatch_error" >&2 || true
+            sleep "$((attempt * 5))"
+          done
+
+          if [ "$dispatch_status" -ne 0 ]; then
+            printf '::warning::Merge scheduler dispatch failed after approval; leaving OpenCode approval intact. Repository=%s ref=%s. The scheduled and workflow_run scheduler paths remain authoritative.\n' "$GH_REPOSITORY" "$scheduler_ref"
+          fi
