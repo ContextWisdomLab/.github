@@ -1,4 +1,4 @@
-name: OpenCode Review
+name: Required OpenCode Review
 
 on:
   pull_request_target:
