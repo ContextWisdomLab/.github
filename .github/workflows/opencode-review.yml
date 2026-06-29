@@ -2772,6 +2772,46 @@ jobs:
             } >"$body_file"
           }
 
+          build_coverage_evidence_unavailable_body() {
+            local body_file="$1"
+
+            {
+              printf '%s\n' \
+                "coverage-evidence did not complete, so OpenCode cannot approve this head yet." \
+                "" \
+                "- Result: COVERAGE_EVIDENCE_UNAVAILABLE" \
+                "- Reason: coverage-evidence result was \`${COVERAGE_EVIDENCE_RESULT:-unknown}\`; rerun the current-head coverage-evidence job and approve only after it reports \`success\`." \
+                "- Head SHA: \`${HEAD_SHA}\`" \
+                "- Workflow run: ${RUN_ID}" \
+                "- Workflow attempt: ${RUN_ATTEMPT}" \
+                "" \
+                "No PR review was posted because cancelled or skipped coverage evidence is review-tool state, not a source-code finding."
+            } >"$body_file"
+          }
+
+          require_successful_coverage_evidence() {
+            local coverage_body_file
+
+            case "${COVERAGE_EVIDENCE_RESULT:-skipped}" in
+              success)
+                return 0
+                ;;
+              failure)
+                coverage_body_file="$(mktemp)"
+                build_coverage_evidence_failure_body "$coverage_body_file"
+                create_pull_review "REQUEST_CHANGES" "$(cat "$coverage_body_file")"
+                rm -f "$coverage_body_file"
+                echo "::endgroup::"
+                exit 0
+                ;;
+              *)
+                coverage_body_file="$(mktemp)"
+                build_coverage_evidence_unavailable_body "$coverage_body_file"
+                stop_approval_without_review "COVERAGE_EVIDENCE_UNAVAILABLE" "$(cat "$coverage_body_file")"
+                ;;
+            esac
+          }
+
           create_pull_review_with_payload() {
             local event="$1" body="$2" review_payload_file="$3" fallback_body_file="$4"
             local gh_error_file
@@ -3978,13 +4018,7 @@ jobs:
             exit 0
           fi
 
-          if [ "${COVERAGE_EVIDENCE_RESULT:-skipped}" != "success" ]; then
-            failed_check_review_body_file="$(mktemp)"
-            build_coverage_evidence_failure_body "$failed_check_review_body_file"
-            create_pull_review "REQUEST_CHANGES" "$(cat "$failed_check_review_body_file")"
-            echo "::endgroup::"
-            exit 0
-          fi
+          require_successful_coverage_evidence
 
           opencode_review_outcome="${OPENCODE_PRIMARY_OUTCOME:-unknown}"
           if [ "$opencode_review_outcome" != "success" ]; then
@@ -4182,13 +4216,7 @@ jobs:
 
           case "$gate_result" in
             APPROVE)
-              if [ "${COVERAGE_EVIDENCE_RESULT:-skipped}" != "success" ]; then
-                failed_check_review_body_file="$(mktemp)"
-                build_coverage_evidence_failure_body "$failed_check_review_body_file"
-                create_pull_review "REQUEST_CHANGES" "$(cat "$failed_check_review_body_file")"
-                echo "::endgroup::"
-                exit 0
-              fi
+              require_successful_coverage_evidence
               if request_changes_for_merge_conflict_if_present; then
                 echo "::endgroup::"
                 exit 0
