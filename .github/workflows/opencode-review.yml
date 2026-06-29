@@ -3828,6 +3828,11 @@ jobs:
             local wait_status=0
             local changed_files_summary body
 
+            [ -n "$pending_file" ] || pending_file="$(mktemp)"
+            [ -n "$failed_file" ] || failed_file="$(mktemp)"
+            [ -n "$unresolved_threads_file" ] || unresolved_threads_file="$(mktemp)"
+            [ -n "$human_thread_body_file" ] || human_thread_body_file="$(mktemp)"
+
             wait_for_peer_github_checks "$pending_file" || wait_status=$?
             if [ "$wait_status" -eq 1 ]; then
               body="$(printf '%s\n' \
