@@ -2648,24 +2648,23 @@ jobs:
               "- Workflow attempt: ${RUN_ATTEMPT}" >"$body_file"
           }
 
-          build_coverage_evidence_failure_body() {
+          build_coverage_evidence_check_failure_body() {
             local body_file="$1"
 
             {
               printf '%s\n' \
                 "## Pull request overview" \
                 "" \
-                "OpenCode reviewed the current-head evidence but cannot approve because required coverage evidence did not pass." \
+                "OpenCode cannot approve yet because required coverage evidence did not pass." \
                 "" \
-                "## Findings" \
+                "## Check outcome" \
                 "" \
-                "### 1. HIGH .github/workflows/opencode-review.yml:1 - Coverage evidence did not prove 100% test and docstring coverage" \
-                "- Problem: The OpenCode approval path reached an APPROVE control result while the separate coverage-evidence job result was \`${COVERAGE_EVIDENCE_RESULT:-unknown}\`." \
-                "- Root cause: Automated approval is only valid when the same-head coverage-evidence job proves both test coverage and docstring coverage at 100%, or reports not applicable because no supported source files or package manifests exist. Missing, failed, skipped, unavailable, unsupported-tooling, or partial coverage evidence is a blocker." \
-                "- Fix: Install or configure the repository coverage/docstring coverage tooling when source files or package manifests exist, rerun the current-head coverage-evidence job, and approve only after it reports \`success\` with 100% or explicit no-source not-applicable evidence." \
-                "- Regression test: Keep the approval branch checking \`needs.coverage-evidence.result == success\` before posting APPROVE." \
+                "- Problem: The separate coverage-evidence job result was \`${COVERAGE_EVIDENCE_RESULT:-unknown}\` before approval." \
+                "- Root cause: Automated approval is only valid when the same-head coverage-evidence job proves both test coverage and docstring coverage at 100%, or reports not applicable because no supported source files or package manifests exist." \
+                "- Fix: Rerun the current-head coverage-evidence job after the queue settles, or install/configure repository coverage/docstring coverage tooling when the evidence summary says tooling is missing." \
+                "- Regression test: Keep the approval branch checking \`needs.coverage-evidence.result == success\` before posting APPROVE, but leave the PR review unchanged for orchestration outcomes such as cancelled or skipped coverage-evidence jobs." \
                 "" \
-                "- Result: REQUEST_CHANGES" \
+                "- Result: CHECK_FAILED" \
                 "- Reason: coverage-evidence result was \`${COVERAGE_EVIDENCE_RESULT:-unknown}\`, so 100% test/docstring coverage was not proven for current head \`${HEAD_SHA}\`." \
                 "- Head SHA: \`${HEAD_SHA}\`" \
                 "- Workflow run: ${RUN_ID}" \
@@ -2675,6 +2674,17 @@ jobs:
                 ""
               printf '%s\n' "${COVERAGE_EVIDENCE_SUMMARY:-Coverage evidence summary was unavailable.}" | sed -n '1,240p'
             } >"$body_file"
+          }
+
+          fail_for_coverage_evidence_without_review() {
+            local body_file
+            body_file="$(mktemp)"
+            build_coverage_evidence_check_failure_body "$body_file"
+            emit_review_body_to_action_log "CHECK_FAILED" "$(cat "$body_file")"
+            update_review_overview "CHECK_FAILED" "$(cat "$body_file")"
+            rm -f "$body_file"
+            echo "::endgroup::"
+            exit 1
           }
 
           create_pull_review_with_payload() {
@@ -3789,11 +3799,7 @@ jobs:
           fi
 
           if [ "${COVERAGE_EVIDENCE_RESULT:-skipped}" != "success" ]; then
-            failed_check_review_body_file="$(mktemp)"
-            build_coverage_evidence_failure_body "$failed_check_review_body_file"
-            create_pull_review "REQUEST_CHANGES" "$(cat "$failed_check_review_body_file")"
-            echo "::endgroup::"
-            exit 0
+            fail_for_coverage_evidence_without_review
           fi
 
           opencode_review_outcome="${OPENCODE_PRIMARY_OUTCOME:-unknown}"
@@ -3946,11 +3952,7 @@ jobs:
           case "$gate_result" in
             APPROVE)
               if [ "${COVERAGE_EVIDENCE_RESULT:-skipped}" != "success" ]; then
-                failed_check_review_body_file="$(mktemp)"
-                build_coverage_evidence_failure_body "$failed_check_review_body_file"
-                create_pull_review "REQUEST_CHANGES" "$(cat "$failed_check_review_body_file")"
-                echo "::endgroup::"
-                exit 0
+                fail_for_coverage_evidence_without_review
               fi
               if request_changes_for_merge_conflict_if_present; then
                 echo "::endgroup::"
