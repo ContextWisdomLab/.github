@@ -687,13 +687,13 @@ def workflow_action_required_reason(checks: list[str]) -> str:
 
 
 def enable_auto_merge(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
-    """Enable merge-commit auto-merge for a PR at its current head."""
+    """Enable squash auto-merge for a PR at its current head."""
     number = str(pr["number"])
     head = pr["headRefOid"]
     if dry_run:
         return
     require_github_actions_mutation_actor("enable-auto-merge")
-    run(["gh", "pr", "merge", number, "--repo", repo, "--auto", "--merge", "--match-head-commit", head])
+    run(["gh", "pr", "merge", number, "--repo", repo, "--auto", "--squash", "--match-head-commit", head])
 
 
 def merge_pr(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
@@ -703,7 +703,7 @@ def merge_pr(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
     if dry_run:
         return
     require_github_actions_mutation_actor("direct-merge")
-    run(["gh", "pr", "merge", number, "--repo", repo, "--merge", "--match-head-commit", head])
+    run(["gh", "pr", "merge", number, "--repo", repo, "--squash", "--match-head-commit", head])
 
 
 def disable_auto_merge(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
