@@ -1,6 +1,6 @@
 # ContextualWisdomLab central required workflow rollout
 
-Updated: 2026-06-29 22:20 KST
+Updated: 2026-06-29 22:41 KST
 
 ## Decision
 
@@ -17,10 +17,10 @@ Use an organization repository ruleset instead of copying workflow files into ea
   - `.github/workflows/opencode-review.yml`
   - `.github/workflows/pr-review-merge-scheduler.yml`
 - Required workflow ref: `refs/heads/main`
-- Required workflow head: `6cdff462af81610a864f3584c5e7ef9bfd5f8161`
+- Last verified workflow implementation commit: `6cdff462af81610a864f3584c5e7ef9bfd5f8161` (`#140`; later documentation-only merges may advance `main` without changing workflow files)
 - Required workflow trigger support: `pull_request_target`
 
-`.github` PRs `#136`, `#137`, `#138`, and `#140` are now in `main`. The required-workflow
+`.github` PRs `#136`, `#137`, `#138`, `#139`, and `#140` are now in `main`. The required-workflow
 ruleset points at `.github@main`; if live organization ruleset inspection
 reports another ref, treat that as operations drift and restore ruleset
 `18156473` to the current `main` head.
@@ -78,7 +78,7 @@ The active ruleset targets all non-fork repositories found by live GitHub invent
 | `ContextualWisdomLab/linux-cluster-ops` | private | `develop` | Git Flow | 65 | none | ruleset target now includes this repo; verify inherited checks on active PRs |
 | `ContextualWisdomLab/naruon` | public | `develop` | Git Flow | 91 | `opencode-review.yml`, `pr-review-merge-scheduler.yml`, `strix-selftest.yml`, `strix.yml` | local workflow contract remains; tests and docs read the repo-local files directly |
 | `ContextualWisdomLab/newsdom-api` | public | `develop` | Git Flow | 32 | none | local workflows already gone; verify inherited checks on active PRs |
-| `ContextualWisdomLab/pg-erd-cloud` | public | `main` | GitHub Flow | 112 | `pr-review-fix-scheduler.yml` | PR `#361` removes the local fix scheduler wrapper; OpenCode review job still in progress on current head |
+| `ContextualWisdomLab/pg-erd-cloud` | public | `main` | GitHub Flow | 112 | none | PR `#361` merged at `21cbc14`; default branch no longer has the local fix scheduler wrapper |
 | `ContextualWisdomLab/scopeweave` | public | `develop` | Git Flow | 58 | none | local workflows already gone; verify inherited checks on active PRs |
 | `ContextualWisdomLab/semantic-data-portal` | public | `main` | GitHub Flow | 1 | none | PR `#3` merged; default branch has no local workflow directory |
 | `ContextualWisdomLab/xtrmLLMBatchPython` | private | `develop` | Git Flow | 68 | none | ruleset target now includes this repo; verify inherited checks on active PRs |
@@ -123,7 +123,7 @@ The active ruleset targets all non-fork repositories found by live GitHub invent
 - `.github` PR `#140` extended `update-branch` handling to PRs where auto-merge is already enabled even if the scheduler cannot find a current-head OpenCode approval node, so queued auto-merge PRs with failed checks can still be refreshed when compare evidence shows the base branch is ahead. Local verification passed `pytest -q`, `coverage report` at 100%, `interrogate` at 100%, `py_compile`, `bash -n`, and `git diff --check`.
 - Organization ruleset `18156473` now targets all live non-fork repositories, including private `aFIPC`, `linux-cluster-ops`, and `xtrmLLMBatchPython`.
 - `ContextualWisdomLab/semantic-data-portal` PR `#3` removed repo-local OpenCode, Strix, and scheduler workflows; the default branch now has no `.github/workflows` directory.
-- `ContextualWisdomLab/pg-erd-cloud` PR `#361` removes the repo-local `pr-review-fix-scheduler.yml` wrapper after central `.github` gained target repository support. As of 2026-06-29 22:20 KST, all current-head checks except `opencode-review` passed and the OpenCode job was still `in_progress`.
+- `ContextualWisdomLab/pg-erd-cloud` PR `#361` removed the repo-local `pr-review-fix-scheduler.yml` wrapper after central `.github` gained target repository support. It merged at 2026-06-29 22:40 KST with merge commit `21cbc14b21d59ac28ac789de58502816cc8df6ad`; live default-branch content lookup returned 404 for that wrapper path after merge.
 - `ContextualWisdomLab/naruon` remains the next complex local-contract repository: `backend/tests/test_release_governance.py` and `scripts/ci/test_strix_quick_gate.sh` read repo-local `.github/workflows/opencode-review.yml`, `strix.yml`, and `pr-review-merge-scheduler.yml` directly, so deletion must follow a test-contract rewrite.
 
 ## Good patterns to keep
@@ -140,6 +140,6 @@ The active ruleset targets all non-fork repositories found by live GitHub invent
 - Generated OpenCode review DAGs must use quoted Mermaid labels such as `A["text"]`; unquoted labels with spaces, punctuation, parentheses, or file counts can fail to render.
 - OpenCode approval summaries must not contradict exact changed-file evidence by saying no source, test, or executable files changed when workflow, script, source, or test files are present.
 - `naruon` still has repo-local Strix/OpenCode/scheduler workflows. Do not copy more workflows into repositories; retire those files only after repository tests and docs are rewritten to the central required-workflow contract.
-- `pg-erd-cloud` still has a local autofix wrapper until PR `#361` merges; the central autofix contract now exists in `.github`.
+- `pg-erd-cloud` no longer has a local autofix wrapper on `main`; keep the central autofix contract in `.github` as the source of truth.
 - Some repositories use classic branch protection while others use rulesets. Normalize branch protection into rulesets without removing repository-specific required application checks.
 - Existing private-repo PRs may not show inherited required workflows until a new PR event or branch update occurs, even though the org ruleset target includes those repositories.
