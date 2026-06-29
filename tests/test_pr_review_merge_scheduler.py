@@ -1147,6 +1147,19 @@ def test_print_summary_self_test_parse_args_and_main(monkeypatch, capsys):
     sched.self_test()
     assert "self-test passed" in capsys.readouterr().out
 
+    real_split_repo = sched.split_repo
+    invalid_inputs = ["owner", "/name", "owner/"]
+    for accepted_invalid in invalid_inputs:
+        def fake_split_repo(repo, accepted_invalid=accepted_invalid):
+            if repo == accepted_invalid:
+                return ("accepted", "invalid")
+            return real_split_repo(repo)
+
+        monkeypatch.setattr(sched, "split_repo", fake_split_repo)
+        with pytest.raises(AssertionError, match="expected ValueError"):
+            sched.self_test()
+    monkeypatch.setattr(sched, "split_repo", real_split_repo)
+
     parsed = sched.parse_args(
         [
             "--repo",
