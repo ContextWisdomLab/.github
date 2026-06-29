@@ -4497,6 +4497,20 @@ run_filtered_gate_case_if_requested() {
 			"" \
 			"github_models/deepseek/deepseek-v3-0324 github_models/deepseek/deepseek-r1-0528"
 		;;
+	gemini-timeout-fallback-success)
+		run_gate_case_allow_provider_signal "gemini-timeout-fallback-success" \
+			"gemini/timeout-fallback-primary" \
+			"gemini/fallback-one gemini/fallback-two" \
+			"0" \
+			"REGEX:Strix quick scan succeeded with fallback model 'gemini/fallback-one' in [0-9]+s\\." \
+			"2" \
+			"gemini/timeout-fallback-primary|gemini/fallback-one" \
+			"https://example.invalid|https://example.invalid" \
+			"vertex_ai" \
+			"__DEFAULT__" \
+			"" \
+			"1"
+		;;
 	*)
 		record_failure "unknown STRIX_TEST_CASE_FILTER '${STRIX_TEST_CASE_FILTER:-}'"
 		;;
