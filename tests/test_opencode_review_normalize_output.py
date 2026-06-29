@@ -368,3 +368,26 @@ def test_main_normalizes_valid_output_and_reports_failures(tmp_path, capsys):
     approval = tmp_path / "approval.json"
     approval.write_text(json.dumps(control()), encoding="utf-8")
     assert norm.main(["prog", "--check-structural-approval", str(approval)]) == 0
+
+def test_main_escapes_html_chars(tmp_path):
+    control_json = {
+        "head_sha": "head",
+        "run_id": "run",
+        "run_attempt": "1",
+        "result": "APPROVE",
+        "reason": "Security review\nChanged files\npath.py",
+        "summary": FULL_SUMMARY + "\n<script>alert(1)</script> & -->",
+        "findings": [],
+    }
+    input_text = f"```json\n{json.dumps(control_json)}\n```"
+
+    output_file = tmp_path / "output.md"
+    output_file.write_text(input_text, encoding="utf-8")
+    argv = ["script", "head", "run", "1", str(output_file)]
+
+    result = norm.main(argv)
+    assert result == 0
+    output_content = output_file.read_text(encoding="utf-8")
+    assert "<script>" not in output_content
+    assert "\\u003cscript\\u003e" in output_content
+    assert "\\u0026 --\\u003e" in output_content
