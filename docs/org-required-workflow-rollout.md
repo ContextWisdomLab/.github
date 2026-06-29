@@ -1,6 +1,6 @@
 # ContextualWisdomLab central required workflow rollout
 
-Updated: 2026-06-29 02:34 KST
+Updated: 2026-06-29 16:45 KST
 
 ## Decision
 
@@ -16,11 +16,14 @@ Use an organization repository ruleset instead of copying workflow files into ea
   - `.github/workflows/strix.yml`
   - `.github/workflows/opencode-review.yml`
   - `.github/workflows/pr-review-merge-scheduler.yml`
-- Required workflow ref: `refs/heads/codex/rerun-required-opencode-job`
-- Required workflow head: `3c62c37a4deabdb0c6ed4ddf0951c1987f09866b`
+- Required workflow ref: `refs/heads/main`
+- Required workflow head: `81408f3dbe0a3c43dc4b76133f72a5e314df8a10`
 - Required workflow trigger support: `pull_request_target`
 
-The current ref is a temporary proof pin for `.github` PR `#100`. Restore this ruleset to `.github@main` immediately after PR `#100` merges.
+`.github` PR `#100` merged on 2026-06-29 05:45 KST. The required-workflow
+ruleset should now point back at `.github@main`; if live organization ruleset
+inspection reports another ref, treat that as an operations drift issue and
+restore ruleset `18156473` to the current `main` head.
 
 This keeps Strix security evidence, OpenCode review evidence, and merge/update automation sourced from the central `.github` repository. Target repositories do not need local copies of these workflows for the organization required workflow rule.
 
@@ -61,7 +64,7 @@ The active ruleset targets the public, non-fork repositories found by live GitHu
 
 | Repository | Default branch | Flow | Open PRs | Default-branch workflow footprint | Local central-workflow copies | Rollout status |
 | --- | --- | --- | ---: | --- | --- | --- |
-| `ContextualWisdomLab/.github` | `main` | GitHub Flow | 1 | OpenCode, scheduler, Strix | central source; keep | PR `#100` proving required-workflow retry fix |
+| `ContextualWisdomLab/.github` | `main` | GitHub Flow | 0 | OpenCode, scheduler, Strix | central source; keep | PR `#100` merged; verify ruleset `18156473` points at `.github@main` |
 | `ContextualWisdomLab/ContextualWisdomLab.github.io` | `main` | GitHub Flow | 1 | none | none | migrated; re-verify before final closure |
 | `ContextualWisdomLab/appguardrail` | `develop` | Git Flow | 1 | none | none | migrated; re-verify before final closure |
 | `ContextualWisdomLab/bandscope` | `develop` | Git Flow | 1 | none | none | no local central copies observed; verify inherited checks on next PR |
@@ -105,8 +108,8 @@ The active ruleset targets the public, non-fork repositories found by live GitHu
 - `ContextualWisdomLab/naruon` reports inherited active ruleset `18156473` with all three required workflow paths, proving target-repository inheritance after the scheduler ruleset update.
 - `ContextualWisdomLab/ContextualWisdomLab.github.io` PR `#25` merged the thin central scheduler caller and repository-local bootstrap fixes. Its main Strix run `28217860369` passed.
 - The organization ruleset API reports the central required workflows ruleset as `active` and inherited by each public non-fork target repository.
-- `.github` PR `#100` adds required-workflow job rerun support and cancels older same-PR OpenCode runs before retrying the current head. Local verification on head `3c62c37a4deabdb0c6ed4ddf0951c1987f09866b`: `pytest -q` passed 38 tests, `coverage report --fail-under=100` reported 100%, `interrogate --fail-under=100 .` reported 100%.
-- On 2026-06-29 02:34 KST, `.github` PR `#100` current-head required workflow runs were still queued after old-head PR `#100` runs `28329720827`, `28329593435`, and `28329593433` were force-cancelled.
+- `.github` PR `#100` added required-workflow job rerun support and cancels older same-PR OpenCode runs before retrying the current head. Local verification on head `3c62c37a4deabdb0c6ed4ddf0951c1987f09866b`: `pytest -q` passed 38 tests, `coverage report --fail-under=100` reported 100%, `interrogate --fail-under=100 .` reported 100%.
+- `.github` PR `#100` merged at 2026-06-29 05:45 KST with merge commit `81408f3dbe0a3c43dc4b76133f72a5e314df8a10`. A follow-up admin check should verify organization ruleset `18156473` is no longer pinned to `refs/heads/codex/rerun-required-opencode-job`.
 
 ## Good patterns to keep
 
