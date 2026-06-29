@@ -4448,6 +4448,7 @@ jobs:
           echo "::endgroup::"
 
       - name: Dispatch merge scheduler after approval
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
@@ -4480,5 +4481,5 @@ jobs:
           done
 
           if [ "$dispatch_status" -ne 0 ]; then
-            printf '::warning::OpenCode review approved the PR, but merge scheduler dispatch did not start after retries for %s at ref %s. The scheduled and workflow_run scheduler paths remain authoritative.\n' "$GH_REPOSITORY" "$scheduler_ref"
+            printf '::warning::Merge scheduler dispatch failed after approval; leaving OpenCode approval intact. Repository=%s ref=%s. The scheduled and workflow_run scheduler paths remain authoritative.\n' "$GH_REPOSITORY" "$scheduler_ref"
           fi
