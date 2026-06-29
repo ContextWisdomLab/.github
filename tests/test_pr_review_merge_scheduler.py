@@ -1321,6 +1321,71 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert called == [("owner/repo", 1, True)]
 
 
+def test_inspect_pr_queues_auto_merge_for_approved_conflicts(monkeypatch):
+    auto_merges = []
+    disables = []
+    monkeypatch.setattr(
+        sched,
+        "enable_auto_merge",
+        lambda repo, pr, dry_run: auto_merges.append((repo, pr["number"], dry_run)),
+    )
+    monkeypatch.setattr(
+        sched,
+        "disable_auto_merge",
+        lambda repo, pr, dry_run: disables.append((repo, pr["number"], dry_run)),
+    )
+
+    approved_conflict = make_pr(
+        mergeStateStatus="DIRTY",
+        reviews={"nodes": [opencode_review("APPROVED", "head")]},
+    )
+    decision = inspect(approved_conflict)
+    assert decision.action == "auto_merge"
+    assert "auto-merge enabled and queued while conflict repair remains required" in decision.reason
+    assert "merge conflict: DIRTY" in decision.reason
+    assert "gh pr checkout 1" in decision.reason
+    assert auto_merges == [("owner/repo", 1, True)]
+    assert disables == []
+
+    already_queued = inspect(
+        make_pr(
+            mergeStateStatus="CONFLICTING",
+            reviews={"nodes": [opencode_review("APPROVED", "head")]},
+            autoMergeRequest={"enabledAt": "now"},
+        )
+    )
+    assert already_queued.action == "wait"
+    assert "auto-merge is already enabled" in already_queued.reason
+    assert "conflict repair is required" in already_queued.reason
+    assert "merge conflict: CONFLICTING" in already_queued.reason
+    assert auto_merges == [("owner/repo", 1, True)]
+    assert disables == []
+
+    disabled_by_inputs = inspect(
+        make_pr(
+            mergeStateStatus="DIRTY",
+            reviews={"nodes": [opencode_review("APPROVED", "head")]},
+        ),
+        enable_auto_merge_flag=False,
+    )
+    assert disabled_by_inputs.action == "wait"
+    assert "auto-merge is not queued" in disabled_by_inputs.reason
+    assert "merge conflict: DIRTY" in disabled_by_inputs.reason
+    assert auto_merges == [("owner/repo", 1, True)]
+
+    direct_mode = inspect(
+        make_pr(
+            mergeStateStatus="DIRTY",
+            reviews={"nodes": [opencode_review("APPROVED", "head")]},
+        ),
+        merge_mode="direct",
+    )
+    assert direct_mode.action == "wait"
+    assert "merge mode is direct" in direct_mode.reason
+    assert "merge conflict: DIRTY" in direct_mode.reason
+    assert auto_merges == [("owner/repo", 1, True)]
+
+
 def test_wait_for_updated_branch_head_polls_until_head_changes(monkeypatch):
     fetches = []
     sleeps = []
