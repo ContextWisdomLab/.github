@@ -653,8 +653,12 @@ M\tscripts/ci/example.py
 
 
 def test_iter_json_objects_extracts_raw_and_embedded_json():
-    assert norm.iter_json_objects('{"a": 1}') == [{"a": 1}, {"a": 1}]
+    assert norm.iter_json_objects('{"a": 1}') == [{"a": 1}]
     assert norm.iter_json_objects('prefix {"b": 2} suffix') == [{"b": 2}]
+    assert norm.iter_json_objects('prefix {"wrapper": {"control": true}} suffix') == [
+        {"wrapper": {"control": True}},
+        {"control": True},
+    ]
     assert norm.iter_json_objects("prefix {  } suffix") == [{}]
     assert norm.iter_json_objects("prefix {not json}") == []
     assert norm.iter_json_objects('prefix {"bad": } suffix') == []
