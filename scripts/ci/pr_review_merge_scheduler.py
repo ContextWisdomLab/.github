@@ -318,7 +318,7 @@ def decision_guidance(decision: Decision) -> dict[str, Any] | None:
 
 
 def run(args: Sequence[str], *, stdin: str | None = None) -> str:
-    """Run a command and return stdout, raising with stderr on failure."""
+    """Run a command and return stdout, raising a scrubbed summary on failure."""
     if isinstance(args, str) or not all(isinstance(arg, str) for arg in args):
         raise TypeError("run() requires a sequence of argv strings; shell command strings are not allowed")
     argv = list(args)
