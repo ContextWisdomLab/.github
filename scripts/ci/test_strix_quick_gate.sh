@@ -642,6 +642,7 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$REPO_ROOT/.github/workflows/strix.yml" 'context="strix"' "strix manual evidence status uses the status context consumed by OpenCode"
 	assert_file_contains "$REPO_ROOT/.github/workflows/strix.yml" 'repos/${TARGET_REPOSITORY}/statuses/${PR_HEAD_SHA}' "strix manual evidence status does not post private-target evidence to .github by mistake"
 	assert_file_contains "$REPO_ROOT/.github/workflows/strix.yml" 'Manual workflow_dispatch Strix evidence failed' "strix manual evidence status records failed reruns so older success cannot mask newer failure"
+	assert_file_contains "$REPO_ROOT/.github/workflows/strix.yml" 'Could not publish manual Strix status from scan job' "strix scan evidence does not fail solely because target status publication is unavailable"
 	assert_file_contains "$REPO_ROOT/scripts/ci/collect_failed_check_evidence.sh" '"workflow_run"' "failed-check evidence includes failed same-head workflow runs outside statusCheckRollup"
 	assert_file_contains "$REPO_ROOT/scripts/ci/collect_failed_check_evidence.sh" "--json databaseId,workflowName,status,conclusion,url,event,headSha" "failed-check evidence scopes supplemental workflow runs with event and head SHA metadata"
 	assert_file_contains "$REPO_ROOT/scripts/ci/collect_failed_check_evidence.sh" 'select((.event // "") == "pull_request_target" or (.event // "") == "workflow_dispatch")' "failed-check evidence appends PR Strix workflow runs and manual PR evidence reruns"
