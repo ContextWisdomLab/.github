@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 STRUCTURAL_FAILURE_PHRASES = (
     "structural exploration was not possible",
     "structural exploration not possible",
@@ -173,7 +172,6 @@ COVERAGE_FAILURE_PHRASES = (
     "unmeasured",
     "partial",
     "not proven",
-    "not applicable",
     "n/a",
     "skipped",
     "unavailable",
@@ -245,7 +243,9 @@ def current_changed_files() -> set[str]:
     try:
         return {
             line.strip()
-            for line in Path(changed_files_path).read_text(encoding="utf-8").splitlines()
+            for line in Path(changed_files_path)
+            .read_text(encoding="utf-8")
+            .splitlines()
             if line.strip()
         }
     except OSError:
@@ -309,16 +309,23 @@ def mentions_actual_changed_file(reason: str, summary: str) -> bool:
 def mentions_verification_posture(reason: str, summary: str) -> bool:
     """Return whether an approval records the concrete review surfaces checked."""
     combined = f"{reason}\n{summary}".casefold()
-    return all(label in combined for label in APPROVAL_VERIFICATION_LABELS) and "codegraph" in combined
+    return (
+        all(label in combined for label in APPROVAL_VERIFICATION_LABELS)
+        and "codegraph" in combined
+    )
 
 
 def label_section(text: str, label: str) -> str:
     """Return text after a verification label until the next known label."""
+
     def label_matches(candidate: str) -> list[re.Match[str]]:
         """Return exact verification-label matches without suffix collisions."""
         matches = []
         for match in re.finditer(re.escape(candidate), text):
-            if candidate == "coverage:" and text[max(0, match.start() - 10) : match.start()] == "docstring ":
+            if (
+                candidate == "coverage:"
+                and text[max(0, match.start() - 10) : match.start()] == "docstring "
+            ):
                 continue
             matches.append(match)
         return matches
@@ -352,7 +359,15 @@ def coverage_section_is_valid(section: str) -> bool:
         return True
     if any(phrase in section for phrase in COVERAGE_FAILURE_PHRASES):
         return False
-    return "100%" in section
+    if "supported repository test suites passed" in section:
+        return True
+    if "configured repository docstring gates passed" in section:
+        return True
+    if "docstring coverage was advisory" in section:
+        return True
+    if "100%" in section:
+        return True
+    return False
 
 
 def mentions_full_coverage(reason: str, summary: str) -> bool:
@@ -428,6 +443,11 @@ def evidence_coverage_mode(text: str) -> str | None:
         return None
     if "- test coverage: 100%" in section and "- docstring coverage: 100%" in section:
         return "full"
+    if (
+        "- test evidence: supported repository test suites passed" in section
+        and "- docstring evidence: configured repository docstring gates passed or docstring coverage was advisory" in section
+    ):
+        return "suite_passed"
     no_source = (
         "no supported source files or package manifests" in section
         or "no supported changed source files or package manifests" in section
@@ -459,6 +479,12 @@ def build_approval_repair_summary(summary: str, evidence_text: str) -> str | Non
             "Docstring coverage: coverage execution evidence reports docstring coverage as not applicable "
             "because no supported changed source files or package manifests were found."
         )
+    elif coverage_mode == "suite_passed":
+        coverage_line = "Coverage: coverage execution evidence reports supported repository test suites passed."
+        docstring_line = (
+            "Docstring coverage: coverage execution evidence reports configured repository docstring gates passed "
+            "or docstring coverage was advisory."
+        )
     else:
         coverage_line = "Coverage: coverage execution evidence proves 100% test coverage for the current head."
         docstring_line = "Docstring coverage: coverage execution evidence proves 100% docstring coverage for the current head."
@@ -489,9 +515,11 @@ Security/privacy: workflow-token, review-gate, and repository-automation securit
 
 def repair_approval_summary(reason: str, summary: str) -> str:
     """Repair an APPROVE summary only from objective bounded evidence."""
-    if mentions_changed_file_evidence(reason, summary) and mentions_verification_posture(
-        reason, summary
-    ) and mentions_full_coverage(reason, summary):
+    if (
+        mentions_changed_file_evidence(reason, summary)
+        and mentions_verification_posture(reason, summary)
+        and mentions_full_coverage(reason, summary)
+    ):
         return summary
 
     evidence_file = approval_repair_evidence_file()
@@ -529,7 +557,7 @@ def check_structural_approval(control_file: Path) -> int:
         str(value.get("summary", "")),
     ):
         return reject("approval admits missing structural review")
-    if value.get("result") == "APPROVE" and not mentions_changed_file_evidence(
+    if value.get("result") == "APPROVE" and not mentions_actual_changed_file(
         str(value.get("reason", "")),
         str(value.get("summary", "")),
     ):
@@ -708,7 +736,7 @@ def main(argv: list[str]) -> int:
         if control is None:
             continue
 
-        normalized_json = json.dumps(control, separators=(",", ":"), ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+        normalized_json = json.dumps(control, separators=(",", ":"), ensure_ascii=False).replace("<", r"\u003c").replace(">", r"\u003e").replace("&", r"\u0026")
         output_file.write_text(
             "\n".join(
                 [

@@ -13,6 +13,11 @@ on:
         description: Optional pull request number for trusted PR-scope evidence
         required: false
         type: string
+      target_repository:
+        description: Optional repository that owns the pull request, in owner/name form
+        required: false
+        default: ""
+        type: string
       pr_base_sha:
         description: Optional pull request base SHA for trusted PR-scope evidence
         required: false
@@ -29,7 +34,7 @@ on:
 
 concurrency:
   group: >-
-    strix-${{ github.repository }}-${{ github.event_name == 'pull_request_target' &&
+    strix-${{ github.event.inputs.target_repository || github.repository }}-${{ github.event_name == 'pull_request_target' &&
     format('pr-{0}-{1}', github.event.pull_request.number, github.event.pull_request.head.sha) ||
     github.event.inputs.pr_number != '' && github.event.inputs.pr_head_sha != '' &&
     format('pr-{0}-{1}', github.event.inputs.pr_number, github.event.inputs.pr_head_sha) ||
@@ -134,8 +139,8 @@ jobs:
 
       - name: Materialize target workspace
         env:
-          GH_TOKEN: ${{ github.token }}
-          REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || github.token }}
+          REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
           TARGET_WORKSPACE_SHA: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.sha || github.sha }}
         run: |
           set -euo pipefail
@@ -154,7 +159,7 @@ jobs:
       - name: Fetch pull request head for trusted scan
         if: github.event_name == 'pull_request_target' || github.event.inputs.pr_number != ''
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || github.token }}
           PR_NUMBER: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.number || github.event.inputs.pr_number }}
           PR_BASE_SHA: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
           PR_HEAD_SHA: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
@@ -519,7 +524,8 @@ jobs:
     steps:
       - name: Publish same-head manual Strix status
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || github.token }}
+          TARGET_REPOSITORY: ${{ github.event.inputs.target_repository || github.repository }}
           PR_HEAD_SHA: ${{ github.event.inputs.pr_head_sha }}
           STRIX_RESULT: ${{ needs.strix.result }}
         run: |
@@ -544,7 +550,7 @@ jobs:
               ;;
           esac
 
-          gh api -X POST "repos/${GITHUB_REPOSITORY}/statuses/${PR_HEAD_SHA}" \
+          gh api -X POST "repos/${TARGET_REPOSITORY}/statuses/${PR_HEAD_SHA}" \
             -f state="$state" \
             -f context="strix" \
             -f description="$description" \

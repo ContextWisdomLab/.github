@@ -1,6 +1,6 @@
 # ContextualWisdomLab central required workflow rollout
 
-Updated: 2026-06-29 16:45 KST
+Updated: 2026-06-29 16:33 KST
 
 ## Decision
 
@@ -35,6 +35,7 @@ The central `.github/workflows/opencode-review.yml` is now part of the active or
 - Stable required check job name: `opencode-review`
 - Trusted source: `ContextualWisdomLab/.github`
 - PR-head handling: checkout or fetch PR head as review data only; trusted scripts come from the central `.github` ref
+- Manual target support: OpenCode and Strix `workflow_dispatch` runs can pass `target_repository` for repos such as private `aFIPC` whose PRs do not yet inherit the org required-workflow rule; org ruleset coverage is still the required steady state before draining that queue
 - Model token posture: use the organization `STRIX_GITHUB_MODELS_TOKEN` secret for GitHub Models calls, with `github.token` as the fallback; live workflow evidence showed `github.token` alone can return 403 from `models.github.ai/inference`
 - Write posture: OpenCode may create review/comment side effects through the OpenCode app token when available; `github.token` remains the last fallback and publication failures are soft-failed
 - Coverage execution posture: privileged `pull_request_target` coverage runs only for same-repository PR heads; fork PR heads must be covered by an unprivileged PR-side check or manually trusted dispatch before approval
@@ -65,6 +66,7 @@ The active ruleset targets the public, non-fork repositories found by live GitHu
 | Repository | Default branch | Flow | Open PRs | Default-branch workflow footprint | Local central-workflow copies | Rollout status |
 | --- | --- | --- | ---: | --- | --- | --- |
 | `ContextualWisdomLab/.github` | `main` | GitHub Flow | 0 | OpenCode, scheduler, Strix | central source; keep | PR `#100` merged; verify ruleset `18156473` points at `.github@main` |
+| `ContextualWisdomLab/aFIPC` | `master` | GitHub Flow | 1 | local R/security checks only | none | drift: PR `#78` lacks inherited OpenCode, Strix, and scheduler required-workflow checks |
 | `ContextualWisdomLab/ContextualWisdomLab.github.io` | `main` | GitHub Flow | 1 | none | none | migrated; re-verify before final closure |
 | `ContextualWisdomLab/appguardrail` | `develop` | Git Flow | 1 | none | none | migrated; re-verify before final closure |
 | `ContextualWisdomLab/bandscope` | `develop` | Git Flow | 1 | none | none | no local central copies observed; verify inherited checks on next PR |
@@ -110,6 +112,7 @@ The active ruleset targets the public, non-fork repositories found by live GitHu
 - The organization ruleset API reports the central required workflows ruleset as `active` and inherited by each public non-fork target repository.
 - `.github` PR `#100` added required-workflow job rerun support and cancels older same-PR OpenCode runs before retrying the current head. Local verification on head `3c62c37a4deabdb0c6ed4ddf0951c1987f09866b`: `pytest -q` passed 38 tests, `coverage report --fail-under=100` reported 100%, `interrogate --fail-under=100 .` reported 100%.
 - `.github` PR `#100` merged at 2026-06-29 05:45 KST with merge commit `81408f3dbe0a3c43dc4b76133f72a5e314df8a10`. A follow-up admin check should verify organization ruleset `18156473` is no longer pinned to `refs/heads/codex/rerun-required-opencode-job`.
+- On 2026-06-29 16:33 KST, `ContextualWisdomLab/aFIPC` PR `#78` proved a target coverage gap: the PR had local `check`, `quality`, and `secret-and-workflow-audit` check runs, but no inherited `opencode-review`, `strix`, or `scan-pr-queue` check runs. The repository ruleset `PR` (`12815994`) required only those three local checks and required zero approving reviews. Do not merge `aFIPC` PRs until current-head central review evidence is present.
 
 ## Good patterns to keep
 
@@ -127,3 +130,4 @@ The active ruleset targets the public, non-fork repositories found by live GitHu
 - Some repositories still have local Strix/OpenCode/scheduler workflows. Do not copy more workflows into repositories; retire local copies only after repository tests and docs are rewritten to the central required-workflow contract.
 - Repositories with local autofix/update workflows, especially `pg-erd-cloud`, need an explicit central autofix contract before local workflows are removed.
 - Some repositories use classic branch protection while others use rulesets. Normalize branch protection into rulesets without removing repository-specific required application checks.
+- `aFIPC` must be added to the organization required-workflow ruleset, or the ruleset target conditions must be repaired, before its PR queue can be drained under the central-review contract. The repository-local `PR` ruleset alone is insufficient because it does not create OpenCode/Strix/scheduler evidence and allows zero required approvals.
