@@ -1428,6 +1428,44 @@ def test_main_keeps_scanning_after_action_error(monkeypatch, capsys):
     assert payload["decisions"][1]["contract_decision"] == "WAIT"
 
 
+def test_main_limits_review_dispatch_fanout(monkeypatch, capsys):
+    prs = [make_pr(number=1), make_pr(number=2), make_pr(number=3)]
+    trigger_flags = []
+
+    def fake_inspect(repo, pr, **kwargs):
+        trigger_flags.append(kwargs["trigger_reviews"])
+        if kwargs["trigger_reviews"]:
+            return sched.Decision(pr["number"], "security_dispatch", "same-head Strix dispatched")
+        return sched.Decision(pr["number"], "block", "current head has no OpenCode approval")
+
+    monkeypatch.setattr(sched, "fetch_open_prs", lambda repo, max_prs: prs)
+    monkeypatch.setattr(sched, "inspect_pr", fake_inspect)
+
+    assert sched.main(["--repo", "owner/repo", "--base-branch", "main", "--project-flow", "github"]) == 0
+    assert trigger_flags == [True, False, False]
+    output = capsys.readouterr().out
+    payload = json.loads(output.strip().splitlines()[-1])
+    assert payload["counts"] == {"block": 2, "security_dispatch": 1}
+
+    trigger_flags.clear()
+    assert (
+        sched.main(
+            [
+                "--repo",
+                "owner/repo",
+                "--base-branch",
+                "main",
+                "--project-flow",
+                "github",
+                "--max-review-dispatches",
+                "-1",
+            ]
+        )
+        == 0
+    )
+    assert trigger_flags == [True, True, True]
+
+
 def test_scrub_sensitive_data_and_run_error():
     assert sched.scrub_sensitive_data("Authorization: Bearer mytoken123") == "Authorization: Bearer ***"
     assert sched.scrub_sensitive_data("token mytoken123") == "token ***"

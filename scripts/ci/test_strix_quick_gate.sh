@@ -902,6 +902,8 @@ assert_pr_review_merge_scheduler_uses_github_actions_bot_token() {
 	assert_file_contains "$workflow_file" 'cancel-in-progress: true' "scheduler cancels stale repository queue scans instead of accumulating merge/update attempts"
 	assert_file_contains "$workflow_file" 'github.event.workflow_run.pull_requests[0].number' "scheduler scopes OpenCode workflow_run events to the completed review PR"
 	assert_file_contains "$workflow_file" "github.event_name == 'pull_request_target' || inputs.trigger_reviews == true" "scheduler enables review dispatch by default for required-workflow PR events"
+	assert_file_contains "$workflow_file" 'MAX_REVIEW_DISPATCHES: ${{ inputs.max_review_dispatches || vars.MAX_REVIEW_DISPATCHES || '"'"'1'"'"' }}' "scheduler caps review dispatch fanout by default"
+	assert_file_contains "$workflow_file" '--max-review-dispatches "$MAX_REVIEW_DISPATCHES"' "scheduler passes the review dispatch fanout cap to the queue scanner"
 	assert_file_contains "$workflow_file" "github.event_name == 'workflow_run' || inputs.enable_auto_merge == true" "scheduler enables auto-merge after OpenCode Review completion"
 	assert_file_contains "$workflow_file" "github.event_name == 'workflow_run' || inputs.update_branches == true" "scheduler enables branch updates after OpenCode Review completion"
 	assert_file_contains "$workflow_file" 'GH_TOKEN: ${{ github.token }}' "scheduler uses the caller workflow token so mutations are attributed to GitHub Actions in the target repository"

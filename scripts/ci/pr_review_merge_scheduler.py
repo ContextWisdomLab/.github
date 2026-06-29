@@ -106,6 +106,7 @@ query($owner: String!, $name: String!, $number: Int!) {
 
 OPEN_PRS_PAGE_SIZE = 25
 DEFAULT_STALE_OPENCODE_MINUTES = 45
+DEFAULT_MAX_REVIEW_DISPATCHES = 1
 OPENCODE_WORKFLOW_NAMES = {"OpenCode Review", "Required OpenCode Review"}
 RUNNING_CHECK_STATES = {"PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"}
 FAILED_CHECK_CONCLUSIONS = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "STARTUP_FAILURE"}
@@ -1914,6 +1915,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--base-branch", default=os.environ.get("DEFAULT_BRANCH", ""))
     parser.add_argument("--project-flow", default=os.environ.get("PROJECT_FLOW", ""))
     parser.add_argument("--max-prs", type=int, default=100)
+    parser.add_argument(
+        "--max-review-dispatches",
+        type=int,
+        default=int(os.environ.get("MAX_REVIEW_DISPATCHES", str(DEFAULT_MAX_REVIEW_DISPATCHES))),
+        help="Maximum Strix/OpenCode review dispatches to create in one scheduler run; negative means unlimited.",
+    )
     parser.add_argument("--pr-number", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--trigger-reviews", action=argparse.BooleanOptionalAction, default=True)
@@ -1949,15 +1956,19 @@ def main(argv: list[str]) -> int:
         raise SystemExit("--project-flow is required")
     if args.pr_number < 0:
         raise SystemExit("--pr-number must not be negative")
+    if args.max_review_dispatches < -1:
+        raise SystemExit("--max-review-dispatches must be -1 or greater")
     prs = fetch_pr(args.repo, args.pr_number) if args.pr_number else fetch_open_prs(args.repo, args.max_prs)
     decisions = []
+    review_dispatches = 0
     for pr in prs:
+        dispatch_cap_reached = 0 <= args.max_review_dispatches <= review_dispatches
         try:
             decision = inspect_pr(
                 args.repo,
                 pr,
                 dry_run=args.dry_run,
-                trigger_reviews=args.trigger_reviews,
+                trigger_reviews=args.trigger_reviews and not dispatch_cap_reached,
                 enable_auto_merge_flag=args.enable_auto_merge,
                 merge_mode=args.merge_mode,
                 update_branches=args.update_branches,
@@ -1973,6 +1984,8 @@ def main(argv: list[str]) -> int:
                 summarize_action_error(exc),
             )
         decisions.append(decision)
+        if decision.action in {"security_dispatch", "review_dispatch"}:
+            review_dispatches += 1
     print_summary(
         decisions,
         dry_run=args.dry_run,
