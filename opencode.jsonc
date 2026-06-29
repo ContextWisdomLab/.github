@@ -88,6 +88,27 @@
         "lsp": "allow",
         "external_directory": "allow"
       }
+    },
+    "code-reviewer": {
+      "description": "Use this subagent immediately after code changes, before opening or merging a PR, or when asked to review a diff. Reviews only; never edits code. Focuses on correctness, security, maintainability, tests, and production risk.",
+      "mode": "subagent",
+      "prompt": "{file:./code-reviewer-prompt.md}",
+      "steps": 16,
+      "color": "#7c3aed",
+      "reasoningEffort": "high",
+      "permission": {
+        "edit": "deny",
+        "read": "allow",
+        "grep": "allow",
+        "glob": "allow",
+        "bash": "allow",
+        "list": "allow",
+        "task": "deny",
+        "webfetch": "deny",
+        "websearch": "deny",
+        "lsp": "deny",
+        "external_directory": "deny"
+      }
     }
   },
   "provider": {
