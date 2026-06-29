@@ -1397,13 +1397,105 @@ def test_inspect_pr_handles_approved_reviews_and_dispatch(monkeypatch):
     assert stale_decision.action == "review_dispatch"
     assert "retry threshold" in stale_decision.reason
     assert dispatched == ["Strix Security Scan", "OpenCode Review", "OpenCode Review"]
+    stale_limited = inspect(stale_opencode, stale_opencode_minutes=0, review_dispatch_allowed=False)
+    assert stale_limited.action == "wait"
+    assert "review dispatch limit reached" in stale_limited.reason
     stale_wait = inspect(stale_opencode, trigger_reviews=False, stale_opencode_minutes=0)
     assert stale_wait.action == "wait"
     assert "review dispatch disabled" in stale_wait.reason
+    missing_limited = inspect(make_pr(), review_dispatch_allowed=False)
+    assert missing_limited.action == "wait"
+    assert (
+        missing_limited.reason
+        == "current head has no completed Strix evidence; review dispatch limit reached"
+    )
+    completed_strix_limited = inspect(
+        make_pr(statusCheckRollup={"contexts": {"nodes": [strix_check()]}}),
+        review_dispatch_allowed=False,
+    )
+    assert completed_strix_limited.action == "wait"
+    assert completed_strix_limited.reason == "current head has completed Strix evidence; review dispatch limit reached"
     assert inspect(make_pr(), trigger_reviews=False).reason == "current head has no OpenCode approval"
     missing_approval_auto = inspect(make_pr(autoMergeRequest={"enabledAt": "now"}), trigger_reviews=False)
     assert missing_approval_auto.action == "disable_auto_merge"
     assert "no OpenCode approval" in missing_approval_auto.reason
+
+
+def test_main_limits_review_dispatches_without_blocking_branch_updates(monkeypatch, capsys):
+    prs = [
+        make_pr(
+            number=1,
+            statusCheckRollup={"contexts": {"nodes": [strix_check()]}},
+        ),
+        make_pr(
+            number=2,
+            statusCheckRollup={"contexts": {"nodes": [strix_check()]}},
+        ),
+        make_pr(
+            number=3,
+            mergeStateStatus="BLOCKED",
+            restMergeableState="BLOCKED",
+            compareBehindBy=2,
+            autoMergeRequest={"enabledAt": "now"},
+        ),
+    ]
+    dispatched = []
+    updated = []
+
+    monkeypatch.setattr(sched, "fetch_open_prs", lambda repo, max_prs: prs)
+    monkeypatch.setattr(
+        sched,
+        "dispatch_opencode_review",
+        lambda repo, workflow, pr, dry_run: dispatched.append(pr["number"]),
+    )
+    monkeypatch.setattr(
+        sched,
+        "update_branch",
+        lambda repo, pr, dry_run: updated.append(pr["number"]),
+    )
+
+    assert (
+        sched.main(
+            [
+                "--repo",
+                "owner/repo",
+                "--base-branch",
+                "main",
+                "--project-flow",
+                "github-flow",
+                "--review-dispatch-limit",
+                "1",
+            ]
+        )
+        == 0
+    )
+
+    output = capsys.readouterr().out
+    payload = json.loads(output.strip().splitlines()[-1])
+    assert dispatched == [1]
+    assert updated == [3]
+    assert payload["counts"] == {"review_dispatch": 1, "update_branch": 1, "wait": 1}
+    assert (
+        payload["decisions"][1]["reason"]
+        == "current head has completed Strix evidence; review dispatch limit reached"
+    )
+    assert payload["decisions"][2]["contract_decision"] == "UPDATE_BRANCH"
+
+
+def test_main_rejects_invalid_review_dispatch_limit():
+    with pytest.raises(SystemExit, match="--review-dispatch-limit must be -1 or greater"):
+        sched.main(
+            [
+                "--repo",
+                "owner/repo",
+                "--base-branch",
+                "main",
+                "--project-flow",
+                "github-flow",
+                "--review-dispatch-limit",
+                "-2",
+            ]
+        )
 
 
 def test_print_summary_self_test_parse_args_and_main(monkeypatch, capsys):
@@ -1422,6 +1514,19 @@ def test_print_summary_self_test_parse_args_and_main(monkeypatch, capsys):
 
     sched.self_test()
     assert "self-test passed" in capsys.readouterr().out
+
+    real_split_repo = sched.split_repo
+    invalid_inputs = ["owner", "/name", "owner/"]
+    for accepted_invalid in invalid_inputs:
+        def fake_split_repo(repo, accepted_invalid=accepted_invalid):
+            if repo == accepted_invalid:
+                return ("accepted", "invalid")
+            return real_split_repo(repo)
+
+        monkeypatch.setattr(sched, "split_repo", fake_split_repo)
+        with pytest.raises(AssertionError, match="expected ValueError"):
+            sched.self_test()
+    monkeypatch.setattr(sched, "split_repo", real_split_repo)
 
     parsed = sched.parse_args(
         [
