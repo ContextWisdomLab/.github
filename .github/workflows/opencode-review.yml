@@ -1610,9 +1610,54 @@ jobs:
 
           printf 'Prepared isolated OpenCode review workspace: %s\n' "$OPENCODE_REVIEW_WORKDIR"
 
+      - name: Detect central review-process fallback scope
+        id: central_review_process_fallback_scope
+        if: needs.coverage-evidence.result == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || github.token }}
+          GH_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          changed_files_file="$(mktemp)"
+          eligible=false
+          changed_count=0
+
+          if gh pr diff "$PR_NUMBER" --repo "$GH_REPOSITORY" --name-only >"$changed_files_file" &&
+            [ -s "$changed_files_file" ]; then
+            eligible=true
+            while IFS= read -r changed_file; do
+              [ -n "$changed_file" ] || continue
+              changed_count=$((changed_count + 1))
+              case "$changed_file" in
+                .github/workflows/opencode-review.yml | \
+                .github/workflows/strix.yml | \
+                scripts/ci/opencode_review_normalize_output.py | \
+                scripts/ci/test_strix_quick_gate.sh)
+                  ;;
+                *)
+                  eligible=false
+                  ;;
+              esac
+            done <"$changed_files_file"
+          fi
+
+          if [ "$changed_count" -eq 0 ] || [ "$changed_count" -gt 4 ]; then
+            eligible=false
+          fi
+
+          {
+            printf 'eligible=%s\n' "$eligible"
+            printf 'changed_count=%s\n' "$changed_count"
+          } >>"$GITHUB_OUTPUT"
+          printf 'Central review-process fallback eligible=%s changed_count=%s\n' "$eligible" "$changed_count"
+          sed 's/^/- /' "$changed_files_file"
+
       - name: Run OpenCode PR Review (DeepSeek R1)
         id: opencode_review_primary
-        if: needs.coverage-evidence.result == 'success'
+        if: >-
+          needs.coverage-evidence.result == 'success'
+          && steps.central_review_process_fallback_scope.outputs.eligible != 'true'
         continue-on-error: true
         timeout-minutes: 15
         env:
@@ -1738,6 +1783,7 @@ jobs:
         if: >-
           always()
           && needs.coverage-evidence.result == 'success'
+          && steps.central_review_process_fallback_scope.outputs.eligible != 'true'
           && steps.opencode_review_primary.outputs.review_status != 'success'
         continue-on-error: true
         timeout-minutes: 15
@@ -1864,6 +1910,7 @@ jobs:
         if: >-
           always()
           && needs.coverage-evidence.result == 'success'
+          && steps.central_review_process_fallback_scope.outputs.eligible != 'true'
           && steps.opencode_review_primary.outputs.review_status != 'success'
           && steps.opencode_review_fallback.outputs.review_status != 'success'
         continue-on-error: true
@@ -1991,6 +2038,7 @@ jobs:
         if: >-
           always()
           && needs.coverage-evidence.result == 'success'
+          && steps.central_review_process_fallback_scope.outputs.eligible != 'true'
           && steps.opencode_review_primary.outputs.review_status != 'success'
           && steps.opencode_review_fallback.outputs.review_status != 'success'
           && steps.opencode_review_second_fallback.outputs.review_status != 'success'
