@@ -181,7 +181,7 @@ def changed_new_lines(path_value: str) -> set[int]:
                 "--",
                 path_value,
             ],
-            check=False, shell=False,
+            check=False,
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
