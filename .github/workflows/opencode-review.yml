@@ -3895,7 +3895,31 @@ jobs:
               stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
             fi
             if [ -s "$failed_file" ]; then
-              return 1
+              local failed_check_evidence_file failed_check_review_body_file failed_check_review_payload_file failed_check_inline_failure_body_file
+              failed_check_evidence_file="$(mktemp)"
+              failed_check_review_body_file="$(mktemp)"
+              failed_check_review_payload_file="$(mktemp)"
+              failed_check_inline_failure_body_file="$(mktemp)"
+              if ! collect_failed_check_evidence_or_note "$failed_check_evidence_file"; then
+                printf "Failed GitHub Check evidence could not be collected for current head \`%s\`.\n" "$HEAD_SHA" >"$failed_check_evidence_file"
+              fi
+
+              if leave_review_unchanged_for_self_modifying_strix_if_present "$failed_check_evidence_file"; then
+                return 1
+              fi
+
+              if comment_for_billing_lock_if_present "$failed_file" "$failed_check_evidence_file" "$failed_check_review_body_file"; then
+                return 0
+              fi
+
+              if run_failed_check_diagnosis "$failed_file" "$failed_check_evidence_file" "$failed_check_review_body_file" "$failed_check_review_payload_file" "$failed_check_inline_failure_body_file"; then
+                create_pull_review_with_payload "REQUEST_CHANGES" "$(cat "$failed_check_review_body_file")" "$failed_check_review_payload_file" "$failed_check_inline_failure_body_file"
+              elif build_failed_check_fallback_body "$failed_file" "$failed_check_evidence_file" "$failed_check_review_body_file"; then
+                create_pull_review "REQUEST_CHANGES" "$(cat "$failed_check_review_body_file")"
+              else
+                stop_failed_check_fallback_unavailable
+              fi
+              return 0
             fi
 
             if request_changes_for_merge_conflict_if_present; then
