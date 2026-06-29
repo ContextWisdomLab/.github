@@ -521,8 +521,9 @@ def test_actions_call_gh_with_expected_arguments(monkeypatch):
     sched.dispatch_strix_evidence("owner/repo", "Strix Security Scan", pr, dry_run=False)
     sched.dispatch_opencode_review("owner/repo", "OpenCode Review", pr, dry_run=False)
     assert calls[0][:4] == ["gh", "pr", "merge", "1"]
+    assert "--squash" in calls[0]
     assert calls[0][-2:] == ["--match-head-commit", "head"]
-    assert calls[1] == ["gh", "pr", "merge", "1", "--repo", "owner/repo", "--merge", "--match-head-commit", "head"]
+    assert calls[1] == ["gh", "pr", "merge", "1", "--repo", "owner/repo", "--squash", "--match-head-commit", "head"]
     assert calls[2] == ["gh", "pr", "merge", "1", "--repo", "owner/repo", "--disable-auto"]
     assert calls[3][:4] == ["gh", "api", "-X", "PUT"]
     assert calls[3][-1] == "expected_head_sha=head"
@@ -1305,7 +1306,7 @@ def test_action_error_guidance_distinguishes_update_branch_from_merge():
 
     merge_error = sched.summarize_action_error(
         RuntimeError(
-            "Command failed (1): gh pr merge 7 --auto --merge\n"
+            "Command failed (1): gh pr merge 7 --auto --squash\n"
             "GraphQL: Resource not accessible by integration (mergePullRequest)"
         )
     )
