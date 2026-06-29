@@ -57,24 +57,30 @@ def opencode_review(
     }
 
 
-def strix_check(status="COMPLETED", conclusion="SUCCESS", workflow="Strix Security Scan"):
-    return {
+def strix_check(status="COMPLETED", conclusion="SUCCESS", workflow="Strix Security Scan", details_url=None):
+    value = {
         "__typename": "CheckRun",
         "name": "strix",
         "status": status,
         "conclusion": conclusion,
         "checkSuite": {"workflowRun": {"workflow": {"name": workflow}}},
     }
+    if details_url:
+        value["detailsUrl"] = details_url
+    return value
 
 
-def opencode_check(status="IN_PROGRESS", started_at=None):
-    return {
+def opencode_check(status="IN_PROGRESS", started_at=None, details_url=None):
+    value = {
         "__typename": "CheckRun",
         "name": "opencode-review",
         "status": status,
         "startedAt": started_at,
         "checkSuite": {"workflowRun": {"workflow": {"name": "OpenCode Review"}}},
     }
+    if details_url:
+        value["detailsUrl"] = details_url
+    return value
 
 
 def inspect(pr, **overrides):
@@ -245,6 +251,33 @@ def test_rest_mergeable_state_helpers(monkeypatch):
     assert prs == [{"number": 9, "restMergeableStateError": "transient REST failure"}]
 
 
+def test_enrich_rest_mergeable_states_uses_bounded_executor_for_multiple_prs(monkeypatch):
+    seen_workers = []
+
+    class FakeExecutor:
+        def __init__(self, *, max_workers):
+            seen_workers.append(max_workers)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def map(self, func, items):
+            return [func(item) for item in items]
+
+    monkeypatch.setattr(sched.concurrent.futures, "ThreadPoolExecutor", FakeExecutor)
+    monkeypatch.setattr(sched, "fetch_rest_mergeable_state", lambda repo, number: f"{repo}:{number}")
+
+    prs = [{"number": number} for number in range(1, sched.REST_MERGEABLE_STATE_WORKERS + 3)]
+    sched.enrich_rest_mergeable_states("owner/repo", prs)
+
+    assert seen_workers == [sched.REST_MERGEABLE_STATE_WORKERS]
+    assert prs[0]["restMergeableState"] == "owner/repo:1"
+    assert prs[-1]["restMergeableState"] == f"owner/repo:{sched.REST_MERGEABLE_STATE_WORKERS + 2}"
+
+
 def test_context_review_and_check_helpers():
     assert sched.context_nodes({}) == []
     assert sched.context_nodes(make_pr()) == []
@@ -263,6 +296,21 @@ def test_context_review_and_check_helpers():
     assert sched.is_strix_context({"context": "Strix Security Scan"})
     assert sched.is_strix_context({"__typename": "CheckRun", "name": "strix", "checkSuite": {"workflowRun": {"workflow": None}}})
     assert not sched.is_strix_context({"context": "lint"})
+    assert sched.actions_job_id_from_details_url(None) is None
+    assert sched.actions_job_id_from_details_url("https://github.com/owner/repo/actions/runs/123/job/456?pr=1") == "456"
+    assert sched.actions_job_id_from_details_url("https://github.com/owner/repo/actions/runs/123") is None
+    check_jobs = make_pr(
+        statusCheckRollup={
+            "contexts": {
+                "nodes": [
+                    opencode_check(details_url="https://github.com/owner/repo/actions/runs/1/job/11"),
+                    strix_check(details_url="https://github.com/owner/repo/actions/runs/2/job/22"),
+                ]
+            }
+        }
+    )
+    assert sched.matching_actions_job_id(check_jobs, sched.is_opencode_context) == "11"
+    assert sched.matching_actions_job_id(check_jobs, sched.is_strix_context) == "22"
 
     assert sched.parse_github_datetime(None) is None
     assert sched.parse_github_datetime("not-a-date") is None
@@ -475,9 +523,45 @@ def test_review_state_and_failed_checks():
     assert sched.failed_status_checks(manual_strix_supersedes_pr_target_failure) == ["lint"]
 
 
+def test_run_command_failure_scrubs_secrets(monkeypatch):
+    import subprocess
+
+    class MockProcess:
+        def __init__(self, returncode, stdout, stderr):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def mock_run(args, **kwargs):
+        stderr_msg = "Error using Token secret_token_123 and bearer super_secret"
+        if "fail" in args:
+            raise subprocess.CalledProcessError(1, args, output="", stderr=stderr_msg)
+        return MockProcess(0, "success", "")
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+
+    assert sched.run(["success"]) == "success"
+
+    token_placeholder = "ghp_placeholder_token_with_underscores_123"
+    with pytest.raises(RuntimeError) as exc_info:
+        sched.run(["gh", "api", "fail", "-H", f"Authorization: token {token_placeholder}"])
+
+    error_msg = str(exc_info.value)
+    assert token_placeholder not in error_msg
+    assert "secret_token_123" not in error_msg
+    assert "super_secret" not in error_msg
+    assert "***" in error_msg
+
 def test_actions_call_gh_with_expected_arguments(monkeypatch):
     calls = []
-    monkeypatch.setattr(sched, "run", lambda args: calls.append(args) or "")
+
+    def fake_run(args, stdin=None):
+        calls.append(args)
+        if args[:5] == ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs"]:
+            return '{"workflow_runs": []}'
+        return ""
+
+    monkeypatch.setattr(sched, "run", fake_run)
     pr = make_pr()
     sched.enable_auto_merge("owner/repo", pr, dry_run=True)
     sched.merge_pr("owner/repo", pr, dry_run=True)
@@ -485,6 +569,7 @@ def test_actions_call_gh_with_expected_arguments(monkeypatch):
     sched.update_branch("owner/repo", pr, dry_run=True)
     sched.dispatch_strix_evidence("owner/repo", "Strix Security Scan", pr, dry_run=True)
     sched.dispatch_opencode_review("owner/repo", "OpenCode Review", pr, dry_run=True)
+    sched.rerun_actions_job("owner/repo", "101", dry_run=True, action="rerun-opencode-review")
     assert calls == []
 
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
@@ -496,13 +581,87 @@ def test_actions_call_gh_with_expected_arguments(monkeypatch):
     sched.dispatch_strix_evidence("owner/repo", "Strix Security Scan", pr, dry_run=False)
     sched.dispatch_opencode_review("owner/repo", "OpenCode Review", pr, dry_run=False)
     assert calls[0][:4] == ["gh", "pr", "merge", "1"]
+    assert "--squash" in calls[0]
     assert calls[0][-2:] == ["--match-head-commit", "head"]
-    assert calls[1] == ["gh", "pr", "merge", "1", "--repo", "owner/repo", "--merge", "--match-head-commit", "head"]
+    assert calls[1] == ["gh", "pr", "merge", "1", "--repo", "owner/repo", "--squash", "--match-head-commit", "head"]
     assert calls[2] == ["gh", "pr", "merge", "1", "--repo", "owner/repo", "--disable-auto"]
     assert calls[3][:4] == ["gh", "api", "-X", "PUT"]
     assert calls[3][-1] == "expected_head_sha=head"
     assert calls[4][:5] == ["gh", "workflow", "run", "Strix Security Scan", "--repo"]
-    assert calls[5][:5] == ["gh", "workflow", "run", "OpenCode Review", "--repo"]
+    assert calls[5][:5] == ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs"]
+    assert calls[6][:5] == ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs"]
+    assert calls[7][:5] == ["gh", "workflow", "run", "OpenCode Review", "--repo"]
+    calls.clear()
+
+    required_workflow_pr = make_pr(
+        statusCheckRollup={
+            "contexts": {
+                "nodes": [
+                    opencode_check(details_url="https://github.com/owner/repo/actions/runs/1/job/101"),
+                    strix_check(details_url="https://github.com/owner/repo/actions/runs/2/job/202"),
+                ]
+            }
+        }
+    )
+    sched.dispatch_opencode_review("owner/repo", "OpenCode Review", required_workflow_pr, dry_run=False)
+    sched.dispatch_strix_evidence("owner/repo", "Strix Security Scan", required_workflow_pr, dry_run=False)
+    assert calls[:2] == [
+        ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs", "-f", "status=queued", "-F", "per_page=100"],
+        ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs", "-f", "status=in_progress", "-F", "per_page=100"],
+    ]
+    assert calls[2:] == [
+        ["gh", "api", "-X", "POST", "repos/owner/repo/actions/jobs/101/rerun"],
+        ["gh", "api", "-X", "POST", "repos/owner/repo/actions/jobs/202/rerun"],
+    ]
+
+
+def test_dispatch_opencode_review_force_cancels_same_pr_old_head_runs(monkeypatch):
+    calls = []
+    stale_same_pr = {
+        "id": 9001,
+        "name": "OpenCode Review",
+        "head_sha": "old",
+        "pull_requests": [{"number": 1}],
+    }
+    current_same_pr = {
+        "id": 9002,
+        "name": "OpenCode Review",
+        "head_sha": "head",
+        "pull_requests": [{"number": 1}],
+    }
+    stale_other_pr = {
+        "id": 9003,
+        "name": "OpenCode Review",
+        "head_sha": "old",
+        "pull_requests": [{"number": 2}],
+    }
+    stale_strix = {
+        "id": 9004,
+        "name": "Strix Security Scan",
+        "head_sha": "old",
+        "pull_requests": [{"number": 1}],
+    }
+
+    def fake_run(args, stdin=None):
+        calls.append(args)
+        if args[:5] == ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs"]:
+            if "status=queued" in args:
+                return json.dumps({"workflow_runs": [stale_same_pr, current_same_pr]})
+            return json.dumps({"workflow_runs": [stale_other_pr, stale_strix]})
+        return ""
+
+    monkeypatch.setattr(sched, "run", fake_run)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GH_TOKEN", "workflow-token")
+
+    sched.dispatch_opencode_review("owner/repo", "OpenCode Review", make_pr(), dry_run=False)
+
+    assert ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs", "-f", "status=queued", "-F", "per_page=100"] in calls
+    assert ["gh", "api", "-X", "POST", "repos/owner/repo/actions/runs/9001/force-cancel"] in calls
+    assert not any("9002/force-cancel" in " ".join(call) for call in calls)
+    assert not any("9003/force-cancel" in " ".join(call) for call in calls)
+    assert not any("9004/force-cancel" in " ".join(call) for call in calls)
+    assert calls[-1][:5] == ["gh", "workflow", "run", "OpenCode Review", "--repo"]
 
 
 def test_mutations_refuse_local_credentials(monkeypatch):
@@ -514,6 +673,17 @@ def test_mutations_refuse_local_credentials(monkeypatch):
     for mutation in (sched.update_branch, sched.enable_auto_merge, sched.merge_pr, sched.disable_auto_merge):
         with pytest.raises(RuntimeError, match="refused outside GitHub Actions"):
             mutation("owner/repo", make_pr(), dry_run=False)
+    rerun_pr = make_pr(
+        statusCheckRollup={
+            "contexts": {
+                "nodes": [
+                    opencode_check(details_url="https://github.com/owner/repo/actions/runs/1/job/101"),
+                ]
+            }
+        }
+    )
+    with pytest.raises(RuntimeError, match="refused outside GitHub Actions"):
+        sched.dispatch_opencode_review("owner/repo", "OpenCode Review", rerun_pr, dry_run=False)
     assert calls == []
 
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
@@ -521,6 +691,8 @@ def test_mutations_refuse_local_credentials(monkeypatch):
     for mutation in (sched.update_branch, sched.enable_auto_merge, sched.merge_pr, sched.disable_auto_merge):
         with pytest.raises(RuntimeError, match="refused without GH_TOKEN"):
             mutation("owner/repo", make_pr(), dry_run=False)
+    with pytest.raises(RuntimeError, match="refused without GH_TOKEN"):
+        sched.dispatch_opencode_review("owner/repo", "OpenCode Review", rerun_pr, dry_run=False)
     assert calls == []
 
 
@@ -834,6 +1006,15 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert same_head_auto_decision.action == "wait"
     assert same_head_auto_decision.reason == "current head is approved; auto-merge already enabled"
     assert disabled == []
+    blocked_auto = make_pr(
+        restMergeableState="blocked",
+        autoMergeRequest={"enabledAt": "now"},
+        reviews={"nodes": [opencode_review("APPROVED", "head")]},
+    )
+    blocked_auto_decision = inspect(blocked_auto)
+    assert blocked_auto_decision.action == "wait"
+    assert "GitHub mergeability is BLOCKED" in blocked_auto_decision.reason
+    assert "rerun the scheduler" in blocked_auto_decision.reason
 
     stale_behind = make_pr(mergeStateStatus="BEHIND", reviews={"nodes": [opencode_review("APPROVED", "old")]})
     dispatched = []
@@ -1128,7 +1309,10 @@ def test_main_keeps_scanning_after_action_error(monkeypatch, capsys):
 def test_scrub_sensitive_data_and_run_error():
     assert sched.scrub_sensitive_data("Authorization: Bearer mytoken123") == "Authorization: Bearer ***"
     assert sched.scrub_sensitive_data("token mytoken123") == "token ***"
-    assert sched.scrub_sensitive_data("ghp_1234567890abcdef") == "***"
+    assert sched.scrub_sensitive_data("ghp_placeholder_token_with_underscores_123") == "***"
+    assert sched.scrub_sensitive_data("gho_installation_token_value") == "***"
+    assert sched.scrub_sensitive_data("ghu_user_token_value") == "***"
+    assert sched.scrub_sensitive_data("ghs_server_token_value") == "***"
     assert sched.scrub_sensitive_data("github_pat_11AAAAA_abcdefg") == "***"
     assert sched.scrub_sensitive_data("No secrets here") == "No secrets here"
     assert sched.scrub_sensitive_data("") == ""
@@ -1185,7 +1369,7 @@ def test_action_error_guidance_distinguishes_update_branch_from_merge():
 
     merge_error = sched.summarize_action_error(
         RuntimeError(
-            "Command failed (1): gh pr merge 7 --auto --merge\n"
+            "Command failed (1): gh pr merge 7 --auto --squash\n"
             "GraphQL: Resource not accessible by integration (mergePullRequest)"
         )
     )
@@ -1209,3 +1393,25 @@ def test_action_error_guidance_distinguishes_update_branch_from_merge():
     )
     assert "PR head likely changed after inspection" in stale_head_error
     assert "reads the new head before mutating" in stale_head_error
+
+def test_parse_conflict_reason_success():
+    """Test parse_conflict_reason with valid complete conflict strings."""
+    assert sched.parse_conflict_reason("merge conflict: DIRTY; base=main,head=feature-branch") == ("DIRTY", "main", "feature-branch")
+    assert sched.parse_conflict_reason("Some prior text. merge conflict: BEHIND; base=develop,head=feat/123") == ("BEHIND", "develop", "feat/123")
+    assert sched.parse_conflict_reason("merge conflict: DIRTY; foo=bar; base=master,head=bugfix; other=stuff") == ("DIRTY", "master", "bugfix")
+
+def test_parse_conflict_reason_no_prefix():
+    """Test parse_conflict_reason returns None when prefix is missing."""
+    assert sched.parse_conflict_reason("no conflict here") is None
+    assert sched.parse_conflict_reason("merge  conflict: space issue") is None
+
+def test_parse_conflict_reason_empty_state():
+    """Test parse_conflict_reason defaults state to UNKNOWN if missing or empty."""
+    assert sched.parse_conflict_reason("merge conflict: ; base=main,head=feature") == ("UNKNOWN", "main", "feature")
+    assert sched.parse_conflict_reason("merge conflict: ") == ("UNKNOWN", "base", "head")
+
+def test_parse_conflict_reason_missing_branches():
+    """Test parse_conflict_reason uses defaults when branch info is missing or malformed."""
+    assert sched.parse_conflict_reason("merge conflict: DIRTY; some other segment") == ("DIRTY", "base", "head")
+    assert sched.parse_conflict_reason("merge conflict: DIRTY; base=,head=something") == ("DIRTY", "base", "something")
+    assert sched.parse_conflict_reason("merge conflict: DIRTY; base=main,head=") == ("DIRTY", "main", "head")
