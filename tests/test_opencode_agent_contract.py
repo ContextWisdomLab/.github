@@ -82,6 +82,14 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "Packaging:" in workflow
     assert '"code-reviewer"' in workflow
     assert '"task": "allow"' in workflow
+    assert 'cat >"$prompt_file" <<EOF' not in workflow
+    assert workflow.count('cat >"$prompt_file" <<\'EOF\'') == 4
+    assert workflow.count("render_opencode_prompt_template.py") == 4
+    assert (
+        'PROMPT_MODEL_CANDIDATE="$model_candidate" '
+        'python3 "$GITHUB_WORKSPACE/scripts/ci/render_opencode_prompt_template.py" '
+        '"$prompt_file"'
+    ) in workflow
 
 
 def test_merge_scheduler_uses_escalating_mutation_credentials():
