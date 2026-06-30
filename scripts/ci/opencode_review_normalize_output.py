@@ -591,9 +591,17 @@ def build_approval_repair_summary(summary: str, evidence_text: str) -> str | Non
         coverage_line = "Coverage: coverage execution evidence proves 100% test coverage for the current head."
         docstring_line = "Docstring coverage: coverage execution evidence proves 100% docstring coverage for the current head."
 
+    language_line = ""
+    if preferred_review_language() == "korean":
+        language_line = (
+            "Review language: 한국어 리뷰 언어 계약을 확인했고, 이 보강 요약은 "
+            "현재 head의 bounded evidence에 근거합니다.\n"
+        )
+
     repair = f"""\
 
 Approval sufficiency: bounded evidence supplied affirmative approval evidence for changed files, coverage/docstring posture, risk surfaces, and current-head verification; approval is not based merely on the absence of known blockers.
+{language_line}\
 Verification posture: CodeGraph evidence was initialized and bounded current-head evidence reviewed for changed-file evidence including {file_list}.
 Linter/static: workflow/static review evidence is bounded by the current-head GitHub Checks gate and changed-file evidence.
 TDD/regression: coverage execution evidence and focused changed hunks were reviewed from bounded-review-evidence.md.
@@ -742,12 +750,15 @@ def valid_control(
         return None
     if contains_non_actionable_failed_check_review(value):
         return None
-    if violates_review_language_contract(value):
+    if result != "APPROVE" and violates_review_language_contract(value):
         return None
     if result == "APPROVE":
         if admits_missing_structural_review(reason, summary):
             return None
         summary = repair_approval_summary(reason, summary)
+        value = {**value, "summary": summary}
+        if violates_review_language_contract(value):
+            return None
         if not mentions_actual_changed_file(reason, summary):
             return None
         if not mentions_verification_posture(reason, summary):

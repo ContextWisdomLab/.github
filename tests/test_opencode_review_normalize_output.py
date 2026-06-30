@@ -879,6 +879,80 @@ M\tscripts/ci/example.py
     assert norm.repair_approval_summary("reason", "summary") == "summary"
 
 
+def test_approval_language_contract_runs_after_evidence_repair(tmp_path, monkeypatch):
+    evidence = tmp_path / "bounded-review-evidence.md"
+    evidence.write_text(
+        """\
+## Review language evidence
+Preferred review language: `Korean`
+## Coverage execution evidence
+- Result: PASS
+- Test coverage: not applicable (no supported changed source files or package manifests)
+- Docstring coverage: not applicable (no supported changed source files or package manifests)
+## Changed files
+
+- .jules/sentinel.md
+- frontend/src/components/EmailDetail.test.tsx
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_APPROVAL_REPAIR_EVIDENCE_FILE", str(evidence))
+
+    reviewed = norm.valid_control(
+        control(
+            reason="Terminology alignment and test coverage improvements",
+            summary=(
+                "Approval sufficiency: Sufficient for terminology alignment. "
+                "Verification posture: Verified test changes. "
+                "Linter/static: No issues. TDD/regression: Tests updated. "
+                "Coverage: Not applicable. Docstring coverage: Not applicable. "
+                "DAG: Not applicable. PoC/execution: Tests pass. "
+                "DDD/domain: Aligned. CDD/context: Matched PR intent. "
+                "Similar issues: None. Claim/concept check: Verified. "
+                "Standards search: N/A. Compatibility/convention: Follows patterns. "
+                "Breaking-change/backcompat: None. Performance: No impact. "
+                "Developer experience: Improved tests. User experience: Consistent terminology. "
+                "Visual/DOM: No visual changes. Accessibility/i18n: Maintained. "
+                "Supply-chain/license: No changes. Packaging: No changes. Security/privacy: No impact."
+            ),
+        ),
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    )
+
+    assert reviewed is not None
+    assert "한국어 리뷰 언어 계약" in reviewed["summary"]
+    assert ".jules/sentinel.md" in reviewed["summary"]
+
+
+def test_request_changes_still_enforces_korean_language_contract(tmp_path, monkeypatch):
+    evidence = tmp_path / "bounded-review-evidence.md"
+    evidence.write_text(
+        """\
+## Review language evidence
+Preferred review language: `Korean`
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_APPROVAL_REPAIR_EVIDENCE_FILE", str(evidence))
+
+    assert (
+        norm.valid_control(
+            control(
+                result="REQUEST_CHANGES",
+                reason="Needs a fix",
+                summary="The review found a bug.",
+                findings=[finding()],
+            ),
+            expected_head_sha="head",
+            expected_run_id="run",
+            expected_run_attempt="attempt",
+        )
+        is None
+    )
+
+
 def test_iter_json_objects_extracts_raw_and_embedded_json():
     assert norm.iter_json_objects('{"a": 1}') == [{"a": 1}]
     assert norm.iter_json_objects('prefix {"b": 2} suffix') == [{"b": 2}]
