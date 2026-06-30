@@ -417,6 +417,7 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" 'repository: ${{ github.event.pull_request.head.repo.full_name || github.event.inputs.target_repository || github.repository }}' "opencode coverage checks out the PR head repository separately from trusted scripts"
 	assert_file_contains "$workflow_file" "Exchange OpenCode app token for target repository review reads" "opencode review can read private target repositories through the OpenCode app token before materializing review data"
 	assert_file_contains "$workflow_file" 'GH_TOKEN: ${{ steps.review_read_app_token.outputs.token || secrets.OPENCODE_APPROVE_TOKEN || github.token }}' "opencode materialization prefers the OpenCode app token for private target repository reads"
+	assert_file_contains "$workflow_file" '[ "${GH_REPOSITORY:-}" != "${GITHUB_REPOSITORY:-}" ]' "opencode approval uses the app token for target-repository check lookup"
 	assert_file_contains "$workflow_file" "path: pr-head" "opencode coverage keeps PR-head data outside the trusted workflow root"
 	assert_file_contains "$workflow_file" 'COVERAGE_SOURCE_WORKDIR: ${{ github.workspace }}/pr-head' "opencode coverage measures the PR-head checkout explicitly"
 	assert_file_not_contains "$workflow_file" "pr_head_ref:" "opencode workflow_dispatch no longer accepts an unused PR head branch input"
