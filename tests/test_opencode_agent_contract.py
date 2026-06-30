@@ -97,3 +97,19 @@ def test_merge_scheduler_uses_escalating_mutation_credentials():
     assert "steps.scheduler_app_token.outputs.token" in workflow
     assert "SCHEDULER_READ_TOKEN: ${{ github.token }}" in workflow
     assert "SCHEDULER_MUTATION_TOKEN_SOURCE" in workflow
+
+
+def test_opencode_runs_merge_scheduler_after_review_without_repo_local_dispatch():
+    """Guard immediate post-review merge/update follow-up from OpenCode."""
+    workflow = Path(".github/workflows/opencode-review.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Run merge scheduler after approval" in workflow
+    assert "python3 scripts/ci/pr_review_merge_scheduler.py" in workflow
+    assert "gh workflow run pr-review-merge-scheduler.yml" not in workflow
+    assert "secrets.PR_REVIEW_MERGE_TOKEN || secrets.OPENCODE_APPROVE_TOKEN || steps.opencode_app_token.outputs.token" in workflow
+    assert "--no-trigger-reviews" in workflow
+    assert "--enable-auto-merge" in workflow
+    assert "--update-branches" in workflow
+    assert "Merge scheduler follow-up skipped after approval because no mutation credential was available" in workflow
