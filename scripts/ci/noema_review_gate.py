@@ -34,6 +34,7 @@ MAX_DIFF_CHARS = 60000
 
 
 def run(args: Sequence[str], *, stdin: str | None = None) -> str:
+    """Run a command without invoking a shell and return stdout."""
     if isinstance(args, str):
         raise TypeError("run() requires argv, not a shell command string")
     completed = subprocess.run(
@@ -52,6 +53,7 @@ def run(args: Sequence[str], *, stdin: str | None = None) -> str:
 
 
 def split_repo(repo: str) -> tuple[str, str]:
+    """Split an owner/name repository string into owner and repository."""
     owner, name = repo.split("/", 1)
     if not owner or not name:
         raise ValueError(f"repo must be owner/name, got {repo!r}")
@@ -59,6 +61,7 @@ def split_repo(repo: str) -> tuple[str, str]:
 
 
 def graphql(query: str, **fields: str | int) -> dict[str, Any]:
+    """Call GitHub GraphQL through gh and return parsed JSON."""
     args = ["gh", "api", "graphql", "-F", "query=@-"]
     for key, value in fields.items():
         args.extend(["-F" if isinstance(value, int) else "-f", f"{key}={value}"])
@@ -114,6 +117,7 @@ query($owner: String!, $name: String!, $number: Int!) {
 
 
 def fetch_pr(repo: str, number: int) -> dict[str, Any]:
+    """Fetch the pull request data required for Noema review gating."""
     owner, name = split_repo(repo)
     data = graphql(PR_QUERY, owner=owner, name=name, number=number)
     pr = data.get("data", {}).get("repository", {}).get("pullRequest")
@@ -123,14 +127,17 @@ def fetch_pr(repo: str, number: int) -> dict[str, Any]:
 
 
 def review_author(review: dict[str, Any]) -> str:
+    """Return the normalized author login from a review node."""
     return ((review.get("author") or {}).get("login") or "").strip()
 
 
 def review_commit(review: dict[str, Any]) -> str:
+    """Return the review commit oid from a review node."""
     return ((review.get("commit") or {}).get("oid") or "").strip()
 
 
 def current_primary_approval(pr: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the current-head OpenCode approval when it matches the contract."""
     head_sha = str(pr.get("headRefOid") or "")
     reviews = (((pr.get("reviews") or {}).get("nodes")) or [])
     for review in reversed(reviews):
@@ -146,6 +153,7 @@ def current_primary_approval(pr: dict[str, Any]) -> dict[str, Any] | None:
 
 
 def has_current_changes_requested(pr: dict[str, Any]) -> bool:
+    """Return whether the current head has any changes-requested review."""
     head_sha = str(pr.get("headRefOid") or "")
     reviews = (((pr.get("reviews") or {}).get("nodes")) or [])
     for review in reversed(reviews):
@@ -155,11 +163,13 @@ def has_current_changes_requested(pr: dict[str, Any]) -> bool:
 
 
 def has_unresolved_threads(pr: dict[str, Any]) -> bool:
+    """Return whether any non-outdated review thread is unresolved."""
     threads = (((pr.get("reviewThreads") or {}).get("nodes")) or [])
     return any(not thread.get("isResolved") and not thread.get("isOutdated") for thread in threads)
 
 
 def check_label(node: dict[str, Any]) -> str:
+    """Return a human-readable label for a status context or check run."""
     if node.get("__typename") == "StatusContext":
         return str(node.get("context") or "")
     workflow = ((((node.get("checkSuite") or {}).get("workflowRun") or {}).get("workflow") or {}).get("name") or "")
@@ -168,6 +178,7 @@ def check_label(node: dict[str, Any]) -> str:
 
 
 def blocking_checks(pr: dict[str, Any]) -> list[str]:
+    """Return check contexts that should block Noema review."""
     contexts = ((((pr.get("statusCheckRollup") or {}).get("contexts") or {}).get("nodes")) or [])
     blockers: list[str] = []
     for node in contexts:
@@ -189,6 +200,7 @@ def blocking_checks(pr: dict[str, Any]) -> list[str]:
 
 
 def existing_noema_review(pr: dict[str, Any], actor: str) -> bool:
+    """Return whether Noema already reviewed the current head."""
     head_sha = str(pr.get("headRefOid") or "")
     marker = "<!-- noema-review-gate"
     for review in (((pr.get("reviews") or {}).get("nodes")) or []):
@@ -202,6 +214,7 @@ def existing_noema_review(pr: dict[str, Any], actor: str) -> bool:
 
 
 def current_actor() -> str:
+    """Return the login for the active gh token, or empty string on failure."""
     try:
         return run(["gh", "api", "user", "--jq", ".login"]).strip()
     except Exception:
@@ -209,6 +222,7 @@ def current_actor() -> str:
 
 
 def fetch_diff(repo: str, number: int) -> tuple[str, bool]:
+    """Fetch the PR diff and truncate it to the bounded LLM prompt size."""
     diff = run(["gh", "api", f"repos/{repo}/pulls/{number}", "-H", "Accept: application/vnd.github.v3.diff"])
     truncated = len(diff) > MAX_DIFF_CHARS
     if truncated:
@@ -217,6 +231,7 @@ def fetch_diff(repo: str, number: int) -> tuple[str, bool]:
 
 
 def extract_json_object(text: str) -> dict[str, Any]:
+    """Extract a JSON object from a strict or lightly wrapped LLM response."""
     stripped = text.strip()
     if stripped.startswith("{"):
         return json.loads(stripped)
@@ -228,6 +243,7 @@ def extract_json_object(text: str) -> dict[str, Any]:
 
 
 def call_llm(repo: str, number: int, pr: dict[str, Any], diff: str, truncated: bool) -> dict[str, Any] | None:
+    """Call the configured OpenAI-compatible LLM endpoint for a review verdict."""
     api_url = os.environ.get("NOEMA_LLM_API_URL", "").strip()
     api_key = os.environ.get("NOEMA_LLM_API_KEY", "").strip()
     model = os.environ.get("NOEMA_LLM_MODEL", "").strip() or "noema-default"
@@ -283,6 +299,7 @@ def call_llm(repo: str, number: int, pr: dict[str, Any], diff: str, truncated: b
 
 
 def format_findings(findings: Any) -> list[str]:
+    """Format bounded LLM findings for a GitHub review body."""
     if not isinstance(findings, list):
         return []
     lines: list[str] = []
@@ -300,6 +317,7 @@ def format_findings(findings: Any) -> list[str]:
 
 
 def submit_review(repo: str, number: int, pr: dict[str, Any], actor: str, verdict: dict[str, Any]) -> None:
+    """Submit the Noema review verdict to the pull request."""
     head_sha = str(pr.get("headRefOid") or "")
     decision = str(verdict.get("decision") or "comment").lower()
     event = "APPROVE" if decision == "approve" else "REQUEST_CHANGES" if decision == "request_changes" else "COMMENT"
@@ -336,6 +354,7 @@ def submit_review(repo: str, number: int, pr: dict[str, Any], actor: str, verdic
 
 
 def inspect_and_review(repo: str, number: int) -> int:
+    """Inspect PR state and submit Noema's LLM review when gates are clean."""
     pr = fetch_pr(repo, number)
     actor = current_actor()
     if actor in PRIMARY_REVIEW_AUTHORS:
@@ -374,6 +393,7 @@ def inspect_and_review(repo: str, number: int) -> int:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    """Parse Noema review gate command-line arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", required=True)
     parser.add_argument("--pr-number", required=True, type=int)
@@ -381,6 +401,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str]) -> int:
+    """Run the Noema review gate command."""
     args = parse_args(argv)
     if args.pr_number <= 0:
         raise SystemExit("--pr-number must be positive")
