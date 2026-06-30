@@ -407,6 +407,8 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" 'install_deps <- c("Depends", "Imports", "LinkingTo")' "opencode R coverage avoids installing oversized suggested dependencies"
 	assert_file_contains "$workflow_file" 'read.dcf("DESCRIPTION")' "opencode R coverage installs target package dependencies from DESCRIPTION"
 	assert_file_contains "$workflow_file" "R package testthat suite" "opencode R package coverage requires package testthat evidence"
+	assert_file_contains "$workflow_file" "R coverage tooling install unavailable in coverage runner; deferring to required peer R CMD check evidence." "opencode R coverage defers runner package-install failures to required peer R checks"
+	assert_file_contains "$workflow_file" "testthat unavailable in coverage runner; deferring to required peer R CMD check evidence." "opencode R package tests defer only when testthat cannot be installed in the coverage runner"
 	assert_file_contains "$workflow_file" "covr package_coverage unavailable after package tests; treating missing-line report as advisory." "opencode R package coverage does not block on covr installation reproduction after tests pass"
 	assert_file_contains "$workflow_file" "R coverage tooling packages unavailable after install" "opencode R coverage verifies covr/testthat are loadable after installation"
 	assert_file_contains "$workflow_file" "repository: ContextualWisdomLab/.github" "opencode required workflow checks out the central source repository"
