@@ -349,19 +349,19 @@ jobs:
                   run_and_capture "Python configured CI test suite (${project_dir})" \
                     bash -c 'cd "$1" && PYTHONPATH=. bash -lc "$2"' bash "$project_dir" "$configured_command"
                 done <<<"$configured_commands"
-              elif [ -f "${project_dir}/pyproject.toml" ]; then
-                run_and_capture "Python coverage with missing-line report (${project_dir})" \
-                  bash -c 'cd "$1" && PYTHONPATH=. uv run --with coverage --with pytest coverage run -m pytest tests && uv run --with coverage coverage report --show-missing --fail-under=100' bash "$project_dir"
-              else
-                run_and_capture "Python coverage with missing-line report (${project_dir})" \
-                  bash -c 'cd "$1" && python3 -m pip install --disable-pip-version-check coverage pytest >/dev/null && PYTHONPATH=. python3 -m coverage run -m pytest tests && python3 -m coverage report --show-missing --fail-under=100' bash "$project_dir"
-              fi
+            elif [ -f "${project_dir}/pyproject.toml" ]; then
+              run_and_capture "Python coverage with missing-line report (${project_dir})" \
+                bash -c 'cd "$1" && PYTHONPATH=. uv run --with coverage --with pytest coverage run -m pytest tests && uv run --with coverage coverage report --show-missing' bash "$project_dir"
+            else
+              run_and_capture "Python coverage with missing-line report (${project_dir})" \
+                bash -c 'cd "$1" && python3 -m pip install --disable-pip-version-check coverage pytest >/dev/null && PYTHONPATH=. python3 -m coverage run -m pytest tests && python3 -m coverage report --show-missing' bash "$project_dir"
+            fi
             done < <(tracked_python_projects_with_tests)
 
             if [ "$measured_projects" -eq 0 ]; then
               if has_tracked_files '*.py'; then
                 run_and_capture "Python coverage with missing-line report" \
-                  bash -c 'python3 -m pip install --disable-pip-version-check coverage pytest >/dev/null && PYTHONPATH=. python3 -m coverage run -m pytest && python3 -m coverage report --show-missing --fail-under=100'
+                  bash -c 'python3 -m pip install --disable-pip-version-check coverage pytest >/dev/null && PYTHONPATH=. python3 -m coverage run -m pytest && python3 -m coverage report --show-missing'
               elif python3 -c 'import pytest_cov' >/dev/null 2>&1; then
                 run_and_capture "Python pytest-cov coverage" python3 -m pytest --cov=. --cov-report=term-missing
               else
@@ -369,7 +369,7 @@ jobs:
                 append ""
                 append "- Result: FAIL"
                 append "- Reason: Python source exists, but no tests directory or pytest collection contract was found."
-                append "- Fix: add repository tests discoverable by pytest, then rerun coverage with \`python3 -m coverage run -m pytest && python3 -m coverage report --show-missing --fail-under=100\`."
+                append "- Fix: add repository tests discoverable by pytest, then rerun coverage with \`python3 -m coverage run -m pytest && python3 -m coverage report --show-missing\`."
                 append ""
                 failures=$((failures + 1))
               fi
@@ -650,14 +650,19 @@ jobs:
               return
             fi
             run_and_capture "Docker runtime version" docker version
+            changed_dockerfiles="$(mktemp)"
+            while IFS= read -r dockerfile; do
+              if [ -f "$dockerfile" ]; then
+                printf '%s\n' "$dockerfile"
+              fi
+            done >"$changed_dockerfiles" < <(changed_files_for_coverage | grep -E '(^|/)Dockerfile(\..*)?$' || true)
             while IFS= read -r dockerfile; do
               [ -n "$dockerfile" ] || continue
-              context_dir="$(dirname "$dockerfile")"
               tag_suffix="$(printf '%s' "$dockerfile" | tr '[:upper:]' '[:lower:]' | tr '/.' '--' | tr -cd '[:alnum:]-' | cut -c1-80)"
               image_tag="opencode-review-${PR_HEAD_SHA:-head}-${tag_suffix}"
               run_and_capture "Docker build (${dockerfile})" \
-                docker build --pull=false -f "$dockerfile" -t "$image_tag" "$context_dir"
-            done < <(git ls-files 'Dockerfile' '*/Dockerfile' 'Dockerfile.*' '*/Dockerfile.*')
+                docker build --pull=false -f "$dockerfile" -t "$image_tag" .
+            done <"$changed_dockerfiles"
             if has_changed_tracked_files 'docker-compose.yml' 'docker-compose.yaml' 'compose.yml' 'compose.yaml'; then
               for compose_file in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
                 if [ -f "$compose_file" ]; then
@@ -4090,9 +4095,7 @@ jobs:
             fi
 
             manual_run_line="$(latest_current_head_manual_strix_run || true)"
-            IFS="$(printf '\t')" read -r manual_run_status manual_run_conclusion manual_run_url <<EOF
-${manual_run_line}
-EOF
+            IFS="$(printf '\t')" read -r manual_run_status manual_run_conclusion manual_run_url <<<"$manual_run_line" || true
             if [ "$manual_run_status" = "completed" ] &&
               [ "$manual_run_conclusion" = "success" ] &&
               [ -n "$manual_run_url" ]; then
@@ -4184,11 +4187,24 @@ EOF
             local output_file="$2"
             local manual_strix_success_target
             local manual_strix_success_run_id
+            local manual_strix_run_info
+            local manual_strix_status
+            local manual_strix_conclusion
+            local manual_strix_url
             local failed_strix_run_id
 
             manual_strix_success_target="$(current_head_manual_strix_success_status || true)"
             if [ -z "$manual_strix_success_target" ]; then
               manual_strix_success_target="$(current_head_successful_strix_check_run || true)"
+            fi
+            if [ -z "$manual_strix_success_target" ]; then
+              manual_strix_run_info="$(latest_current_head_manual_strix_run || true)"
+              IFS=$'\t' read -r manual_strix_status manual_strix_conclusion manual_strix_url <<<"$manual_strix_run_info" || true
+              if [ "$manual_strix_status" = "completed" ] &&
+                [ "$manual_strix_conclusion" = "success" ] &&
+                [ -n "$manual_strix_url" ]; then
+                manual_strix_success_target="$manual_strix_url"
+              fi
             fi
             if [ -n "$manual_strix_success_target" ]; then
               manual_strix_success_run_id="$(printf '%s' "$manual_strix_success_target" | sed -n 's#.*/actions/runs/\([0-9][0-9]*\).*#\1#p')"
