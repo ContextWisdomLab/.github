@@ -275,14 +275,14 @@ def test_fix_inspect_skip_wait_and_error_paths(monkeypatch):
     pr1 = make_pr(number=1)
     pr2 = make_pr(number=2)
     monkeypatch.setattr(fix, "fetch_open_prs", lambda repo, max_prs: [pr1, pr2])
-    monkeypatch.setattr(fix, "inspect_pr", lambda repo, pr, args: ("dispatch", ("reason",)))
+    monkeypatch.setattr(fix, "inspect_pr", lambda repo, pr, args, **kwargs: ("dispatch", ("reason",)))
     payload_lines = []
     monkeypatch.setattr("builtins.print", lambda *parts, **kwargs: payload_lines.append(" ".join(map(str, parts))))
     assert fix.process_queue(args) == 0
     assert "autofix dispatch limit reached" in payload_lines[-1]
 
     monkeypatch.setattr(fix, "fetch_pr", lambda repo, number: [make_pr(number=number)])
-    monkeypatch.setattr(fix, "inspect_pr", lambda repo, pr, args: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(fix, "inspect_pr", lambda repo, pr, args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
     args = fix.parse_args(["--repo", "owner/repo", "--base-branch", "main", "--pr-number", "3"])
     payload_lines.clear()
     assert fix.process_queue(args) == 0
