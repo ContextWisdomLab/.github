@@ -81,13 +81,19 @@ jobs:
         id: secondary_app_token
         env:
           OIDC_AUDIENCE: ${{ vars.SECONDARY_REVIEW_OIDC_AUDIENCE || 'secondary-review-github-action' }}
-          TOKEN_EXCHANGE_URL: ${{ vars.SECONDARY_REVIEW_TOKEN_EXCHANGE_URL || 'https://api.opencode.ai/exchange_secondary_review_github_app_token' }}
+          TOKEN_EXCHANGE_URL: ${{ vars.SECONDARY_REVIEW_TOKEN_EXCHANGE_URL || '' }}
         run: |
           set -euo pipefail
 
           mark_unavailable() {
             echo "available=false" >>"$GITHUB_OUTPUT"
           }
+
+          if [ -z "${TOKEN_EXCHANGE_URL:-}" ]; then
+            echo "Secondary review app token exchange unavailable: SECONDARY_REVIEW_TOKEN_EXCHANGE_URL is not configured."
+            mark_unavailable
+            exit 0
+          fi
 
           if [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
             echo "Secondary review app token exchange unavailable: OIDC request environment is missing."

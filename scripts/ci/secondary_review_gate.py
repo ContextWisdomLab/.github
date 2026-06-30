@@ -240,6 +240,12 @@ def approve(repo: str, number: int, pr: dict[str, Any], actor: str) -> None:
 def inspect_and_approve(repo: str, number: int) -> int:
     pr = fetch_pr(repo, number)
     actor = current_actor()
+    if actor in PRIMARY_REVIEW_AUTHORS:
+        print(
+            f"Current token actor {actor!r} is already a primary review actor; "
+            "secondary approval skipped so GitHub receives an independent reviewer."
+        )
+        return 0
     if pr.get("isDraft"):
         print("PR is draft; secondary approval skipped.")
         return 0
