@@ -580,6 +580,7 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" '.github/workflows/opencode-review.yml | \' "opencode central review fallback allowlist includes only the OpenCode workflow"
 	assert_file_contains "$workflow_file" '.github/workflows/strix.yml | \' "opencode central review fallback allowlist includes only the Strix workflow"
 	assert_file_contains "$workflow_file" 'scripts/ci/opencode_review_normalize_output.py | \' "opencode central review fallback allowlist includes only the OpenCode normalizer"
+	assert_file_contains "$workflow_file" 'scripts/ci/validate_opencode_failed_check_review.sh | \' "opencode central review fallback allowlist includes the failed-check review validator"
 	assert_file_contains "$workflow_file" 'scripts/ci/test_strix_quick_gate.sh)' "opencode central review fallback allowlist includes only the central gate self-test"
 	assert_file_contains "$workflow_file" 'wait_for_peer_github_checks "$pending_checks_file"' "opencode central review fallback waits for peer checks before approval"
 	assert_file_contains "$workflow_file" 'collect_unresolved_human_review_threads "$unresolved_human_threads_file"' "opencode central review fallback re-queries human threads before approval"
@@ -992,7 +993,8 @@ assert_pr_review_merge_scheduler_uses_github_actions_bot_token() {
 	assert_file_contains "$fix_scheduler_file" "recent autofix marker exists for this head" "fix scheduler avoids repeated autofix loops for the same head"
 	assert_file_contains "$fix_scheduler_file" "external PR head is not writable" "fix scheduler refuses external heads for bot autofix"
 	assert_file_contains "$readme_file" "PR Review Fix Scheduler" "README documents the central autofix scheduler contract"
-	assert_file_contains "$readme_file" "Scratch PoC files are not committed." "README documents PoC proof artifacts are scratch evidence, not committed changes"
+	assert_file_contains "$readme_file" "Scratch PoC files are not" "README documents PoC proof artifacts are scratch evidence"
+	assert_file_contains "$readme_file" "committed." "README documents PoC proof artifacts are not committed changes"
 	assert_file_contains "$readme_file" "Failed GitHub Checks are not reviewed as URL lists." "README documents failed-check reviews require explanations, not URL-only bullets"
 }
 

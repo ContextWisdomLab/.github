@@ -10,7 +10,3 @@
 **Vulnerability:** Information Disclosure / Command Injection
 **Learning:** `subprocess.run` defaults to `shell=False`, but linters like Bandit require explicit `shell=False` to pass security checks. Furthermore, logging `process.stderr` or command arguments in CI tools can leak sensitive data (e.g., GitHub tokens or API keys passed to commands) if a command fails and dumps the context.
 **Prevention:** Always explicitly define `shell=False` when using `subprocess.run()`. Scrub secrets from both arguments and `stderr` before including them in error messages within CI scripts.
-## 2026-06-25 - Restore Shell Options After Case-Insensitive Matching
-**Vulnerability:** Shell Option State Leakage / Unsafe Command Execution
-**Learning:** `shopt nocasematch` can leak case-insensitive matching state into later checks when scripts enable it inside helpers without restoring the previous setting. Avoid `eval` for shell option restoration.
-**Prevention:** Save the previous `nocasematch` state with `shopt -q`, use a normal conditional to restore it, and return explicit status codes from helpers that run under `set -e`.

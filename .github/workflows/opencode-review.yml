@@ -1819,6 +1819,7 @@ jobs:
                 .github/workflows/opencode-review.yml | \
                 .github/workflows/strix.yml | \
                 scripts/ci/opencode_review_normalize_output.py | \
+                scripts/ci/validate_opencode_failed_check_review.sh | \
                 scripts/ci/test_strix_quick_gate.sh)
                   ;;
                 *)
@@ -4514,6 +4515,7 @@ jobs:
                 .github/workflows/strix.yml | \
                 PR_GOVERNANCE_AUDIT.md | \
                 scripts/ci/opencode_review_normalize_output.py | \
+                scripts/ci/validate_opencode_failed_check_review.sh | \
                 scripts/ci/test_strix_quick_gate.sh)
                   ;;
                 *)
