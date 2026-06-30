@@ -926,6 +926,33 @@ Preferred review language: `Korean`
     assert ".jules/sentinel.md" in reviewed["summary"]
 
 
+def test_request_changes_still_enforces_korean_language_contract(tmp_path, monkeypatch):
+    evidence = tmp_path / "bounded-review-evidence.md"
+    evidence.write_text(
+        """\
+## Review language evidence
+Preferred review language: `Korean`
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_APPROVAL_REPAIR_EVIDENCE_FILE", str(evidence))
+
+    assert (
+        norm.valid_control(
+            control(
+                result="REQUEST_CHANGES",
+                reason="Needs a fix",
+                summary="The review found a bug.",
+                findings=[finding()],
+            ),
+            expected_head_sha="head",
+            expected_run_id="run",
+            expected_run_attempt="attempt",
+        )
+        is None
+    )
+
+
 def test_iter_json_objects_extracts_raw_and_embedded_json():
     assert norm.iter_json_objects('{"a": 1}') == [{"a": 1}]
     assert norm.iter_json_objects('prefix {"b": 2} suffix') == [{"b": 2}]
