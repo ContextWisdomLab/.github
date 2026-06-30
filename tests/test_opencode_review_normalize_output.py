@@ -4,6 +4,7 @@ from scripts.ci import opencode_review_normalize_output as norm
 
 
 FULL_SUMMARY = """\
+Approval sufficiency: affirmative evidence supported approval beyond the absence of blockers.
 Verification posture: CodeGraph inspected scripts/ci/example.py on the current head.
 Linter/static: actionlint and bash -n passed.
 TDD/regression: pytest covered the changed behavior.
@@ -20,7 +21,11 @@ Compatibility/convention: compatibility and naming conventions were checked.
 Breaking-change/backcompat: no breaking change was found.
 Performance: performance risk was checked.
 Developer experience: developer workflow impact was checked.
-User experience: user-facing behavior impact was checked.
+User experience: user, operator, API, CLI, docs, status-check, and workflow-reader impact was checked.
+Visual/DOM: no web UI surface was present, so non-web interaction evidence was checked instead.
+Accessibility/i18n: accessibility and localization impact was checked.
+Supply-chain/license: supply-chain and license risk was checked.
+Packaging: package and build contracts were checked.
 Security/privacy: security impact was checked.
 """
 
@@ -123,6 +128,20 @@ def test_actual_changed_file_detection_prefers_current_head_file_list(tmp_path, 
     monkeypatch.setenv("OPENCODE_CHANGED_FILES_FILE", str(tmp_path / "missing.txt"))
     assert norm.current_changed_files() == set()
     assert norm.mentions_actual_changed_file("scripts/ci/example.py", "")
+
+
+def test_preferred_review_language_handles_unreadable_and_unknown_evidence(tmp_path, monkeypatch):
+    evidence = tmp_path / "evidence.md"
+    evidence.write_text(
+        "## Review language evidence\nPreferred review language: `Spanish`\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_APPROVAL_REPAIR_EVIDENCE_FILE", str(evidence))
+
+    assert norm.preferred_review_language() is None
+
+    monkeypatch.setattr(norm, "read_text_lossy", lambda _path: None)
+    assert norm.preferred_review_language() is None
 
 
 def test_changed_file_kind_contradictions_are_rejected(tmp_path, monkeypatch):
@@ -261,6 +280,14 @@ def test_check_structural_approval_rejects_invalid_or_unsafe_approvals(tmp_path,
         control(reason="No source path", summary=FULL_SUMMARY.replace("scripts/ci/example.py", "source file")),
         control(summary="scripts/ci/example.py\nCoverage: coverage execution evidence proves 100%."),
         control(summary=FULL_SUMMARY.replace("100%", "99%", 1)),
+        control(
+            reason="scripts/ci/example.py checked.",
+            summary=(
+                FULL_SUMMARY
+                + "\nOpenCode model attempts did not emit a usable current-head control block, "
+                "so the approval gate used deterministic current-head evidence instead of model prose."
+            ),
+        ),
     ]
     for index, value in enumerate(cases):
         path = tmp_path / f"case-{index}.json"
@@ -324,6 +351,19 @@ def test_valid_control_filters_shape_head_and_review_contract():
     ) is None
     assert norm.valid_control(control(summary="scripts/ci/example.py"), **kwargs) is None
     assert norm.valid_control(control(summary=FULL_SUMMARY.replace("100%", "99%", 1)), **kwargs) is None
+    assert (
+        norm.valid_control(
+            control(
+                summary=(
+                    FULL_SUMMARY
+                    + "\nModel outcomes: primary=failed, fallback=failed, "
+                    "second_fallback=failed, catalog_fallback=failed."
+                )
+            ),
+            **kwargs,
+        )
+        is None
+    )
 
     request = control(result="REQUEST_CHANGES", findings=[finding()])
     assert norm.valid_control(dict(request, findings=["bad"]), **kwargs) is None
@@ -778,6 +818,39 @@ def test_main_normalizes_valid_output_and_reports_failures(tmp_path, capsys):
     )
     assert norm.main(["prog", "--check-structural-approval", str(generic_failed_check)]) == 4
     assert "non-actionable failed-check deflection" in capsys.readouterr().err
+
+
+def test_review_language_contract_rejects_english_only_korean_pr(tmp_path, monkeypatch, capsys):
+    evidence = tmp_path / "bounded-review-evidence.md"
+    evidence.write_text(
+        "## Review language evidence\n\n- Preferred review language: `Korean`\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_EVIDENCE_FILE", str(evidence))
+
+    assert norm.valid_control(
+        control(),
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    ) is None
+
+    korean_control = control(
+        reason="scripts/ci/example.py 검토 완료.",
+        summary=FULL_SUMMARY + "\n한국어 리뷰 문체를 유지했습니다.",
+    )
+    assert norm.valid_control(
+        korean_control,
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    ) is not None
+
+    approval = tmp_path / "approval.json"
+    approval.write_text(json.dumps(control()), encoding="utf-8")
+    assert norm.main(["prog", "--check-structural-approval", str(approval)]) == 4
+    assert "preferred PR language" in capsys.readouterr().err
+
 
 def test_main_normalizes_and_escapes_html_markers(tmp_path):
     output = tmp_path / "opencode.txt"

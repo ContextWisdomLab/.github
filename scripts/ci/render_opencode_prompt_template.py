@@ -18,6 +18,7 @@ def placeholder_values(environ: Mapping[str, str]) -> dict[str, str]:
         "${HEAD_SHA}": environ.get("HEAD_SHA", ""),
         "${RUN_ID}": environ.get("RUN_ID", ""),
         "${RUN_ATTEMPT}": environ.get("RUN_ATTEMPT", ""),
+        "${OPENCODE_REVIEW_INTRO}": environ.get("OPENCODE_REVIEW_INTRO", ""),
         "${model_candidate}": environ.get("PROMPT_MODEL_CANDIDATE", ""),
     }
 

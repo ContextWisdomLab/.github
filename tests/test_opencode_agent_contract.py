@@ -29,12 +29,27 @@ def test_code_reviewer_subagent_contract_is_configured():
     assert permission["lsp"] == "deny"
 
     for primary_agent in ("ci-review", "ci-review-fallback"):
+        assert agents[primary_agent]["reasoningEffort"] == "high"
         permission = agents[primary_agent]["permission"]
         assert permission["bash"] == "allow"
         assert permission["task"] == "allow"
         assert permission["webfetch"] == "allow"
         assert permission["websearch"] == "allow"
         assert permission["lsp"] == "allow"
+
+    models = config["provider"]["github-models"]["models"]
+    high_reasoning_models = {
+        "openai/gpt-5",
+        "openai/gpt-5-chat",
+        "openai/gpt-5-mini",
+        "deepseek/deepseek-r1-0528",
+        "openai/o3",
+        "openai/o3-mini",
+        "openai/o4-mini",
+    }
+    for model_name in high_reasoning_models:
+        assert models[model_name]["reasoning"] is True
+        assert models[model_name]["options"]["reasoningEffort"] == "high"
 
 
 def test_code_reviewer_prompt_preserves_review_only_policy():
@@ -50,6 +65,11 @@ def test_code_reviewer_prompt_preserves_review_only_policy():
     assert "P1" in prompt
     assert "Execution evidence must be sandboxed" in prompt
     assert "mktemp -d" in prompt
+    assert "Docker, Docker Compose, devcontainer, Nix" in prompt
+    assert "single happy-path test is not sufficient" in prompt
+    assert "object naming and reserved-word safety" in prompt
+    assert "connected code" in prompt
+    assert "cannot be sandboxed safely" not in prompt
     assert "scripts/ci/sandboxed_verify.py" in prompt
     assert "--allow-env NAME" in prompt
     assert "--network required" in prompt
@@ -59,6 +79,9 @@ def test_code_reviewer_prompt_preserves_review_only_policy():
     assert "code-reviewer" in ci_prompt
     assert "Execution evidence must be sandboxed" in ci_prompt
     assert "SANDBOXED_VERIFY_RESULT" in ci_prompt
+    assert "Docker, Docker Compose, devcontainer, Nix" in ci_prompt
+    assert "single happy-path test is not sufficient" in ci_prompt
+    assert "object naming and reserved-word safety" in ci_prompt
     assert "opencode-review-control-v1" in ci_prompt
 
 
@@ -74,6 +97,11 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "review_execution_contracts.py" in workflow
     assert "SANDBOXED_VERIFY_RESULT" in workflow
     assert "SANDBOXED_WEB_E2E_RESULT" in workflow
+    assert "Docker Compose, devcontainer, Nix, or temporary package-install sandbox" in workflow
+    assert "scientific, statistical, simulation" in workflow
+    assert "skewed true" in workflow
+    assert "object naming" in workflow
+    assert "connected code paths, rendering paths" in workflow
     assert "CHECK_LOOKUP_GH_TOKEN" in workflow
     assert "retrying with workflow github token" in workflow
     assert "Review execution contracts" in workflow
@@ -81,15 +109,28 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "Supply-chain/license:" in workflow
     assert "Packaging:" in workflow
     assert '"code-reviewer"' in workflow
+    assert workflow.count('"reasoningEffort": "high"') >= 10
     assert '"task": "allow"' in workflow
     assert 'cat >"$prompt_file" <<EOF' not in workflow
-    assert workflow.count('cat >"$prompt_file" <<\'EOF\'') == 4
-    assert workflow.count("render_opencode_prompt_template.py") == 4
-    assert (
-        'PROMPT_MODEL_CANDIDATE="$model_candidate" '
-        'python3 "$GITHUB_WORKSPACE/scripts/ci/render_opencode_prompt_template.py" '
-        '"$prompt_file"'
-    ) in workflow
+    assert 'cat >"$prompt_file" <<\'EOF\'' not in workflow
+    assert "Run OpenCode PR Review model pool" in workflow
+    assert "opencode_review_model_pool" in workflow
+    assert "run_opencode_review_model_pool.sh" in workflow
+    assert "OPENCODE_MODEL_CANDIDATES" in workflow
+    assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "19800"' in workflow
+    assert "${{ runner.temp }}/opencode-review-model-pool.md" in workflow
+
+    prompt_template = Path("scripts/ci/opencode_review_prompt_template.md").read_text(encoding="utf-8")
+    assert "${OPENCODE_REVIEW_INTRO}" in prompt_template
+    assert "CodeGraph MCP is mandatory" in prompt_template
+    assert "Context7" in prompt_template
+    assert "web_search" in prompt_template
+    assert "Playwright visual" in prompt_template
+    assert "balanced and skewed parameters" in prompt_template
+    assert "Docker, Docker Compose, devcontainer, Nix" in prompt_template
+    assert "naming and reserved-word" in prompt_template
+    assert "connected code paths" in prompt_template
+    assert "Korean PRs must receive Korean" in prompt_template
 
 
 def test_merge_scheduler_uses_escalating_mutation_credentials():

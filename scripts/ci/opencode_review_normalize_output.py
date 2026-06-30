@@ -78,6 +78,19 @@ NON_ACTIONABLE_FAILED_CHECK_REVIEW_PHRASES = (
     "map each failed check to exact local source lines",
 )
 
+MODEL_FAILURE_APPROVAL_PHRASES = (
+    "model attempts did not emit a usable current-head control block",
+    "all configured opencode model attempts failed",
+    "all configured model attempts failed",
+    "deterministic fallback approval",
+    "deterministic current-head evidence instead of model prose",
+    "model-output instability",
+    "model output instability",
+    "primary=failed",
+    "fallback=failed",
+    "catalog_fallback=failed",
+)
+
 CHANGED_FILE_EVIDENCE_PATTERN = re.compile(
     r"(?<![A-Za-z0-9_])(?:[A-Za-z0-9_.-]+/){1,64}(?:[A-Za-z0-9_.@+-]+\."
     r"(?:py|js|jsx|ts|tsx|mjs|cjs|sh|bash|yml|yaml|json|jsonc|toml|lock|md|txt|css|scss|html|sql|go|rs|java|kt|swift|rb|php|cs|xml|ini|cfg)"
@@ -89,6 +102,7 @@ CHANGED_FILE_EVIDENCE_PATTERN = re.compile(
 )
 
 APPROVAL_VERIFICATION_LABELS = (
+    "approval sufficiency:",
     "verification posture:",
     "linter/static:",
     "tdd/regression:",
@@ -106,6 +120,10 @@ APPROVAL_VERIFICATION_LABELS = (
     "performance:",
     "developer experience:",
     "user experience:",
+    "visual/dom:",
+    "accessibility/i18n:",
+    "supply-chain/license:",
+    "packaging:",
     "security/privacy:",
 )
 
@@ -194,6 +212,11 @@ EVIDENCE_REPAIR_ENV_VARS = (
     "OPENCODE_EVIDENCE_FILE",
 )
 
+HANGUL_RE = re.compile(r"[가-힣]")
+PREFERRED_REVIEW_LANGUAGE_RE = re.compile(
+    r"Preferred review language:\s*`?([A-Za-z]+)`?", re.IGNORECASE
+)
+
 
 def admits_missing_structural_review(reason: str, summary: str) -> bool:
     """Return whether an approval admits it did not inspect required structure."""
@@ -223,6 +246,32 @@ def control_review_text(value: dict[str, Any]) -> str:
     return "\n".join(chunks)
 
 
+def preferred_review_language() -> str | None:
+    """Return the bounded-evidence review language contract, when present."""
+    evidence_file = approval_repair_evidence_file()
+    if evidence_file is None:
+        return None
+    evidence_text = read_text_lossy(evidence_file)
+    if evidence_text is None:
+        return None
+    section = section_between_markers(evidence_text, "Review language evidence")
+    match = PREFERRED_REVIEW_LANGUAGE_RE.search(section)
+    if not match:
+        return None
+    language = match.group(1).strip().casefold()
+    if language in {"korean", "english"}:
+        return language
+    return None
+
+
+def violates_review_language_contract(value: dict[str, Any]) -> bool:
+    """Return whether review prose ignores the preferred PR language."""
+    language = preferred_review_language()
+    if language != "korean":
+        return False
+    return not HANGUL_RE.search(control_review_text(value))
+
+
 def contains_non_actionable_failed_check_review(value: dict[str, Any]) -> bool:
     """Return whether a review punts failed-check diagnosis back to the reader."""
     return bool(non_actionable_failed_check_review_phrase(value))
@@ -232,6 +281,12 @@ def non_actionable_failed_check_review_phrase(value: dict[str, Any]) -> str:
     """Return the failed-check deflection phrase found in the review, if any."""
     combined = control_review_text(value).casefold()
     return next((phrase for phrase in NON_ACTIONABLE_FAILED_CHECK_REVIEW_PHRASES if phrase in combined), "")
+
+
+def model_failure_approval_phrase(reason: str, summary: str) -> str:
+    """Return the model-failure approval phrase found in approval prose, if any."""
+    combined = f"{reason}\n{summary}".casefold()
+    return next((phrase for phrase in MODEL_FAILURE_APPROVAL_PHRASES if phrase in combined), "")
 
 
 def mentions_changed_file_evidence(reason: str, summary: str) -> bool:
@@ -499,23 +554,28 @@ def build_approval_repair_summary(summary: str, evidence_text: str) -> str | Non
 
     repair = f"""\
 
+Approval sufficiency: bounded evidence supplied affirmative approval evidence for changed files, coverage/docstring posture, risk surfaces, and current-head verification; approval is not based merely on the absence of known blockers.
 Verification posture: CodeGraph evidence was initialized and bounded current-head evidence reviewed for changed-file evidence including {file_list}.
 Linter/static: workflow/static review evidence is bounded by the current-head GitHub Checks gate and changed-file evidence.
 TDD/regression: coverage execution evidence and focused changed hunks were reviewed from bounded-review-evidence.md.
 {coverage_line}
 {docstring_line}
-DAG: Change Flow DAG maps {first_file} through bounded evidence, review risk, and required checks.
+DAG: CodeGraph/source-backed behavior map connects {first_file} to the affected review, runtime, or workflow path and required checks.
 PoC/execution: coverage-evidence job executed on the current head and reported PASS.
 DDD/domain: workflow and repository-governance invariants were reviewed against changed files in bounded evidence.
 CDD/context: CodeGraph evidence, changed-file history, and focused hunks were reviewed from bounded-review-evidence.md.
 Similar issues: changed-file history evidence was reviewed for comparable local precedents.
-Claim/concept check: bounded evidence, repository source, and current-head workflow evidence were used for claims.
+Claim/concept check: bounded evidence, repository source, current-head workflow evidence, and, where numeric, scientific, statistical, or literature-backed claims are affected, original-paper/formula evidence and parameter-recovery expectations were used for claims.
 Standards search: standards and external-source checks are delegated to configured OpenCode web_search/Context7/DeepWiki sources when applicable; no evidence-backed standards blocker is present in bounded evidence.
-Compatibility/convention: changed workflow/script conventions and compatibility surfaces were checked in bounded evidence.
+Compatibility/convention: changed workflow/script conventions, object naming, and reserved-word safety for schema/API/config/code surfaces were checked in bounded evidence.
 Breaking-change/backcompat: deployment evidence and changed-file history were checked for backward-compatibility risk.
 Performance: changed surfaces were checked for performance risk in bounded evidence.
-Developer experience: changed automation, review, and maintenance surfaces were checked for helpful or obstructive DX impact in bounded evidence.
-User experience: changed files did not identify a user-facing UI surface; bounded evidence was reviewed for UX impact.
+Developer experience: changed automation, review, test, setup, and maintenance surfaces were checked for helpful or obstructive DX impact in bounded evidence.
+User experience: connected user, operator, API, CLI, documentation, review-comment, status-check, rendering, and workflow-reader behavior was checked for contradictions against code, docs, and tests in bounded evidence.
+Visual/DOM: Playwright visual, DOM locator, ARIA snapshot, console, and responsive evidence were checked when a web UI surface was present; for non-web surfaces, API/CLI/log/docs/workflow interaction evidence was reviewed instead.
+Accessibility/i18n: accessibility, localization, and human-readable text surfaces were checked where UI, CLI, API message, docs, logs, or review text changed.
+Supply-chain/license: dependency, package, model, container, and external-tool changes were checked in bounded evidence.
+Packaging: package, build, test, lint, and security contracts were checked in bounded evidence.
 Security/privacy: workflow-token, review-gate, and repository-automation security/privacy boundaries were checked in bounded evidence.
 """
     return f"{summary.rstrip()}\n{repair}"
@@ -585,10 +645,19 @@ def check_structural_approval(control_file: Path) -> int:
         str(value.get("summary", "")),
     ):
         return reject("approval contradicts changed file kinds")
+    if value.get("result") == "APPROVE":
+        phrase = model_failure_approval_phrase(
+            str(value.get("reason", "")),
+            str(value.get("summary", "")),
+        )
+        if phrase:
+            return reject(f"approval depends on failed model output: {phrase}")
     # Generic failed-check deflections are invalid for both approvals and request-changes.
     phrase = non_actionable_failed_check_review_phrase(value)
     if phrase:
         return reject(f"non-actionable failed-check deflection: {phrase}")
+    if violates_review_language_contract(value):
+        return reject("review prose does not follow the preferred PR language")
 
     return 0
 
@@ -633,6 +702,8 @@ def valid_control(
         return None
     if contains_non_actionable_failed_check_review(value):
         return None
+    if violates_review_language_contract(value):
+        return None
     if result == "APPROVE":
         if admits_missing_structural_review(reason, summary):
             return None
@@ -644,6 +715,8 @@ def valid_control(
         if not mentions_full_coverage(reason, summary):
             return None
         if contradicts_changed_file_kinds(reason, summary):
+            return None
+        if model_failure_approval_phrase(reason, summary):
             return None
 
     required_finding_fields = (
