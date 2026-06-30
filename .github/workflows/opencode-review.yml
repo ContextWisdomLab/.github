@@ -640,9 +640,9 @@ jobs:
             run_and_capture "Docker runtime version" docker version
             while IFS= read -r dockerfile; do
               [ -n "$dockerfile" ] || continue
-              context_dir="$(dirname "$dockerfile")"
-              [ "$context_dir" = "." ] || [ -n "$context_dir" ] || context_dir="."
-              image_tag="opencode-review-${PR_HEAD_SHA:-head}-$(printf '%s' "$dockerfile" | tr '/.' '--' | tr -cd '[:alnum:]-' | cut -c1-80)"
+              context_dir="."
+              tag_suffix="$(printf '%s' "$dockerfile" | tr '[:upper:]' '[:lower:]' | tr '/.' '--' | tr -cd '[:alnum:]-' | cut -c1-80)"
+              image_tag="opencode-review-${PR_HEAD_SHA:-head}-${tag_suffix}"
               run_and_capture "Docker build (${dockerfile})" \
                 docker build --pull=false -f "$dockerfile" -t "$image_tag" "$context_dir"
             done < <(git ls-files 'Dockerfile' '*/Dockerfile' 'Dockerfile.*' '*/Dockerfile.*')
