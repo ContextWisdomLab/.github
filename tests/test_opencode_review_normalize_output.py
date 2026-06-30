@@ -202,6 +202,8 @@ def test_label_and_full_coverage_detection():
     combined = FULL_SUMMARY.casefold()
     assert "100%" in norm.label_section(combined, "coverage:")
     assert norm.label_section(combined, "missing:") == ""
+    text_coverage = "performance: FAST docstring coverage: 100% something else coverage: 100%"
+    assert norm.label_section(text_coverage, "performance:") == " FAST "
     assert norm.mentions_full_coverage("", FULL_SUMMARY)
     no_source_summary = FULL_SUMMARY.replace(
         "coverage execution evidence proves 100% test coverage",
