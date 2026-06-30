@@ -94,9 +94,10 @@ run_one_model_attempt() {
 	local candidate_output_file="$6"
 	local opencode_json_file="$7"
 	local opencode_export_file="$8"
-	local run_timeout_seconds opencode_status session_id
+	local run_timeout_seconds export_timeout_seconds opencode_status session_id
 
 	run_timeout_seconds="${OPENCODE_RUN_TIMEOUT_SECONDS:-180}"
+	export_timeout_seconds="${OPENCODE_EXPORT_TIMEOUT_SECONDS:-60}"
 
 	rm -f "$opencode_json_file" "$opencode_export_file" "$candidate_output_file"
 	set +e
@@ -119,8 +120,8 @@ run_one_model_attempt() {
 		cat "$opencode_json_file"
 		return 1
 	fi
-	if ! opencode export "$session_id" --pure >"$opencode_export_file"; then
-		printf 'OpenCode %s attempt %s/%s session export did not complete.\n' "$model_candidate" "$attempt" "$attempts"
+	if ! timeout --kill-after=15s "${export_timeout_seconds}s" opencode export "$session_id" --pure >"$opencode_export_file"; then
+		printf 'OpenCode %s attempt %s/%s session export did not complete within %ss.\n' "$model_candidate" "$attempt" "$attempts" "$export_timeout_seconds"
 		return 1
 	fi
 	jq -r '.messages[] | select(.info.role == "assistant") | .parts[]? | select(.type == "text") | .text' "$opencode_export_file" >"$candidate_output_file"
