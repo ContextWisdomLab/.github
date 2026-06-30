@@ -361,6 +361,173 @@ def test_rest_mergeable_state_helpers(monkeypatch):
     ]
 
 
+def test_rest_pr_fallback_shapes_reviews_and_checks(monkeypatch):
+    calls = []
+    payloads = {
+        "repos/owner/repo/pulls/42/reviews?per_page=100": [
+            {
+                "state": "APPROVED",
+                "body": "Head SHA: `abc123`",
+                "submitted_at": "2026-06-30T00:00:00Z",
+                "commit_id": "abc123",
+                "user": {"login": "opencode-agent[bot]"},
+            }
+        ],
+        "repos/owner/repo/commits/abc123/check-runs?per_page=100": {
+            "check_runs": [
+                {
+                    "name": "opencode-review",
+                    "status": "completed",
+                    "conclusion": "success",
+                    "started_at": "2026-06-30T00:00:00Z",
+                    "details_url": "https://github.com/owner/repo/actions/runs/1/job/2",
+                }
+            ]
+        },
+    }
+
+    def fake_api(path):
+        calls.append(path)
+        return payloads[path]
+
+    monkeypatch.setattr(sched, "gh_api_json", fake_api)
+    node = sched.rest_pr_node(
+        "owner/repo",
+        {
+            "number": 42,
+            "title": "Fallback",
+            "draft": False,
+            "mergeable": True,
+            "mergeable_state": "clean",
+            "base": {"ref": "main", "sha": "base123"},
+            "head": {
+                "ref": "feature",
+                "sha": "abc123",
+                "repo": {"full_name": "owner/repo"},
+            },
+            "maintainer_can_modify": True,
+            "auto_merge": {"enabled_at": "2026-06-30T00:01:00Z"},
+        },
+    )
+
+    assert calls == [
+        "repos/owner/repo/pulls/42/reviews?per_page=100",
+        "repos/owner/repo/commits/abc123/check-runs?per_page=100",
+    ]
+    assert node["number"] == 42
+    assert node["mergeStateStatus"] == "CLEAN"
+    assert node["restMergeableState"] == "CLEAN"
+    assert node["headRepository"] == {"nameWithOwner": "owner/repo"}
+    assert not node["isCrossRepository"]
+    assert node["reviews"]["nodes"][0]["author"]["login"] == "opencode-agent[bot]"
+    assert node["reviews"]["nodes"][0]["commit"]["oid"] == "abc123"
+    assert node["statusCheckRollup"]["contexts"]["nodes"][0]["status"] == "COMPLETED"
+    assert node["statusCheckRollup"]["contexts"]["nodes"][0]["conclusion"] == "SUCCESS"
+
+
+def test_fetch_pr_falls_back_to_rest_when_graphql_denied(monkeypatch):
+    def deny_graphql(*args, **kwargs):
+        raise RuntimeError("gh: Resource not accessible by integration")
+
+    monkeypatch.setattr(sched, "gh_graphql", deny_graphql)
+    monkeypatch.setattr(sched, "fetch_pr_rest", lambda repo, number: [{"number": number, "repo": repo}])
+
+    assert sched.github_resource_inaccessible(RuntimeError("Resource not accessible by integration"))
+    assert sched.fetch_pr("owner/repo", 77) == [{"number": 77, "repo": "owner/repo"}]
+
+
+def test_rest_api_wrapper_and_fetch_pr_rest(monkeypatch):
+    run_calls = []
+
+    def fake_run(args):
+        run_calls.append(args)
+        return json.dumps({"number": 42})
+
+    monkeypatch.setattr(sched, "run", fake_run)
+    assert sched.gh_api_json("repos/owner/repo/pulls/42") == {"number": 42}
+    assert run_calls == [["gh", "api", "repos/owner/repo/pulls/42"]]
+
+    api_calls = []
+
+    def fake_api(path):
+        api_calls.append(path)
+        if path == "repos/owner/repo/pulls/42":
+            return {"number": 42}
+        return {}
+
+    monkeypatch.setattr(sched, "gh_api_json", fake_api)
+    monkeypatch.setattr(sched, "rest_pr_node", lambda repo, pr: {"repo": repo, "number": pr["number"]})
+    assert sched.fetch_pr_rest("owner/repo", 42) == [{"repo": "owner/repo", "number": 42}]
+    assert sched.fetch_pr_rest("owner/repo", 99) == []
+    assert api_calls == ["repos/owner/repo/pulls/42", "repos/owner/repo/pulls/99"]
+
+
+def test_fetch_open_prs_rest_paginates_and_fetch_open_prs_falls_back(monkeypatch):
+    paths = []
+    pages = {
+        "repos/owner/repo/pulls?state=open&sort=created&direction=asc&per_page=3&page=1": [
+            {"number": 1},
+            {"number": 2},
+        ]
+    }
+
+    def fake_api(path):
+        paths.append(path)
+        return pages[path]
+
+    monkeypatch.setattr(sched, "gh_api_json", fake_api)
+    monkeypatch.setattr(sched, "rest_pr_node", lambda repo, pr: {"number": pr["number"], "repo": repo})
+
+    assert sched.fetch_open_prs_rest("owner/repo", 3) == [
+        {"number": 1, "repo": "owner/repo"},
+        {"number": 2, "repo": "owner/repo"},
+    ]
+    assert paths == [
+        "repos/owner/repo/pulls?state=open&sort=created&direction=asc&per_page=3&page=1",
+    ]
+
+    def deny_graphql(*args, **kwargs):
+        raise RuntimeError("gh: Resource not accessible by integration")
+
+    monkeypatch.setattr(sched, "gh_graphql", deny_graphql)
+    monkeypatch.setattr(sched, "fetch_open_prs_rest", lambda repo, max_prs: [{"repo": repo, "max": max_prs}])
+    assert sched.fetch_open_prs("owner/repo", 5) == [{"repo": "owner/repo", "max": 5}]
+
+
+def test_fetch_open_prs_rest_base_branch_empty_and_next_page(monkeypatch):
+    paths = []
+    pages = {
+        "repos/owner/repo/pulls?state=open&sort=created&direction=asc&per_page=100&page=1&base=release%2Fv1": [
+            {"number": number} for number in range(1, 101)
+        ],
+        "repos/owner/repo/pulls?state=open&sort=created&direction=asc&per_page=1&page=2&base=release%2Fv1": [],
+    }
+
+    def fake_api(path):
+        paths.append(path)
+        return pages[path]
+
+    monkeypatch.setattr(sched, "gh_api_json", fake_api)
+    monkeypatch.setattr(sched, "rest_pr_node", lambda repo, pr: {"number": pr["number"]})
+
+    assert sched.fetch_open_prs_rest("owner/repo", 101, base_branch="release/v1") == [
+        {"number": number} for number in range(1, 101)
+    ]
+    assert paths == list(pages)
+
+
+def test_graphql_read_errors_only_fall_back_for_integration_denials(monkeypatch):
+    def fail_graphql(*args, **kwargs):
+        raise RuntimeError("gh: timeout")
+
+    monkeypatch.setattr(sched, "gh_graphql", fail_graphql)
+
+    with pytest.raises(RuntimeError, match="timeout"):
+        sched.fetch_open_prs("owner/repo", 1)
+    with pytest.raises(RuntimeError, match="timeout"):
+        sched.fetch_pr("owner/repo", 1)
+
+
 def test_context_review_and_check_helpers():
     assert sched.context_nodes({}) == []
     assert sched.context_nodes(make_pr()) == []
