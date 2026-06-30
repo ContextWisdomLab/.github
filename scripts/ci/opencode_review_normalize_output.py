@@ -519,6 +519,7 @@ def changed_files_from_evidence(text: str) -> list[str]:
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
+        line = re.sub(r"^[-*+]\s+", "", line)
         parts = line.split("\t")
         path = parts[-1].strip()
         if not path or path.startswith("["):
