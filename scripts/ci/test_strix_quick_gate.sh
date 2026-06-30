@@ -651,7 +651,7 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" "check:python-docstrings" "opencode coverage evidence can use repository Python docstring gates exposed through package scripts"
 	assert_file_contains "$workflow_file" "Coverage execution evidence" "opencode evidence exposes coverage measurement to the review model"
 	assert_file_contains "$workflow_file" 'changed_files_for_coverage | grep -E' "opencode Docker evidence limits Docker builds to changed Dockerfiles"
-	assert_file_contains "$workflow_file" 'docker build --pull=false -f "$dockerfile" -t "$image_tag" "$context_dir"' "opencode Docker evidence keeps Dockerfile paths relative to the source checkout"
+	assert_file_contains "$workflow_file" 'docker build --pull=false -f "$dockerfile" -t "$image_tag" .' "opencode Docker evidence builds changed Dockerfiles from the repository root context"
 	assert_file_contains "$workflow_file" "has_changed_tracked_files 'docker-compose.yml' 'docker-compose.yaml' 'compose.yml' 'compose.yaml'" "opencode Docker evidence runs compose checks only when compose files changed"
 	assert_file_contains "$workflow_file" "Coverage and Docstring coverage labels must cite Coverage execution evidence showing supported repository test suites passed" "opencode approval requires passing test evidence when coverage is applicable"
 	assert_file_contains "$workflow_file" "or explicitly cite Coverage execution evidence as not applicable because no supported source files or package manifests were found" "opencode approval permits only evidence-backed no-source coverage N/A"
