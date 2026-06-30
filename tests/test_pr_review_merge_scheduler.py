@@ -2356,6 +2356,9 @@ def test_main_keeps_scanning_after_action_error(monkeypatch, capsys):
 def test_scrub_sensitive_data_and_run_error():
     assert sched.scrub_sensitive_data("Authorization: Bearer mytoken123") == "Authorization: Bearer ***"
     assert sched.scrub_sensitive_data("token mytoken123") == "token ***"
+    assert sched.scrub_sensitive_data("ghp_1234567890abcdef1234") == "***"
+    assert sched.scrub_sensitive_data("gho_1234567890abcdef1234567890extra") == "***"
+    assert sched.scrub_sensitive_data("github_pat_11AAAAA_abcdefg1234567890") == "***"
     assert sched.scrub_sensitive_data("ghp_placeholder_token_with_underscores_123") == "***"
     assert sched.scrub_sensitive_data("gho_installation_token_value") == "***"
     assert sched.scrub_sensitive_data("ghu_user_token_value") == "***"
@@ -2366,7 +2369,7 @@ def test_scrub_sensitive_data_and_run_error():
     assert sched.scrub_sensitive_data(None) is None
 
     with pytest.raises(RuntimeError, match=r"Command failed \([12]\): .* \*\*\*"):
-        sched.run([sys.executable, "-c", "import sys; sys.exit(1)", "ghp_secret"], stdin=None)
+        sched.run([sys.executable, "-c", "import sys; sys.exit(1)", "ghp_1234567890abcdef1234"], stdin=None)
 
 
 def test_main_keeps_scanning_after_update_branch_403_and_422(monkeypatch, capsys):
@@ -2472,3 +2475,43 @@ def test_parse_conflict_reason_missing_branches():
     assert sched.parse_conflict_reason("merge conflict: DIRTY; some other segment") == ("DIRTY", "base", "head")
     assert sched.parse_conflict_reason("merge conflict: DIRTY; base=,head=something") == ("DIRTY", "base", "something")
     assert sched.parse_conflict_reason("merge conflict: DIRTY; base=main,head=") == ("DIRTY", "main", "head")
+
+
+def test_run_masks_secrets():
+    with pytest.raises(RuntimeError) as exc_info:
+        sched.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import sys; "
+                    "sys.stderr.write('ghp_abcdef1234567890abcdef1234567890abcdef\\n"
+                    "Bearer super_secret\\ntoken my_secret\\n'); "
+                    "sys.exit(1)"
+                ),
+            ]
+        )
+
+    err_msg = str(exc_info.value)
+    assert "ghp_abcdef1234567890abcdef1234567890abcdef" not in err_msg
+    assert "***" in err_msg
+    assert "Bearer super_secret" not in err_msg
+    assert "Bearer ***" in err_msg
+    assert "token my_secret" not in err_msg
+    assert "token ***" in err_msg
+
+
+def test_run_masks_secrets_in_args():
+    with pytest.raises(RuntimeError) as exc_info:
+        sched.run(
+            [
+                sys.executable,
+                "-c",
+                "import sys; sys.exit(1)",
+                "ghp_abcdef1234567890abcdef1234567890abcdef",
+            ]
+        )
+
+    err_msg = str(exc_info.value)
+    assert "ghp_abcdef1234567890abcdef1234567890abcdef" not in err_msg
+    assert "***" in err_msg

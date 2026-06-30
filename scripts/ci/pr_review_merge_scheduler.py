@@ -159,7 +159,7 @@ def scrub_sensitive_data(text: str | None) -> str | None:
         return text
     text = re.sub(r'(?i)(bearer\s+)[^\s"\'\\]+', r'\1***', text)
     text = re.sub(r'(?i)(token\s+)[^\s"\'\\]+', r'\1***', text)
-    text = re.sub(r'(?i)(github_pat_[A-Za-z0-9_]+|gh[psuo]_[A-Za-z0-9_]+)', '***', text)
+    text = re.sub(r'(?i)\b(?:github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+)\b', '***', text)
     return text
 
 
