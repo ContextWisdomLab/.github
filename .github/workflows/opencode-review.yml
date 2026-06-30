@@ -3480,7 +3480,8 @@ jobs:
                 opencode.jsonc \
                 scripts/ci/strix_quick_gate.sh \
                 scripts/ci/test_strix_quick_gate.sh \
-                requirements-strix-ci.txt
+                requirements-strix-ci.txt \
+                requirements-strix-ci-hashes.txt
               diff_status=$?
               set -e
 
@@ -3737,11 +3738,50 @@ jobs:
             return 0
           }
 
+          pr_changes_path() {
+            local changed_path="$1"
+            local source_root="${OPENCODE_SOURCE_WORKDIR:-${GITHUB_WORKSPACE:-$PWD}}"
+
+            if [ -z "${PR_BASE_SHA:-}" ] || [ -z "${PR_HEAD_SHA:-}" ]; then
+              return 1
+            fi
+            if ! git -C "$source_root" rev-parse --verify "${PR_BASE_SHA}^{commit}" >/dev/null 2>&1 ||
+              ! git -C "$source_root" rev-parse --verify "${PR_HEAD_SHA}^{commit}" >/dev/null 2>&1; then
+              return 1
+            fi
+
+            set +e
+            git -C "$source_root" diff --quiet "${PR_BASE_SHA}...${PR_HEAD_SHA}" -- "$changed_path"
+            local diff_status=$?
+            set -e
+
+            [ "$diff_status" -eq 1 ]
+          }
+
+          self_healed_strix_dependency_base_failure() {
+            local evidence_file="$1"
+            local source_root="${OPENCODE_SOURCE_WORKDIR:-${GITHUB_WORKSPACE:-$PWD}}"
+            local hashes_file="${source_root%/}/requirements-strix-ci-hashes.txt"
+
+            grep -Fq "protobuf==7.35.1" "$evidence_file" || return 1
+            grep -Fq "google-cloud-aiplatform" "$evidence_file" || return 1
+            grep -Fq "<7.0.0" "$evidence_file" || return 1
+            [ -f "$hashes_file" ] || return 1
+            grep -Fq "protobuf==6.33.6" "$hashes_file" || return 1
+            if grep -Fq "protobuf==7.35.1" "$hashes_file"; then
+              return 1
+            fi
+            pr_changes_path "requirements-strix-ci-hashes.txt"
+          }
+
           self_modifying_strix_base_failure() {
             local evidence_file="$1"
             local source_root="${OPENCODE_SOURCE_WORKDIR:-${GITHUB_WORKSPACE:-$PWD}}"
             local diff_status
 
+            if self_healed_strix_dependency_base_failure "$evidence_file"; then
+              return 0
+            fi
             grep -Fq "Self-test Strix gate script" "$evidence_file" || return 1
             grep -Fq "opencode.jsonc: No such file or directory" "$evidence_file" || return 1
             if [ -z "${PR_BASE_SHA:-}" ] || [ -z "${PR_HEAD_SHA:-}" ]; then
@@ -3759,7 +3799,8 @@ jobs:
               opencode.jsonc \
               scripts/ci/strix_quick_gate.sh \
               scripts/ci/test_strix_quick_gate.sh \
-              requirements-strix-ci.txt
+              requirements-strix-ci.txt \
+              requirements-strix-ci-hashes.txt
             diff_status=$?
             set -e
 
@@ -4511,6 +4552,11 @@ EOF
                 printf "Failed GitHub Check evidence could not be collected for current head \`%s\`.\n" "$HEAD_SHA" >"$failed_check_evidence_file"
               fi
 
+              if self_healed_strix_dependency_base_failure "$failed_check_evidence_file"; then
+                echo "Ignoring trusted-base Strix protobuf resolver failure because current head updates requirements-strix-ci-hashes.txt away from protobuf==7.35.1."
+                : >"$failed_file"
+                rm -f "$failed_check_evidence_file" "$failed_check_review_body_file" "$failed_check_review_payload_file" "$failed_check_inline_failure_body_file"
+              else
               if leave_review_unchanged_for_self_modifying_strix_if_present "$failed_check_evidence_file"; then
                 return 1
               fi
@@ -4527,6 +4573,7 @@ EOF
                 stop_failed_check_fallback_unavailable
               fi
               return 0
+              fi
             fi
 
             if request_changes_for_merge_conflict_if_present; then
@@ -5004,6 +5051,12 @@ EOF
                 if ! collect_failed_check_evidence_or_note "$failed_check_evidence_file"; then
                   printf "Failed GitHub Check evidence could not be collected for current head \`%s\`.\n" "$HEAD_SHA" >"$failed_check_evidence_file"
                 fi
+                if self_healed_strix_dependency_base_failure "$failed_check_evidence_file"; then
+                  printf 'Ignoring trusted-base Strix protobuf resolver failure because current head updates requirements-strix-ci-hashes.txt away from protobuf==7.35.1.\n' >&2
+                  : >"$failed_checks_file"
+                fi
+              fi
+              if [ -s "$failed_checks_file" ]; then
                 if leave_review_unchanged_for_self_modifying_strix_if_present "$failed_check_evidence_file"; then
                   echo "::endgroup::"
                   exit 1
