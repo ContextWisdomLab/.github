@@ -59,14 +59,28 @@ def test_structural_review_detection_accepts_phrases_patterns_and_clean_text():
     assert norm.admits_missing_structural_review("No changed files", "")
     assert norm.admits_missing_structural_review("Could not inspect the changed files", "")
     assert norm.admits_missing_structural_review("", "Source files were not inspected")
+    assert norm.admits_missing_structural_review("structural exploration was not possible", "summary")
+    assert norm.admits_missing_structural_review("reason", "evidence was truncated")
+    assert norm.admits_missing_structural_review("", "structural analysis was incomplete")
+    assert norm.admits_missing_structural_review("", "zero changed files")
+    assert norm.admits_missing_structural_review("STRUCTURAL EXPLORATION WAS NOT POSSIBLE", "")
     assert not norm.admits_missing_structural_review("scripts/ci/example.py checked", "")
 
 
 def test_changed_file_and_verification_posture_detection():
     assert norm.mentions_changed_file_evidence("README.md", "")
     assert norm.mentions_changed_file_evidence("scripts/ci/example.py", "")
+    assert norm.mentions_changed_file_evidence("", "Checked some_script.sh")
+    assert norm.mentions_changed_file_evidence("Modified a.ts", "and b.tsx")
+    assert norm.mentions_changed_file_evidence("updated package.json", "")
+    assert norm.mentions_changed_file_evidence("checked Dockerfile", "")
+    assert norm.mentions_changed_file_evidence("reviewed AGENTS.md", "")
+    assert norm.mentions_changed_file_evidence("The file dir/sub/app.js is good", "")
+    assert norm.mentions_changed_file_evidence("Fixed bug in module.rs", "")
     assert not norm.mentions_changed_file_evidence("No path here", "")
     assert not norm.mentions_changed_file_evidence("Security/privacy: checked", "")
+    assert not norm.mentions_changed_file_evidence("changed some code", "no file listed here")
+    assert not norm.mentions_changed_file_evidence("invalid.ext", "not a valid extension")
     assert norm.mentions_verification_posture("", FULL_SUMMARY)
     assert not norm.mentions_verification_posture("", FULL_SUMMARY.replace("CodeGraph", "graph"))
 
