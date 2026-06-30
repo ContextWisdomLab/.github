@@ -2693,6 +2693,7 @@ jobs:
           GH_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
           STRIX_GITHUB_MODELS_TOKEN: ${{ secrets.STRIX_GITHUB_MODELS_TOKEN || github.token }}
           OPENCODE_APP_TOKEN: ${{ steps.opencode_app_token.outputs.token }}
+          WORKFLOW_GITHUB_TOKEN: ${{ github.token }}
           OPENCODE_EVIDENCE_FILE: ${{ runner.temp }}/opencode-review-evidence.md
           OPENCODE_FAILED_CHECK_EVIDENCE_FILE: ${{ runner.temp }}/opencode-failed-check-evidence.md
           OPENCODE_FAILED_CHECK_DIAGNOSIS_FILE: ${{ runner.temp }}/opencode-failed-check-diagnosis.md
@@ -4261,6 +4262,14 @@ jobs:
             while [ "$attempt" -le "$attempts" ]; do
               if "$collector" "$output_file"; then
                 return 0
+              fi
+              if app_token_limited_check_lookup &&
+                [ -n "${WORKFLOW_GITHUB_TOKEN:-}" ] &&
+                [ "${WORKFLOW_GITHUB_TOKEN:-}" != "${GH_TOKEN:-}" ]; then
+                printf 'GitHub Checks lookup failed with OpenCode app token; retrying with workflow token before changing review state.\n' >&2
+                if env GH_TOKEN="$WORKFLOW_GITHUB_TOKEN" "$collector" "$output_file"; then
+                  return 0
+                fi
               fi
               : >"$output_file"
               if [ "$attempt" -lt "$attempts" ]; then
