@@ -582,6 +582,7 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" '.github/workflows/opencode-review.yml | \' "opencode central review fallback allowlist includes only the OpenCode workflow"
 	assert_file_contains "$workflow_file" '.github/workflows/strix.yml | \' "opencode central review fallback allowlist includes only the Strix workflow"
 	assert_file_contains "$workflow_file" 'scripts/ci/opencode_review_normalize_output.py | \' "opencode central review fallback allowlist includes only the OpenCode normalizer"
+	assert_file_contains "$workflow_file" 'scripts/ci/validate_opencode_failed_check_review.sh | \' "opencode central review fallback allowlist includes the failed-check review validator"
 	assert_file_contains "$workflow_file" 'scripts/ci/test_strix_quick_gate.sh)' "opencode central review fallback allowlist includes only the central gate self-test"
 	assert_file_contains "$workflow_file" 'wait_for_peer_github_checks "$pending_checks_file"' "opencode central review fallback waits for peer checks before approval"
 	assert_file_contains "$workflow_file" 'collect_unresolved_human_review_threads "$unresolved_human_threads_file"' "opencode central review fallback re-queries human threads before approval"
@@ -4591,6 +4592,30 @@ run_filtered_gate_case_if_requested() {
 			"" \
 			"" \
 			"github_models/deepseek/deepseek-v3-0324 github_models/deepseek/deepseek-r1-0528"
+		;;
+	gemini-timeout-fallback-success)
+		run_gate_case_allow_provider_signal "gemini-timeout-fallback-success" \
+			"gemini/timeout-fallback-primary" \
+			"gemini/fallback-one gemini/fallback-two" \
+			"0" \
+			"REGEX:Strix quick scan succeeded with fallback model 'gemini/fallback-one' in [0-9]+s\\." \
+			"2" \
+			"gemini/timeout-fallback-primary|gemini/fallback-one" \
+			"https://example.invalid|https://example.invalid" \
+			"vertex_ai" \
+			"__DEFAULT__" \
+			"" \
+			"1"
+		;;
+	vertex-primary-notfound-fallback-success)
+		run_gate_case "vertex-primary-notfound-fallback-success" \
+			"vertex_ai/missing-primary" \
+			"vertex_ai/fallback-one vertex_ai/fallback-two" \
+			"0" \
+			"REGEX:Strix quick scan succeeded with fallback model 'vertex_ai/fallback-one' in [0-9]+s\\." \
+			"2" \
+			"vertex_ai/missing-primary|vertex_ai/fallback-one" \
+			"<unset>|<unset>"
 		;;
 	*)
 		record_failure "unknown STRIX_TEST_CASE_FILTER '${STRIX_TEST_CASE_FILTER:-}'"
