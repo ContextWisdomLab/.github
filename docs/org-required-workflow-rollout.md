@@ -1,6 +1,6 @@
 # ContextualWisdomLab central required workflow rollout
 
-Updated: 2026-07-01 02:52 KST
+Updated: 2026-07-01 05:10 KST
 
 ## Decision
 
@@ -17,10 +17,10 @@ Use an organization repository ruleset instead of copying workflow files into ea
   - `.github/workflows/opencode-review.yml`
   - `.github/workflows/pr-review-merge-scheduler.yml`
 - Required workflow ref: `refs/heads/main`
-- Last verified workflow implementation base commit: `57a1fa580731a0f76b31dcf29a597c5715dba2fd` (`#226`)
+- Last verified workflow implementation base commit: `482b05c6c11d9da9895246406aca1c3bd8f6a691` (`#235`)
 - Required workflow trigger support: `pull_request_target`, `push`, `workflow_run`
 
-`.github` PRs through `#226` are now in `main`. The required-workflow
+`.github` PRs through `#235` are now in `main`. The required-workflow
 ruleset points at `.github@main`; if live organization ruleset inspection
 reports another ref, treat that as operations drift and restore ruleset
 `18156473` to the current `main` head.
@@ -69,7 +69,7 @@ The active ruleset no longer maintains a repository-name allowlist. Live ruleset
 
 | Repository | Visibility | Default branch | Flow | Open PRs | Local central-workflow copies on default branch | Rollout status |
 | --- | --- | --- | --- | ---: | --- | --- |
-| `ContextualWisdomLab/.github` | public | `main` | GitHub Flow | 22 | central source; keep | single source of truth; PRs `#225` and `#226` merged |
+| `ContextualWisdomLab/.github` | public | `main` | GitHub Flow | 23 | central source; keep | single source of truth; PRs through `#235` merged |
 | `ContextualWisdomLab/appguardrail` | public | `develop` | Git Flow | 7 | none | migrated; re-verify inherited checks before final closure |
 | `ContextualWisdomLab/bandscope` | public | `develop` | Git Flow | 78 | none | no local central copies observed; verify inherited checks on active PRs |
 | `ContextualWisdomLab/clearfolio` | public | `main` | GitHub Flow | 45 | none | migrated; re-verify inherited checks before final closure |
@@ -106,6 +106,11 @@ The active ruleset no longer maintains a repository-name allowlist. Live ruleset
 - On 2026-07-01 02:52 KST, ruleset `18156473` still reported `enforcement=active`, `repository_name.include=["~ALL"]`, `ref_name.include=["~DEFAULT_BRANCH"]`, and the three required workflow paths from `ContextualWisdomLab/.github@refs/heads/main`.
 - `.github` PR `#225` raised high reasoning effort for all reasoning-capable OpenCode review model definitions and merged at `50c6ef82f52af3eeb0e58c174902fc9855c36682`.
 - `.github` PR `#226` stopped the merge scheduler from treating old deterministic fallback approval bodies as current-head approval evidence and merged at `57a1fa580731a0f76b31dcf29a597c5715dba2fd`.
+- `.github` PR `#230` added changed-file candidates to merge-conflict guidance so `DIRTY` or `CONFLICTING` PRs name the first files to inspect instead of giving only generic conflict instructions. It merged at `0cab5c8d46e88c1a3f68ef3f71b5d44d971cd2ef`.
+- `.github` PR `#232` removed the workflow-only deterministic approval fallback introduced by PR `#231`; model-pool exhaustion now stays on the fail-closed `REQUEST_CHANGES` path, and reasoning-capable OpenCode model candidates must have `reasoningEffort: high` before execution. It merged at `f545a9917933f8f81a76ea0044cbce0aae1ac5bd`.
+- `.github` PR `#233` blocks false trivial approval reasons such as `Typo fix in documentation string` when current-head changed files include workflow, script/source, or test surfaces. It merged at `4ff660c8396b78a1b82aef8c316b26527864d450`.
+- `.github` PR `#234` made approval-summary repair parse bullet-form changed-file evidence from bounded review logs, so changed-file evidence is not lost when the evidence section is rendered as a Markdown list. It merged at `da3a4a5788e7019229d66247c360b258b1a5b1f7`.
+- `.github` PR `#235` changed the post-approval OpenCode merge-scheduler follow-up to prefer the workflow `github.token` for same-repository mechanical merge/update mutations, keeping secret/app fallbacks for cross-repository manual dispatch. It merged at `482b05c6c11d9da9895246406aca1c3bd8f6a691`.
 - `.github` scheduler default merge mode is now `direct_or_auto`: approved same-repository `CLEAN` PRs request immediate guarded merge, approved non-clean same-repository PRs can queue native auto-merge, and fork or external-head PRs are left for maintainer merge.
 - OpenCode approval runs the trusted central merge scheduler script directly with `pr_number` and `max_prs=1`, so the just-reviewed PR is inspected immediately even when organization required workflows are not repo-local `workflow_dispatch` targets.
 - `.github` PR `#74` changed OpenCode review model order to DeepSeek R1 first and added a catalog fallback pool.
@@ -162,6 +167,8 @@ The active ruleset no longer maintains a repository-name allowlist. Live ruleset
 - Bounded OpenCode evidence includes `Review execution contracts`, which inventories runtime matrices, package manifests, test, coverage, docstring, E2E, lint, security, Docker, and unpackaged-source gaps before the model chooses verification commands.
 - Generated OpenCode review DAGs must use quoted Mermaid labels such as `A["text"]`; unquoted labels with spaces, punctuation, parentheses, or file counts can fail to render.
 - OpenCode approval summaries must not contradict exact changed-file evidence by saying no source, test, or executable files changed when workflow, script, source, or test files are present.
+- OpenCode approval reasons must not trivialize material workflow, script/source, or test changes as docs-only, typo-only, or string-only changes. The normalizer now rejects those approvals before publication.
+- Same-repository post-approval merge/update follow-up should use the workflow `github.token` first so the mechanical actor is `github-actions[bot]`; cross-repository manual dispatch may still fall back to configured secrets or the OpenCode app token when the workflow token cannot mutate the target repository.
 - Do not copy central Strix, OpenCode, or merge scheduler workflows into repositories. Repository-local application CI, security CI, or targeted autofix workers may remain when they are not substitutes for the required central workflows.
 - `pg-erd-cloud` still has a repository-local `pr-review-autofix.yml` worker; keep it out of the central required-workflow contract unless the autofix path is also moved to organization-level execution.
 - Some repositories use classic branch protection while others use rulesets. Normalize branch protection into rulesets without removing repository-specific required application checks.
