@@ -703,6 +703,9 @@ def enrich_rest_mergeable_states(repo: str, prs: list[dict[str, Any]]) -> None:
         except RuntimeError as exc:
             pr["compareBranchFreshnessError"] = bounded_error_summary(str(exc))
 
+    if not prs:
+        return
+
     if len(prs) <= 1:
         for pr in prs:
             enrich(pr)
