@@ -548,15 +548,27 @@ def test_fetch_open_prs_rest_base_branch_empty_and_next_page(monkeypatch):
     assert paths == list(pages)
 
 
-def test_graphql_read_errors_only_fall_back_for_integration_denials(monkeypatch):
+def test_graphql_read_errors_fall_back_for_transient_failures(monkeypatch):
     def fail_graphql(*args, **kwargs):
-        raise RuntimeError("gh: timeout")
+        raise RuntimeError("Command failed (1): gh api graphql\ngh: HTTP 504")
+
+    monkeypatch.setattr(sched, "gh_graphql", fail_graphql)
+    monkeypatch.setattr(sched, "fetch_open_prs_rest", lambda repo, max_prs: [{"repo": repo, "max": max_prs}])
+    monkeypatch.setattr(sched, "fetch_pr_rest", lambda repo, number: [{"repo": repo, "number": number}])
+
+    assert sched.fetch_open_prs("owner/repo", 1) == [{"repo": "owner/repo", "max": 1}]
+    assert sched.fetch_pr("owner/repo", 1) == [{"repo": "owner/repo", "number": 1}]
+
+
+def test_graphql_read_errors_do_not_fall_back_for_schema_errors(monkeypatch):
+    def fail_graphql(*args, **kwargs):
+        raise RuntimeError("gh: Field 'unknown' doesn't exist on type 'PullRequest'")
 
     monkeypatch.setattr(sched, "gh_graphql", fail_graphql)
 
-    with pytest.raises(RuntimeError, match="timeout"):
+    with pytest.raises(RuntimeError, match="unknown"):
         sched.fetch_open_prs("owner/repo", 1)
-    with pytest.raises(RuntimeError, match="timeout"):
+    with pytest.raises(RuntimeError, match="unknown"):
         sched.fetch_pr("owner/repo", 1)
 
 
