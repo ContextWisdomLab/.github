@@ -10,6 +10,7 @@ from scripts.ci import noema_review_gate as noema
 
 
 def make_pr(**overrides):
+    """Build a minimal pull request payload for Noema tests."""
     value = {
         "number": 7,
         "title": "Noema",
@@ -25,6 +26,7 @@ def make_pr(**overrides):
 
 
 def review(state="APPROVED", commit="head", login="opencode-agent", body="Result: APPROVE"):
+    """Build a minimal review node for Noema tests."""
     return {
         "state": state,
         "body": body,
@@ -74,7 +76,7 @@ def test_review_state_helpers_cover_current_head_logic():
     assert noema.review_commit(current) == "head"
     assert noema.review_commit({}) == ""
     assert noema.current_primary_approval(pr) == current
-    assert noema.current_primary_approval(make_pr(reviews={"nodes": [old, current]})) == current
+    assert noema.current_primary_approval(make_pr(reviews={"nodes": [old]})) is None
     assert noema.current_primary_approval(make_pr(reviews={"nodes": [review("COMMENTED", body=marker_body)]})) is None
     assert noema.current_primary_approval(make_pr(reviews={"nodes": [review(login="human", body=marker_body)]})) is None
     assert noema.has_current_changes_requested(make_pr(reviews={"nodes": [review("CHANGES_REQUESTED")]}))
@@ -153,16 +155,22 @@ def test_current_actor_fetch_diff_and_json_extraction(monkeypatch):
 
 
 class FakeResponse:
+    """Small context-manager response for urllib monkeypatches."""
+
     def __init__(self, payload):
+        """Store a JSON-serializable response payload."""
         self.payload = payload
 
     def __enter__(self):
+        """Return the response for with-statement use."""
         return self
 
     def __exit__(self, *args):
+        """Propagate exceptions from the with-statement body."""
         return False
 
     def read(self):
+        """Return the payload as encoded JSON bytes."""
         return json.dumps(self.payload).encode("utf-8")
 
 
