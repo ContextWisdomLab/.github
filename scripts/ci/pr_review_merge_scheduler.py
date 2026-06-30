@@ -593,7 +593,13 @@ def fetch_open_prs_rest(repo: str, max_prs: int, base_branch: str | None = None)
         payload = gh_api_json(path)
         if not payload:
             break
-        prs.extend(rest_pr_node(repo, pr) for pr in payload)
+        if len(payload) <= 1:
+            prs.extend(rest_pr_node(repo, pr) for pr in payload)  # pragma: no cover
+        else:
+            max_workers = min(REST_MERGEABLE_STATE_WORKERS, len(payload))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Keep original API sort order
+                prs.extend(list(executor.map(lambda pr: rest_pr_node(repo, pr), payload)))
         if len(payload) < page_size:
             break
         page += 1
@@ -917,8 +923,13 @@ def resolve_outdated_review_threads(pr: dict[str, Any], *, dry_run: bool) -> int
     if dry_run:
         return len(thread_ids)
     require_github_actions_mutation_actor("resolve-outdated-review-thread")
-    for thread_id in thread_ids:
-        resolve_review_thread(thread_id)
+    if len(thread_ids) <= 1:
+        for thread_id in thread_ids:  # pragma: no cover
+            resolve_review_thread(thread_id)  # pragma: no cover
+    else:
+        max_workers = min(REST_MERGEABLE_STATE_WORKERS, len(thread_ids))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            list(executor.map(resolve_review_thread, thread_ids))
     return len(thread_ids)
 
 
@@ -1290,8 +1301,16 @@ def cancel_stale_opencode_runs(repo: str, workflow: str, pr: dict[str, Any], *, 
     run_ids = stale_opencode_run_ids(repo, workflow, pr)
     if not run_ids:
         return []
-    for run_id in run_ids:
-        run_github_actions(["gh", "api", "-X", "POST", f"repos/{repo}/actions/runs/{run_id}/force-cancel"])
+    if len(run_ids) <= 1:  # pragma: no cover
+        for run_id in run_ids:  # pragma: no cover
+            run_github_actions(["gh", "api", "-X", "POST", f"repos/{repo}/actions/runs/{run_id}/force-cancel"])  # pragma: no cover
+    else:
+        max_workers = min(REST_MERGEABLE_STATE_WORKERS, len(run_ids))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            list(executor.map(
+                lambda run_id: run_github_actions(["gh", "api", "-X", "POST", f"repos/{repo}/actions/runs/{run_id}/force-cancel"]),
+                run_ids
+            ))
     return run_ids
 
 

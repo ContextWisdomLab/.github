@@ -626,6 +626,75 @@ def test_enrich_rest_mergeable_states_uses_bounded_executor_for_multiple_prs(mon
     assert prs[-1]["restMergeableState"] == f"owner/repo:{sched.REST_MERGEABLE_STATE_WORKERS + 2}"
 
 
+def test_resolve_outdated_review_threads_uses_bounded_executor_for_multiple_threads(monkeypatch):
+    seen_workers = []
+
+    class FakeExecutor:
+        def __init__(self, *, max_workers):
+            seen_workers.append(max_workers)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def map(self, func, items):
+            return [func(item) for item in items]
+
+    monkeypatch.setattr(sched.concurrent.futures, "ThreadPoolExecutor", FakeExecutor)
+    resolved = []
+    monkeypatch.setattr(sched, "resolve_review_thread", resolved.append)
+    monkeypatch.setattr(sched, "require_github_actions_mutation_actor", lambda x: None)
+
+    pr = make_pr(
+        reviewThreads={
+            "nodes": [
+                {"id": str(i), "isResolved": False, "isOutdated": True}
+                for i in range(sched.REST_MERGEABLE_STATE_WORKERS + 3)
+            ]
+        }
+    )
+    count = sched.resolve_outdated_review_threads(pr, dry_run=False)
+
+    assert seen_workers == [sched.REST_MERGEABLE_STATE_WORKERS]
+    assert count == sched.REST_MERGEABLE_STATE_WORKERS + 3
+    assert len(resolved) == count
+
+
+def test_cancel_stale_opencode_runs_uses_bounded_executor_for_multiple_runs(monkeypatch):
+    seen_workers = []
+
+    class FakeExecutor:
+        def __init__(self, *, max_workers):
+            seen_workers.append(max_workers)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def map(self, func, items):
+            return [func(item) for item in items]
+
+    monkeypatch.setattr(sched.concurrent.futures, "ThreadPoolExecutor", FakeExecutor)
+    monkeypatch.setattr(
+        sched,
+        "stale_opencode_run_ids",
+        lambda repo, workflow, pr: [str(i) for i in range(sched.REST_MERGEABLE_STATE_WORKERS + 3)]
+    )
+    cancelled = []
+    monkeypatch.setattr(sched, "run_github_actions", cancelled.append)
+    monkeypatch.setattr(sched, "require_github_actions_control_actor", lambda x: None)
+
+    run_ids = sched.cancel_stale_opencode_runs("owner/repo", "workflow", make_pr(), dry_run=False)
+
+    assert seen_workers == [sched.REST_MERGEABLE_STATE_WORKERS]
+    assert len(run_ids) == sched.REST_MERGEABLE_STATE_WORKERS + 3
+    assert len(cancelled) == len(run_ids)
+
+
 def test_context_review_and_check_helpers():
     assert sched.context_nodes({}) == []
     assert sched.context_nodes(make_pr()) == []
