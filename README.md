@@ -27,6 +27,8 @@ its own `pull_request_target` job token to repository-write permission; its
 immediate post-approval scheduler follow-up uses only an explicit merge token or
 the OpenCode app token, otherwise it leaves the separate scheduler required
 workflow and schedule authoritative.
+When the scheduler falls back to the target workflow token, mechanical branch
+updates and merges are attributed to `github-actions[bot]`.
 That `update_branch` path is deliberately not used for `DIRTY` or
 `CONFLICTING` PRs: GitHub cannot synthesize a safe conflict resolution for the
 author, so the review must give the author a repair path instead of pretending

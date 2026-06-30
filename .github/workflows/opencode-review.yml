@@ -2481,6 +2481,27 @@ jobs:
             fi
           }
 
+          fail_review_publication_failure() {
+            local action="$1" error_file="$2"
+            printf 'OpenCode could not publish %s; failing because required approval reviews must be durable.\n' "$action" >&2
+            if [ -s "$error_file" ]; then
+              sed 's/^/gh: /' "$error_file" >&2 || true
+            fi
+            if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+              {
+                printf '## OpenCode review publication failed\n\n'
+                printf -- '- Action: `%s`\n' "$action"
+                printf -- '- Head SHA: `%s`\n' "$HEAD_SHA"
+                printf -- '- Workflow run: %s\n' "$RUN_ID"
+                printf -- '- Workflow attempt: %s\n\n' "$RUN_ATTEMPT"
+                printf 'Required review gates must not pass unless the PR review was actually published.\n'
+              } >>"$GITHUB_STEP_SUMMARY"
+            fi
+            printf '::error::OpenCode could not publish %s; required approval reviews must be durable.\n' "$action"
+            echo "::endgroup::"
+            exit 1
+          }
+
                     emit_change_flow_mermaid_graph() {
                       local merge_state="${1:-UNKNOWN}"
                       local changed_files_file surfaces_file idx next_node
@@ -2983,10 +3004,8 @@ jobs:
               --arg commit_id "$HEAD_SHA" \
               '{event: $event, body: $body, commit_id: $commit_id}' >"$review_payload_file"
             if ! env GH_TOKEN="$review_write_token" gh api -X POST "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}/reviews" --input "$review_payload_file" >/dev/null 2>"$gh_error_file"; then
-              warn_gh_publication_failure "pull review" "$gh_error_file"
+              fail_review_publication_failure "pull review" "$gh_error_file"
               rm -f "$gh_error_file" "$review_payload_file"
-              update_review_overview "$event" "$body"
-              return 0
             fi
             rm -f "$gh_error_file" "$review_payload_file"
             update_review_overview "$event" "$body"
