@@ -163,6 +163,15 @@ def run_command(command: Sequence[str], cwd: Path, env: dict[str, str], timeout:
     )
 
 
+def timeout_output_text(value: str | bytes | None) -> str:
+    """Return timeout output as text, regardless of subprocess internals."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode(errors="replace")
+    return value
+
+
 def emit_result(
     *,
     command: Sequence[str],
@@ -214,10 +223,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(completed.stderr, end="", file=sys.stderr)
             exit_code = completed.returncode
         except subprocess.TimeoutExpired as exc:
-            if exc.stdout:
-                print(exc.stdout, end="")
-            if exc.stderr:
-                print(exc.stderr, end="", file=sys.stderr)
+            stdout = timeout_output_text(exc.stdout)
+            stderr = timeout_output_text(exc.stderr)
+            if stdout:
+                print(stdout, end="" if stdout.endswith("\n") else "\n")
+            if stderr:
+                print(stderr, end="" if stderr.endswith("\n") else "\n", file=sys.stderr)
             print(f"sandboxed-verify: command timed out after {args.timeout}s", file=sys.stderr)
             exit_code = 124
         return exit_code

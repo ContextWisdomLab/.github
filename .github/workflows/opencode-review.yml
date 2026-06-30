@@ -4264,10 +4264,12 @@ jobs:
             local output_file="$2"
             local attempts="${CHECK_LOOKUP_RETRY_ATTEMPTS:-5}"
             local sleep_seconds="${CHECK_LOOKUP_RETRY_SLEEP_SECONDS:-5}"
+            local primary_check_lookup_token="${GH_TOKEN:-}"
+            local fallback_check_lookup_token="${CHECK_LOOKUP_GH_TOKEN:-}"
             local attempt=1
 
             while [ "$attempt" -le "$attempts" ]; do
-              if "$collector" "$output_file"; then
+              if GH_TOKEN="$primary_check_lookup_token" "$collector" "$output_file"; then
                 return 0
               fi
               : >"$output_file"
@@ -4277,6 +4279,24 @@ jobs:
               fi
               attempt=$((attempt + 1))
             done
+
+            if app_token_limited_check_lookup &&
+              [ -n "$fallback_check_lookup_token" ] &&
+              [ "$fallback_check_lookup_token" != "$primary_check_lookup_token" ]; then
+              printf 'GitHub Checks lookup failed with OpenCode app token; retrying with workflow github token before changing review state.\n' >&2
+              attempt=1
+              while [ "$attempt" -le "$attempts" ]; do
+                if GH_TOKEN="$fallback_check_lookup_token" "$collector" "$output_file"; then
+                  return 0
+                fi
+                : >"$output_file"
+                if [ "$attempt" -lt "$attempts" ]; then
+                  printf 'GitHub Checks lookup with workflow github token failed; retrying %s/%s before changing review state.\n' "$attempt" "$attempts" >&2
+                  sleep "$sleep_seconds"
+                fi
+                attempt=$((attempt + 1))
+              done
+            fi
 
             return 1
           }
@@ -5020,12 +5040,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
           PR_BASE_REF: ${{ github.event.pull_request.base.ref || github.event.inputs.pr_base_ref || '' }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number || '' }}
         run: |
           set -euo pipefail
           scheduler_ref="$(
             gh api "repos/${GH_REPOSITORY}" --jq '.default_branch // empty' 2>/dev/null || true
           )"
           scheduler_ref="${scheduler_ref:-${PR_BASE_REF:-main}}"
+
+          scheduler_inputs=(
+            -f dry_run=false
+            -f trigger_reviews=false
+            -f enable_auto_merge=true
+            -f merge_mode=direct_or_auto
+            -f update_branches=true
+          )
+          if [ -n "${PR_NUMBER:-}" ]; then
+            scheduler_inputs+=(-f max_prs=1 -f pr_number="$PR_NUMBER")
+          else
+            scheduler_inputs+=(-f max_prs=100)
+          fi
 
           dispatch_status=1
           dispatch_error="$(mktemp)"
@@ -5034,12 +5068,7 @@ jobs:
             if gh workflow run pr-review-merge-scheduler.yml \
               --repo "$GH_REPOSITORY" \
               --ref "$scheduler_ref" \
-              -f dry_run=false \
-              -f max_prs=100 \
-              -f trigger_reviews=false \
-              -f enable_auto_merge=true \
-              -f merge_mode=auto \
-              -f update_branches=true 2>"$dispatch_error"; then
+              "${scheduler_inputs[@]}" 2>"$dispatch_error"; then
               dispatch_status=0
               break
             fi

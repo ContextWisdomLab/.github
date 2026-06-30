@@ -74,9 +74,25 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "review_execution_contracts.py" in workflow
     assert "SANDBOXED_VERIFY_RESULT" in workflow
     assert "SANDBOXED_WEB_E2E_RESULT" in workflow
+    assert "CHECK_LOOKUP_GH_TOKEN" in workflow
+    assert "retrying with workflow github token" in workflow
     assert "Review execution contracts" in workflow
     assert "Accessibility/i18n:" in workflow
     assert "Supply-chain/license:" in workflow
     assert "Packaging:" in workflow
     assert '"code-reviewer"' in workflow
     assert '"task": "allow"' in workflow
+
+
+def test_merge_scheduler_uses_escalating_mutation_credentials():
+    """Guard immediate merge/update execution credentials for central scheduling."""
+    workflow = Path(".github/workflows/pr-review-merge-scheduler.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "id-token: write" in workflow
+    assert "Exchange OpenCode app token for scheduler mutations" in workflow
+    assert "secrets.PR_REVIEW_MERGE_TOKEN" in workflow
+    assert "secrets.OPENCODE_APPROVE_TOKEN" in workflow
+    assert "steps.scheduler_app_token.outputs.token" in workflow
+    assert "SCHEDULER_MUTATION_TOKEN_SOURCE" in workflow
