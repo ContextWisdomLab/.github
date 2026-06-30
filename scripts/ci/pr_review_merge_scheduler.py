@@ -11,6 +11,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -106,6 +107,8 @@ query($owner: String!, $name: String!, $number: Int!) {
 
 OPEN_PRS_PAGE_SIZE = 25
 DEFAULT_STALE_OPENCODE_MINUTES = 45
+DEFAULT_UPDATE_BRANCH_HEAD_POLL_ATTEMPTS = 6
+DEFAULT_UPDATE_BRANCH_HEAD_POLL_SECONDS = 5.0
 OPENCODE_WORKFLOW_NAMES = {"OpenCode Review", "Required OpenCode Review"}
 RUNNING_CHECK_STATES = {"PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"}
 FAILED_CHECK_CONCLUSIONS = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "STARTUP_FAILURE"}
@@ -351,13 +354,50 @@ def split_repo(repo: str) -> tuple[str, str]:
     return owner, name
 
 
+TRANSIENT_GITHUB_API_ERRORS = (
+    "HTTP 500",
+    "HTTP 502",
+    "HTTP 503",
+    "HTTP 504",
+    "connection reset",
+    "connection refused",
+    "connection timed out",
+    "context deadline exceeded",
+    "gateway timeout",
+    "i/o timeout",
+    "server error",
+    "service unavailable",
+    "temporary failure",
+    "timeout",
+)
+
+
+def is_transient_github_api_error(exc: RuntimeError) -> bool:
+    """Return whether a GitHub API failure is worth retrying in the same run."""
+    message = str(exc)
+    folded = message.lower()
+    return any(marker in message or marker.lower() in folded for marker in TRANSIENT_GITHUB_API_ERRORS)
+
+
 def gh_graphql(query: str, **fields: str | int) -> dict[str, Any]:
     """Run a GitHub GraphQL query through gh and decode the JSON response."""
     cmd = ["gh", "api", "graphql", "-F", "query=@-"]
     for key, value in fields.items():
         flag = "-F" if isinstance(value, int) else "-f"
         cmd.extend([flag, f"{key}={value}"])
-    return json.loads(run(cmd, stdin=query))
+    max_attempts = 4
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return json.loads(run(cmd, stdin=query))
+        except RuntimeError as exc:
+            if attempt >= max_attempts or not is_transient_github_api_error(exc):
+                raise
+            delay = min(2 ** (attempt - 1), 8)
+            print(
+                f"Transient GitHub GraphQL error on attempt {attempt}/{max_attempts}; retrying in {delay}s",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
 
 
 def fetch_open_prs(repo: str, max_prs: int) -> list[dict[str, Any]]:
@@ -804,6 +844,93 @@ def update_branch(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
     )
 
 
+def short_sha(value: str | None) -> str:
+    """Return a compact SHA for human-readable scheduler notes."""
+    if not value:
+        return "<unknown>"
+    return value[:12]
+
+
+def wait_for_updated_branch_head(
+    repo: str,
+    pr: dict[str, Any],
+    *,
+    attempts: int = DEFAULT_UPDATE_BRANCH_HEAD_POLL_ATTEMPTS,
+    delay_seconds: float = DEFAULT_UPDATE_BRANCH_HEAD_POLL_SECONDS,
+) -> dict[str, Any] | None:
+    """Poll GitHub after update-branch until the PR head or freshness evidence changes."""
+    original_head = str(pr.get("headRefOid") or "")
+    attempts = max(1, attempts)
+    for attempt in range(attempts):
+        if attempt and delay_seconds > 0:
+            time.sleep(delay_seconds)
+        fresh_prs = fetch_pr(repo, int(pr["number"]))
+        if not fresh_prs:
+            continue
+        fresh_pr = fresh_prs[0]
+        fresh_head = str(fresh_pr.get("headRefOid") or "")
+        if fresh_head and fresh_head != original_head:
+            return fresh_pr
+        fresh_merge_state = effective_merge_state(fresh_pr)
+        if branch_outdated_by_base(fresh_pr, fresh_merge_state) <= 0:
+            return fresh_pr
+    return None
+
+
+def post_update_branch_followup(
+    repo: str,
+    pr: dict[str, Any],
+    *,
+    dry_run: bool,
+    trigger_reviews: bool,
+    review_dispatch_allowed: bool,
+    workflow: str,
+    security_workflow: str,
+    stale_opencode_minutes: int,
+) -> str | None:
+    """After update-branch, observe the new head and dispatch current-head evidence."""
+    if dry_run:
+        return None
+
+    original_head = str(pr.get("headRefOid") or "")
+    updated_pr = wait_for_updated_branch_head(repo, pr)
+    if updated_pr is None:
+        return (
+            "update-branch was accepted, but the scheduler did not observe a refreshed PR head within "
+            "the poll window; the next scheduler run must re-read the PR before review or merge"
+        )
+
+    updated_head = str(updated_pr.get("headRefOid") or "")
+    if not updated_head or updated_head == original_head:
+        return (
+            f"update-branch completed without a new head SHA (still {short_sha(original_head)}); "
+            "wait for GitHub to refresh branch-freshness and required-check evidence"
+        )
+
+    head_note = f"updated head {short_sha(updated_head)} observed after update-branch"
+    if not trigger_reviews:
+        return f"{head_note}; review dispatch is disabled for this scheduler run"
+    if not review_dispatch_allowed:
+        return f"{head_note}; review dispatch limit reached, so no same-head evidence workflow was dispatched"
+
+    strix_state = strix_evidence_state(updated_pr)
+    if strix_state == "missing":
+        dispatch_strix_evidence(repo, security_workflow, updated_pr, dry_run=dry_run)
+        return (
+            f"{head_note}; same-head Strix evidence dispatched because workflow-token branch updates "
+            "must not rely on a PR synchronize event to rerun evidence"
+        )
+    if strix_state == "running":
+        return f"{head_note}; same-head Strix evidence is already running"
+
+    opencode_state = opencode_progress_state(updated_pr, stale_after_minutes=stale_opencode_minutes)
+    if opencode_state == "running":
+        return f"{head_note}; same-head OpenCode review is already running"
+
+    dispatch_opencode_review(repo, workflow, updated_pr, dry_run=dry_run)
+    return f"{head_note}; same-head Strix evidence is complete, so OpenCode review was dispatched"
+
+
 def can_update_pr_head(repo: str, pr: dict[str, Any]) -> bool:
     """Return whether the scheduler may try to mutate the PR head branch."""
     head_repo = (pr.get("headRepository") or {}).get("nameWithOwner")
@@ -983,6 +1110,11 @@ def auto_merge_wait_reason(merge_state: str) -> str:
     """Explain why an approved PR with auto-merge enabled is still waiting."""
     if merge_state == "CLEAN":
         return "current head is approved; auto-merge already enabled"
+    if merge_state in {"DIRTY", "CONFLICTING"}:
+        return (
+            "current head is approved and auto-merge is already enabled, "
+            "but conflict repair is required before GitHub can merge it"
+        )
     return (
         "current head is approved and auto-merge is already enabled, "
         f"but GitHub mergeability is {merge_state}; wait for required workflows, rulesets, "
@@ -996,6 +1128,7 @@ def inspect_pr(
     *,
     dry_run: bool,
     trigger_reviews: bool,
+    review_dispatch_allowed: bool = True,
     enable_auto_merge_flag: bool,
     update_branches: bool,
     workflow: str,
@@ -1028,30 +1161,6 @@ def inspect_pr(
         return finish(Decision(number, action, reason))
 
     merge_state = effective_merge_state(pr)
-    if merge_state == "UNKNOWN":
-        if pr.get("autoMergeRequest"):
-            return finish(
-                disable_auto_merge_decision(
-                    repo,
-                    pr,
-                    dry_run=dry_run,
-                    reason="mergeability is still being calculated; wait for GitHub mergeability evidence before re-enabling auto-merge",
-                )
-            )
-        return decide("wait", "mergeability is still being calculated")
-
-    if merge_state in {"DIRTY", "CONFLICTING"}:
-        if pr.get("autoMergeRequest"):
-            return finish(
-                disable_auto_merge_decision(
-                    repo,
-                    pr,
-                    dry_run=dry_run,
-                    reason=f"{merge_conflict_guidance(pr, merge_state)}; repair the conflict before re-enabling auto-merge",
-                )
-            )
-        return decide("block", merge_conflict_guidance(pr, merge_state))
-
     unresolved = unresolved_thread_count(pr)
     if unresolved:
         if pr.get("autoMergeRequest"):
@@ -1079,6 +1188,37 @@ def inspect_pr(
 
     current_head_approved = has_current_head_approval(pr)
     auto_merge_enabled = bool(pr.get("autoMergeRequest"))
+    if merge_state in {"DIRTY", "CONFLICTING"}:
+        conflict_reason = merge_conflict_guidance(pr, merge_state)
+        if current_head_approved:
+            if auto_merge_enabled:
+                return decide("wait", f"{auto_merge_wait_reason(merge_state)}; {conflict_reason}")
+            if enable_auto_merge_flag and merge_mode == "auto":
+                enable_auto_merge(repo, pr, dry_run=dry_run)
+                return decide(
+                    "auto_merge",
+                    "current head is approved; auto-merge enabled and queued while conflict repair remains required; "
+                    f"{conflict_reason}",
+                )
+            return decide(
+                "wait",
+                "current head is approved; auto-merge is not queued because scheduler auto-merge "
+                f"is disabled or merge mode is {merge_mode}; {conflict_reason}",
+            )
+        if auto_merge_enabled:
+            return finish(
+                disable_auto_merge_decision(
+                    repo,
+                    pr,
+                    dry_run=dry_run,
+                    reason=(
+                        f"{conflict_reason}; current head has no OpenCode approval; "
+                        "repair the conflict and get same-head approval before re-enabling auto-merge"
+                    ),
+                )
+            )
+        return decide("block", conflict_reason)
+
     behind_by = branch_outdated_by_base(pr, merge_state)
     if behind_by and (current_head_approved or auto_merge_enabled):
         if not update_branches:
@@ -1103,11 +1243,36 @@ def inspect_pr(
                 "auto-merge already enabled; "
                 f"base branch is {behind_by} commit(s) ahead even though GitHub mergeability is {merge_state}"
             )
-        return decide(
+        followup_note = post_update_branch_followup(
+            repo,
+            pr,
+            dry_run=dry_run,
+            trigger_reviews=trigger_reviews,
+            review_dispatch_allowed=review_dispatch_allowed,
+            workflow=workflow,
+            security_workflow=security_workflow,
+            stale_opencode_minutes=stale_opencode_minutes,
+        )
+        decision = Decision(
+            number,
             "update_branch",
             f"{freshness_reason}; branch update requested with workflow GH_TOKEN "
             f"(github-actions[bot] in GitHub Actions){suffix}",
+            (followup_note,) if followup_note else (),
         )
+        return finish(decision)
+
+    if merge_state == "UNKNOWN":
+        if pr.get("autoMergeRequest"):
+            return finish(
+                disable_auto_merge_decision(
+                    repo,
+                    pr,
+                    dry_run=dry_run,
+                    reason="mergeability is still being calculated and no branch freshness evidence is available; wait for GitHub mergeability evidence before re-enabling auto-merge",
+                )
+            )
+        return decide("wait", "mergeability is still being calculated and no branch freshness evidence is available")
 
     if current_head_approved:
         failed_checks = failed_status_checks(pr)
@@ -1169,6 +1334,11 @@ def inspect_pr(
             f"OpenCode review exceeded {stale_opencode_minutes} minute retry threshold; review dispatch disabled",
         )
     if opencode_state == "stale":
+        if not review_dispatch_allowed:
+            return decide(
+                "wait",
+                f"OpenCode review exceeded {stale_opencode_minutes} minute retry threshold; review dispatch limit reached",
+            )
         dispatch_opencode_review(repo, workflow, pr, dry_run=dry_run)
         return decide(
             "review_dispatch",
@@ -1178,6 +1348,11 @@ def inspect_pr(
     if trigger_reviews:
         strix_state = strix_evidence_state(pr)
         if strix_state == "missing":
+            if not review_dispatch_allowed:
+                return decide(
+                    "wait",
+                    "current head has no completed Strix evidence; review dispatch limit reached",
+                )
             dispatch_strix_evidence(repo, security_workflow, pr, dry_run=dry_run)
             return decide(
                 "security_dispatch",
@@ -1187,6 +1362,11 @@ def inspect_pr(
             return decide("wait", "same-head Strix evidence is still running")
         # Legacy trusted-base Strix self-test sentinel while this scheduler rollout lands:
         # same-head Strix and OpenCode dispatched
+        if not review_dispatch_allowed:
+            return decide(
+                "wait",
+                "current head has completed Strix evidence; review dispatch limit reached",
+            )
         dispatch_opencode_review(repo, workflow, pr, dry_run=dry_run)
         return decide(
             "review_dispatch",
@@ -1378,7 +1558,7 @@ def update_branch_summary(decisions: list[Decision]) -> list[str]:
     if not updates:
         return []
     pr_list = ", ".join(f"#{decision.pr}" for decision in updates)
-    return [
+    lines = [
         "",
         "### Branch update requests",
         "",
@@ -1390,6 +1570,11 @@ def update_branch_summary(decisions: list[Decision]) -> list[str]:
         "When repository permissions allow the mutation, GitHub records the resulting branch update as `github-actions[bot]`.",
         "The updated head is not merge evidence by itself. Wait for the new head to receive OpenCode approval, Strix evidence, required checks, and unresolved-thread checks before merge or auto-merge.",
     ]
+    followups = [(decision, note) for decision in updates for note in decision.notes if "update-branch" in note]
+    if followups:
+        lines.extend(["", "Follow-up evidence:"])
+        lines.extend(f"- PR #{decision.pr}: {note}" for decision, note in followups)
+    return lines
 
 
 def parse_external_head_update_reason(reason: str) -> str | None:
@@ -1511,6 +1696,23 @@ def summarize_action_error(exc: RuntimeError) -> str:
 
 def self_test() -> None:
     """Exercise scheduler invariants without GitHub network access."""
+    assert split_repo("owner/name") == ("owner", "name")
+    assert split_repo("owner/name/extra") == ("owner", "name/extra")
+    try:
+        split_repo("owner")
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
+    try:
+        split_repo("/name")
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
+    try:
+        split_repo("owner/")
+        raise AssertionError("expected ValueError")
+    except ValueError:
+        pass
     sample = {
         "number": 1,
         "headRefOid": "abc",
@@ -1588,7 +1790,8 @@ def self_test() -> None:
         security_workflow="Strix Security Scan",
         base_branch="main",
     )
-    assert decision.action == "disable_auto_merge"
+    assert decision.action == "wait"
+    assert "auto-merge is already enabled" in decision.reason
     assert "merge conflict: DIRTY" in decision.reason
     sample["restMergeableState"] = "UNKNOWN"
     sample["autoMergeRequest"] = None
@@ -1831,12 +2034,27 @@ def self_test() -> None:
         security_workflow="Strix Security Scan",
         base_branch="main",
     )
-    assert decision.action == "disable_auto_merge"
+    assert decision.action == "wait"
+    assert "auto-merge is already enabled" in decision.reason
     assert "merge conflict: DIRTY" in decision.reason
     conflict_guidance = decision_guidance(decision)
     assert conflict_guidance
     assert conflict_guidance["type"] == "merge_conflict_repair"
     sample["autoMergeRequest"] = None
+    decision = inspect_pr(
+        "owner/repo",
+        sample,
+        dry_run=True,
+        trigger_reviews=True,
+        enable_auto_merge_flag=True,
+        update_branches=True,
+        workflow="OpenCode Review",
+        security_workflow="Strix Security Scan",
+        base_branch="main",
+    )
+    assert decision.action == "auto_merge"
+    assert "auto-merge enabled and queued while conflict repair remains required" in decision.reason
+    sample["reviews"]["nodes"][0]["commit"]["oid"] = "old"
     decision = inspect_pr(
         "owner/repo",
         sample,
@@ -1917,6 +2135,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--pr-number", type=int, default=0)
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--trigger-reviews", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--review-dispatch-limit",
+        type=int,
+        default=int(os.environ.get("REVIEW_DISPATCH_LIMIT", "-1")),
+        help="Maximum OpenCode/Strix review dispatch actions per scheduler run; -1 means unlimited",
+    )
     parser.add_argument("--enable-auto-merge", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument(
         "--merge-mode",
@@ -1949,15 +2173,22 @@ def main(argv: list[str]) -> int:
         raise SystemExit("--project-flow is required")
     if args.pr_number < 0:
         raise SystemExit("--pr-number must not be negative")
+    if args.review_dispatch_limit < -1:
+        raise SystemExit("--review-dispatch-limit must be -1 or greater")
     prs = fetch_pr(args.repo, args.pr_number) if args.pr_number else fetch_open_prs(args.repo, args.max_prs)
     decisions = []
+    review_dispatches_used = 0
     for pr in prs:
+        review_dispatch_allowed = (
+            args.review_dispatch_limit < 0 or review_dispatches_used < args.review_dispatch_limit
+        )
         try:
             decision = inspect_pr(
                 args.repo,
                 pr,
                 dry_run=args.dry_run,
                 trigger_reviews=args.trigger_reviews,
+                review_dispatch_allowed=review_dispatch_allowed,
                 enable_auto_merge_flag=args.enable_auto_merge,
                 merge_mode=args.merge_mode,
                 update_branches=args.update_branches,
@@ -1973,6 +2204,8 @@ def main(argv: list[str]) -> int:
                 summarize_action_error(exc),
             )
         decisions.append(decision)
+        if decision.action in {"review_dispatch", "security_dispatch"}:
+            review_dispatches_used += 1
     print_summary(
         decisions,
         dry_run=args.dry_run,

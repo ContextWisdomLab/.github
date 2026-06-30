@@ -221,6 +221,42 @@ def test_fetch_pr_uses_exact_pull_request_number(monkeypatch):
     assert seen == [{"owner": "owner", "name": "repo", "number": 42}]
 
 
+def test_gh_graphql_retries_transient_gateway_errors(monkeypatch):
+    calls = []
+    sleeps = []
+
+    def fake_run(args, stdin=None):
+        calls.append((args, stdin))
+        if len(calls) == 1:
+            raise RuntimeError("Command failed (1): gh api graphql\ngh: HTTP 502")
+        if len(calls) == 2:
+            raise RuntimeError("Command failed (1): gh api graphql\ngh: HTTP 504")
+        return '{"data":{"repository":{"pullRequests":{"nodes":[],"pageInfo":{"hasNextPage":false}}}}}'
+
+    monkeypatch.setattr(sched, "run", fake_run)
+    monkeypatch.setattr(sched.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    payload = sched.gh_graphql("query", owner="owner", name="repo", pageSize=100)
+
+    assert payload["data"]["repository"]["pullRequests"]["nodes"] == []
+    assert len(calls) == 3
+    assert sleeps == [1, 2]
+
+
+def test_gh_graphql_does_not_retry_non_transient_errors(monkeypatch):
+    calls = []
+
+    def fake_run(args, stdin=None):
+        calls.append(args)
+        raise RuntimeError("Command failed (1): gh api graphql\ngh: Field 'unknown' doesn't exist on type 'PullRequest'")
+
+    monkeypatch.setattr(sched, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="Field 'unknown'"):
+        sched.gh_graphql("query", owner="owner")
+    assert len(calls) == 1
+
+
 def test_rest_mergeable_state_helpers(monkeypatch):
     calls = []
 
@@ -969,7 +1005,9 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert "merge conflict: DIRTY" in rest_conflict.reason
     unknown_mergeability = inspect(make_pr(mergeStateStatus="CLEAN", restMergeableState="UNKNOWN"))
     assert unknown_mergeability.action == "wait"
-    assert unknown_mergeability.reason == "mergeability is still being calculated"
+    assert unknown_mergeability.reason == (
+        "mergeability is still being calculated and no branch freshness evidence is available"
+    )
     unknown_auto_merge = inspect(
         make_pr(
             mergeStateStatus="CLEAN",
@@ -1220,6 +1258,51 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert "existing auto-merge request remains queued" in blocked_compare_behind_decision.reason
     assert called == [("owner/repo", 1, True)]
     called.clear()
+    diverged_failed_auto = make_pr(
+        mergeStateStatus="BLOCKED",
+        restMergeableState="BLOCKED",
+        compareStatus="diverged",
+        compareBehindBy=184,
+        compareAheadBy=1,
+        autoMergeRequest={"enabledAt": "now"},
+        statusCheckRollup={
+            "contexts": {
+                "nodes": [
+                    {"__typename": "CheckRun", "name": "coverage-evidence", "conclusion": "FAILURE"},
+                    {"__typename": "CheckRun", "name": "opencode-review", "conclusion": "FAILURE"},
+                ],
+            }
+        },
+    )
+    diverged_failed_decision = inspect(diverged_failed_auto)
+    assert diverged_failed_decision.action == "update_branch"
+    assert "auto-merge already enabled" in diverged_failed_decision.reason
+    assert "base branch is 184 commit(s) ahead" in diverged_failed_decision.reason
+    assert "existing auto-merge request remains queued" in diverged_failed_decision.reason
+    assert called == [("owner/repo", 1, True)]
+    called.clear()
+    unknown_compare_behind_auto = make_pr(
+        mergeStateStatus="UNKNOWN",
+        restMergeableState="UNKNOWN",
+        compareStatus="behind",
+        autoMergeRequest={"enabledAt": "now"},
+        statusCheckRollup={
+            "contexts": {
+                "nodes": [
+                    {"__typename": "CheckRun", "name": "strix", "conclusion": "FAILURE"},
+                    {"__typename": "CheckRun", "name": "coverage-evidence", "conclusion": "FAILURE"},
+                ],
+            }
+        },
+    )
+    unknown_compare_behind_decision = inspect(unknown_compare_behind_auto)
+    assert unknown_compare_behind_decision.action == "update_branch"
+    assert "auto-merge already enabled" in unknown_compare_behind_decision.reason
+    assert "base branch is 1 commit(s) ahead" in unknown_compare_behind_decision.reason
+    assert "GitHub mergeability is UNKNOWN" in unknown_compare_behind_decision.reason
+    assert "existing auto-merge request remains queued" in unknown_compare_behind_decision.reason
+    assert called == [("owner/repo", 1, True)]
+    called.clear()
     disabled.clear()
     assert (
         inspect(blocked_failed_behind_auto_without_opencode_approval, update_branches=False).reason
@@ -1236,6 +1319,239 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert behind_without_opencode_decision.reason.startswith("auto-merge already enabled; branch update requested")
     assert "existing auto-merge request remains queued" in behind_without_opencode_decision.reason
     assert called == [("owner/repo", 1, True)]
+
+
+def test_inspect_pr_queues_auto_merge_for_approved_conflicts(monkeypatch):
+    auto_merges = []
+    disables = []
+    monkeypatch.setattr(
+        sched,
+        "enable_auto_merge",
+        lambda repo, pr, dry_run: auto_merges.append((repo, pr["number"], dry_run)),
+    )
+    monkeypatch.setattr(
+        sched,
+        "disable_auto_merge",
+        lambda repo, pr, dry_run: disables.append((repo, pr["number"], dry_run)),
+    )
+
+    approved_conflict = make_pr(
+        mergeStateStatus="DIRTY",
+        reviews={"nodes": [opencode_review("APPROVED", "head")]},
+    )
+    decision = inspect(approved_conflict)
+    assert decision.action == "auto_merge"
+    assert "auto-merge enabled and queued while conflict repair remains required" in decision.reason
+    assert "merge conflict: DIRTY" in decision.reason
+    assert "gh pr checkout 1" in decision.reason
+    assert auto_merges == [("owner/repo", 1, True)]
+    assert disables == []
+
+    already_queued = inspect(
+        make_pr(
+            mergeStateStatus="CONFLICTING",
+            reviews={"nodes": [opencode_review("APPROVED", "head")]},
+            autoMergeRequest={"enabledAt": "now"},
+        )
+    )
+    assert already_queued.action == "wait"
+    assert "auto-merge is already enabled" in already_queued.reason
+    assert "conflict repair is required" in already_queued.reason
+    assert "merge conflict: CONFLICTING" in already_queued.reason
+    assert auto_merges == [("owner/repo", 1, True)]
+    assert disables == []
+
+    disabled_by_inputs = inspect(
+        make_pr(
+            mergeStateStatus="DIRTY",
+            reviews={"nodes": [opencode_review("APPROVED", "head")]},
+        ),
+        enable_auto_merge_flag=False,
+    )
+    assert disabled_by_inputs.action == "wait"
+    assert "auto-merge is not queued" in disabled_by_inputs.reason
+    assert "merge conflict: DIRTY" in disabled_by_inputs.reason
+    assert auto_merges == [("owner/repo", 1, True)]
+
+    direct_mode = inspect(
+        make_pr(
+            mergeStateStatus="DIRTY",
+            reviews={"nodes": [opencode_review("APPROVED", "head")]},
+        ),
+        merge_mode="direct",
+    )
+    assert direct_mode.action == "wait"
+    assert "merge mode is direct" in direct_mode.reason
+    assert "merge conflict: DIRTY" in direct_mode.reason
+    assert auto_merges == [("owner/repo", 1, True)]
+
+
+def test_wait_for_updated_branch_head_polls_until_head_changes(monkeypatch):
+    fetches = []
+    sleeps = []
+    same_head = make_pr(
+        headRefOid="head",
+        mergeStateStatus="BLOCKED",
+        restMergeableState="BLOCKED",
+        compareBehindBy=1,
+    )
+    new_head = make_pr(headRefOid="new-head", mergeStateStatus="CLEAN", restMergeableState="CLEAN")
+
+    def fake_fetch_pr(repo, number):
+        fetches.append((repo, number))
+        return [same_head if len(fetches) == 1 else new_head]
+
+    monkeypatch.setattr(sched, "fetch_pr", fake_fetch_pr)
+    monkeypatch.setattr(sched.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    assert sched.wait_for_updated_branch_head("owner/repo", make_pr(), attempts=3, delay_seconds=0.25) == new_head
+    assert fetches == [("owner/repo", 1), ("owner/repo", 1)]
+    assert sleeps == [0.25]
+
+
+def test_wait_for_updated_branch_head_handles_empty_fetch_and_fresh_same_head(monkeypatch):
+    fetches = []
+    fresh_same_head = make_pr(headRefOid="head", mergeStateStatus="CLEAN", restMergeableState="CLEAN")
+
+    def fake_fetch_pr(repo, number):
+        fetches.append((repo, number))
+        return [] if len(fetches) == 1 else [fresh_same_head]
+
+    monkeypatch.setattr(sched, "fetch_pr", fake_fetch_pr)
+    monkeypatch.setattr(sched.time, "sleep", lambda seconds: None)
+
+    assert sched.short_sha(None) == "<unknown>"
+    assert sched.wait_for_updated_branch_head("owner/repo", make_pr(), attempts=2, delay_seconds=0) == fresh_same_head
+    assert fetches == [("owner/repo", 1), ("owner/repo", 1)]
+
+
+def test_wait_for_updated_branch_head_returns_none_when_still_outdated(monkeypatch):
+    stale_same_head = make_pr(
+        headRefOid="head",
+        mergeStateStatus="BLOCKED",
+        restMergeableState="BLOCKED",
+        compareBehindBy=2,
+    )
+
+    monkeypatch.setattr(sched, "fetch_pr", lambda repo, number: [stale_same_head])
+    monkeypatch.setattr(sched.time, "sleep", lambda seconds: None)
+
+    assert sched.wait_for_updated_branch_head("owner/repo", make_pr(), attempts=2, delay_seconds=0) is None
+
+
+def test_inspect_pr_dispatches_strix_after_update_branch_observes_new_head(monkeypatch):
+    updated = []
+    dispatched = []
+    old_head_pr = make_pr(
+        mergeStateStatus="BEHIND",
+        reviews={"nodes": [opencode_review("APPROVED", "head")]},
+        autoMergeRequest={"enabledAt": "now"},
+    )
+    new_head_pr = make_pr(headRefOid="new-head", reviews={"nodes": []})
+
+    monkeypatch.setattr(sched, "update_branch", lambda repo, pr, dry_run: updated.append((repo, pr["headRefOid"], dry_run)))
+    monkeypatch.setattr(sched, "wait_for_updated_branch_head", lambda repo, pr: new_head_pr)
+    monkeypatch.setattr(
+        sched,
+        "dispatch_strix_evidence",
+        lambda repo, workflow, pr, dry_run: dispatched.append((repo, workflow, pr["headRefOid"], dry_run)),
+    )
+
+    decision = inspect(old_head_pr, dry_run=False)
+
+    assert decision.action == "update_branch"
+    assert updated == [("owner/repo", "head", False)]
+    assert dispatched == [("owner/repo", "Strix Security Scan", "new-head", False)]
+    assert decision.notes == (
+        "updated head new-head observed after update-branch; same-head Strix evidence dispatched because workflow-token branch updates must not rely on a PR synchronize event to rerun evidence",
+    )
+
+
+def test_inspect_pr_notes_when_update_branch_head_is_not_observed(monkeypatch):
+    updated = []
+    pr = make_pr(
+        mergeStateStatus="BEHIND",
+        reviews={"nodes": [opencode_review("APPROVED", "head")]},
+    )
+
+    monkeypatch.setattr(sched, "update_branch", lambda repo, pr, dry_run: updated.append(pr["number"]))
+    monkeypatch.setattr(sched, "wait_for_updated_branch_head", lambda repo, pr: None)
+
+    decision = inspect(pr, dry_run=False)
+
+    assert decision.action == "update_branch"
+    assert updated == [1]
+    assert decision.notes == (
+        "update-branch was accepted, but the scheduler did not observe a refreshed PR head within the poll window; the next scheduler run must re-read the PR before review or merge",
+    )
+
+
+def test_post_update_branch_followup_covers_dispatch_boundaries(monkeypatch):
+    original = make_pr(headRefOid="old-head")
+    opencode_dispatched = []
+
+    def followup(updated_pr, **overrides):
+        monkeypatch.setattr(sched, "wait_for_updated_branch_head", lambda repo, pr: updated_pr)
+        kwargs = {
+            "dry_run": False,
+            "trigger_reviews": True,
+            "review_dispatch_allowed": True,
+            "workflow": "OpenCode Review",
+            "security_workflow": "Strix Security Scan",
+            "stale_opencode_minutes": 45,
+        }
+        kwargs.update(overrides)
+        return sched.post_update_branch_followup("owner/repo", original, **kwargs)
+
+    assert "without a new head SHA" in followup(make_pr(headRefOid="old-head"))
+    assert "review dispatch is disabled" in followup(make_pr(headRefOid="new-head"), trigger_reviews=False)
+    assert "review dispatch limit reached" in followup(
+        make_pr(headRefOid="new-head"),
+        review_dispatch_allowed=False,
+    )
+    assert "same-head Strix evidence is already running" in followup(
+        make_pr(
+            headRefOid="new-head",
+            statusCheckRollup={"contexts": {"nodes": [strix_check(status="IN_PROGRESS", conclusion="")]}},
+        )
+    )
+    assert "same-head OpenCode review is already running" in followup(
+        make_pr(
+            headRefOid="new-head",
+            statusCheckRollup={"contexts": {"nodes": [strix_check(), opencode_check()]}},
+        )
+    )
+
+    monkeypatch.setattr(
+        sched,
+        "dispatch_opencode_review",
+        lambda repo, workflow, pr, dry_run: opencode_dispatched.append((repo, workflow, pr["headRefOid"], dry_run)),
+    )
+    assert "OpenCode review was dispatched" in followup(
+        make_pr(
+            headRefOid="new-head",
+            statusCheckRollup={"contexts": {"nodes": [strix_check()]}},
+        )
+    )
+    assert opencode_dispatched == [("owner/repo", "OpenCode Review", "new-head", False)]
+
+
+def test_update_branch_summary_includes_followup_notes():
+    summary = "\n".join(
+        sched.update_branch_summary(
+            [
+                sched.Decision(
+                    12,
+                    "update_branch",
+                    "branch update requested",
+                    ("updated head abc123 observed after update-branch; same-head Strix evidence dispatched",),
+                )
+            ]
+        )
+    )
+
+    assert "Follow-up evidence" in summary
+    assert "PR #12: updated head abc123 observed after update-branch" in summary
 
 
 def test_inspect_pr_handles_approved_reviews_and_dispatch(monkeypatch):
@@ -1314,13 +1630,106 @@ def test_inspect_pr_handles_approved_reviews_and_dispatch(monkeypatch):
     assert stale_decision.action == "review_dispatch"
     assert "retry threshold" in stale_decision.reason
     assert dispatched == ["Strix Security Scan", "OpenCode Review", "OpenCode Review"]
+    stale_limited = inspect(stale_opencode, stale_opencode_minutes=0, review_dispatch_allowed=False)
+    assert stale_limited.action == "wait"
+    assert "review dispatch limit reached" in stale_limited.reason
     stale_wait = inspect(stale_opencode, trigger_reviews=False, stale_opencode_minutes=0)
     assert stale_wait.action == "wait"
     assert "review dispatch disabled" in stale_wait.reason
+    missing_limited = inspect(make_pr(), review_dispatch_allowed=False)
+    assert missing_limited.action == "wait"
+    assert (
+        missing_limited.reason
+        == "current head has no completed Strix evidence; review dispatch limit reached"
+    )
+    completed_strix_limited = inspect(
+        make_pr(statusCheckRollup={"contexts": {"nodes": [strix_check()]}}),
+        review_dispatch_allowed=False,
+    )
+    assert completed_strix_limited.action == "wait"
+    assert completed_strix_limited.reason == "current head has completed Strix evidence; review dispatch limit reached"
     assert inspect(make_pr(), trigger_reviews=False).reason == "current head has no OpenCode approval"
     missing_approval_auto = inspect(make_pr(autoMergeRequest={"enabledAt": "now"}), trigger_reviews=False)
     assert missing_approval_auto.action == "disable_auto_merge"
     assert "no OpenCode approval" in missing_approval_auto.reason
+
+
+def test_main_limits_review_dispatches_without_blocking_branch_updates(monkeypatch, capsys):
+    prs = [
+        make_pr(
+            number=1,
+            statusCheckRollup={"contexts": {"nodes": [strix_check()]}},
+        ),
+        make_pr(
+            number=2,
+            statusCheckRollup={"contexts": {"nodes": [strix_check()]}},
+        ),
+        make_pr(
+            number=3,
+            mergeStateStatus="BLOCKED",
+            restMergeableState="BLOCKED",
+            compareBehindBy=2,
+            autoMergeRequest={"enabledAt": "now"},
+        ),
+    ]
+    dispatched = []
+    updated = []
+
+    monkeypatch.setattr(sched, "fetch_open_prs", lambda repo, max_prs: prs)
+    monkeypatch.setattr(
+        sched,
+        "dispatch_opencode_review",
+        lambda repo, workflow, pr, dry_run: dispatched.append(pr["number"]),
+    )
+    monkeypatch.setattr(
+        sched,
+        "update_branch",
+        lambda repo, pr, dry_run: updated.append(pr["number"]),
+    )
+    monkeypatch.setattr(sched, "wait_for_updated_branch_head", lambda repo, pr: None)
+
+    assert (
+        sched.main(
+            [
+                "--repo",
+                "owner/repo",
+                "--base-branch",
+                "main",
+                "--project-flow",
+                "github-flow",
+                "--review-dispatch-limit",
+                "1",
+            ]
+        )
+        == 0
+    )
+
+    output = capsys.readouterr().out
+    payload = json.loads(output.strip().splitlines()[-1])
+    assert dispatched == [1]
+    assert updated == [3]
+    assert payload["counts"] == {"review_dispatch": 1, "update_branch": 1, "wait": 1}
+    assert (
+        payload["decisions"][1]["reason"]
+        == "current head has completed Strix evidence; review dispatch limit reached"
+    )
+    assert payload["decisions"][2]["contract_decision"] == "UPDATE_BRANCH"
+
+
+def test_main_rejects_invalid_review_dispatch_limit():
+    with pytest.raises(SystemExit, match="--review-dispatch-limit must be -1 or greater"):
+        sched.main(
+            [
+                "--repo",
+                "owner/repo",
+                "--base-branch",
+                "main",
+                "--project-flow",
+                "github-flow",
+                "--review-dispatch-limit",
+                "-2",
+            ]
+        )
 
 
 def test_print_summary_self_test_parse_args_and_main(monkeypatch, capsys):
@@ -1339,6 +1748,19 @@ def test_print_summary_self_test_parse_args_and_main(monkeypatch, capsys):
 
     sched.self_test()
     assert "self-test passed" in capsys.readouterr().out
+
+    real_split_repo = sched.split_repo
+    invalid_inputs = ["owner", "/name", "owner/"]
+    for accepted_invalid in invalid_inputs:
+        def fake_split_repo(repo, accepted_invalid=accepted_invalid):
+            if repo == accepted_invalid:
+                return ("accepted", "invalid")
+            return real_split_repo(repo)
+
+        monkeypatch.setattr(sched, "split_repo", fake_split_repo)
+        with pytest.raises(AssertionError, match="expected ValueError"):
+            sched.self_test()
+    monkeypatch.setattr(sched, "split_repo", real_split_repo)
 
     parsed = sched.parse_args(
         [
