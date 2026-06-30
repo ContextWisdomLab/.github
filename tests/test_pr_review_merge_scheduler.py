@@ -126,6 +126,27 @@ def test_run_split_repo_and_graphql(monkeypatch):
     assert calls[0][1] == "query"
 
 
+def test_github_reads_use_dedicated_read_token_when_configured(monkeypatch):
+    calls = []
+
+    monkeypatch.setenv("GH_TOKEN", "mutation-token")
+    monkeypatch.setenv("SCHEDULER_READ_TOKEN", "read-token")
+
+    def fake_run_with_env(args, stdin=None, env=None):
+        calls.append((args, stdin, env))
+        return '{"ok": true}'
+
+    monkeypatch.setattr(sched, "run_with_env", fake_run_with_env)
+
+    assert sched.gh_api_json("repos/owner/repo/pulls/1") == {"ok": True}
+    assert sched.gh_graphql("query", owner="owner") == {"ok": True}
+    assert calls[0][0] == ["gh", "api", "repos/owner/repo/pulls/1"]
+    assert calls[0][2]["GH_TOKEN"] == "read-token"
+    assert calls[1][0][:3] == ["gh", "api", "graphql"]
+    assert calls[1][1] == "query"
+    assert calls[1][2]["GH_TOKEN"] == "read-token"
+
+
 def test_run_passes_shell_metacharacters_as_plain_arguments(tmp_path):
     sentinel = tmp_path / "pwned"
     payload = f"feature; touch {sentinel}; #"
@@ -439,7 +460,7 @@ def test_fetch_pr_falls_back_to_rest_when_graphql_denied(monkeypatch):
 def test_rest_api_wrapper_and_fetch_pr_rest(monkeypatch):
     run_calls = []
 
-    def fake_run(args):
+    def fake_run(args, stdin=None):
         run_calls.append(args)
         return json.dumps({"number": 42})
 
