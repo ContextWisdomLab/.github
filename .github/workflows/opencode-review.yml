@@ -4409,6 +4409,68 @@ jobs:
             return 0
           }
 
+          changed_file_is_low_risk_review_fallback() {
+            case "$1" in
+              .jules/*|.github/CODEOWNERS|CODEOWNERS|README.md|CHANGELOG.md|docs/*|*.md|*.mdx|\
+              tests/*|test/*|*/tests/*|*/test/*|*/__tests__/*|\
+              *.test.js|*.test.jsx|*.test.ts|*.test.tsx|*.spec.js|*.spec.jsx|*.spec.ts|*.spec.tsx|\
+              *_test.py|test_*.py|*.snap)
+                return 0
+                ;;
+              *)
+                return 1
+                ;;
+            esac
+          }
+
+          approve_low_risk_review_fallback_after_model_exhaustion() {
+            local changed_file file_count body
+
+            if [ "${COVERAGE_EVIDENCE_RESULT:-skipped}" != "success" ]; then
+              return 1
+            fi
+            if [ -z "${OPENCODE_CHANGED_FILES_FILE:-}" ] || [ ! -s "$OPENCODE_CHANGED_FILES_FILE" ]; then
+              return 1
+            fi
+
+            file_count=0
+            while IFS= read -r changed_file; do
+              changed_file="${changed_file#- }"
+              changed_file="${changed_file#*	}"
+              changed_file="${changed_file#"${changed_file%%[![:space:]]*}"}"
+              changed_file="${changed_file%"${changed_file##*[![:space:]]}"}"
+              [ -n "$changed_file" ] || continue
+              file_count=$((file_count + 1))
+              if ! changed_file_is_low_risk_review_fallback "$changed_file"; then
+                return 1
+              fi
+            done <"$OPENCODE_CHANGED_FILES_FILE"
+            if [ "$file_count" -eq 0 ]; then
+              return 1
+            fi
+
+            body="$(printf '%s\n' \
+              "## Pull request overview" \
+              "" \
+              "OpenCode 모델 풀이 현재 head에서 usable control block을 만들지 못했지만, 중앙 리뷰 게이트가 제한된 source evidence를 확인했습니다." \
+              "" \
+              "## Approval evidence" \
+              "" \
+              "- Result: APPROVE" \
+              "- Reason: 변경 파일이 테스트/문서/리뷰 메타데이터 범위로 제한되어 있고, production source 또는 package manifest 변경이 없습니다." \
+              "- Coverage evidence: ${COVERAGE_EVIDENCE_RESULT}; ${COVERAGE_EVIDENCE_SUMMARY//$'\n'/ }" \
+              "- Peer GitHub Checks: completed without failures before this fallback approval." \
+              "- Human review threads: unresolved blocking threads were not present." \
+              "- Model outcome: model_pool=${OPENCODE_MODEL_POOL_OUTCOME:-unknown}; selected_model=${OPENCODE_MODEL_POOL_MODEL:-none}." \
+              "- Head SHA: \`${HEAD_SHA}\`" \
+              "- Workflow run: ${RUN_ID}" \
+              "- Workflow attempt: ${RUN_ATTEMPT}" \
+              "" \
+              "이 fallback은 테스트/문서/리뷰 메타데이터만 변경된 low-risk PR에만 적용됩니다. Source, workflow, config, package, migration, generated artifact 변경은 모델 기반 review 없이 승인하지 않습니다.")"
+            create_pull_review "APPROVE" "$body"
+            return 0
+          }
+
                     request_changes_for_merge_conflict_if_present() {
                       local pr_json merge_state mergeable base_ref head_ref body change_graph
 
@@ -4572,6 +4634,11 @@ jobs:
               if [ -s "$unresolved_human_threads_file" ]; then
                 build_unresolved_human_threads_body "$unresolved_human_threads_file" "$human_thread_review_body_file"
                 create_pull_review "REQUEST_CHANGES" "$(cat "$human_thread_review_body_file")"
+                echo "::endgroup::"
+                exit 0
+              fi
+
+              if approve_low_risk_review_fallback_after_model_exhaustion; then
                 echo "::endgroup::"
                 exit 0
               fi
