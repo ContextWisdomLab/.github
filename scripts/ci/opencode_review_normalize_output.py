@@ -189,6 +189,22 @@ EXECUTABLE_KIND_FALSE_PHRASES = (
     "no executable files changed",
 )
 
+MATERIAL_CHANGE_FALSE_PHRASES = (
+    "change in a string is safe",
+    "just a string change",
+    "no tests are needed",
+    "no tests needed",
+    "no verification is needed",
+    "no verification needed",
+    "only a string change",
+    "safe string change",
+    "simple typo fix",
+    "string typo fix",
+    "string with no functional impact",
+    "string-only change",
+    "typo fix with no functional impact",
+)
+
 COVERAGE_FAILURE_PHRASES = (
     "not measured",
     "unmeasured",
@@ -338,6 +354,11 @@ def changed_file_is_test_like(path: str) -> bool:
     )
 
 
+def changed_file_is_material(path: str) -> bool:
+    """Return whether a changed path is too risky for trivial-string approval claims."""
+    return changed_file_is_source_like(path) or changed_file_is_test_like(path)
+
+
 def contradicts_changed_file_kinds(reason: str, summary: str) -> bool:
     """Return whether approval prose denies changed file kinds that evidence lists."""
     changed_files = current_changed_files()
@@ -354,6 +375,18 @@ def contradicts_changed_file_kinds(reason: str, summary: str) -> bool:
     if has_test_like_change and any(phrase in combined for phrase in TEST_KIND_FALSE_PHRASES):
         return True
     return False
+
+
+def contradicts_material_changed_file_scope(reason: str, summary: str) -> bool:
+    """Return whether approval prose trivializes material current-head changes."""
+    changed_files = current_changed_files()
+    if not changed_files:
+        return False
+    if not any(changed_file_is_material(path) for path in changed_files):
+        return False
+
+    combined = f"{reason}\n{summary}".casefold()
+    return any(phrase in combined for phrase in MATERIAL_CHANGE_FALSE_PHRASES)
 
 
 def mentions_actual_changed_file(reason: str, summary: str) -> bool:
@@ -601,6 +634,9 @@ def repair_approval_summary(reason: str, summary: str) -> str:
     if repaired_summary and contradicts_changed_file_kinds(reason, repaired_summary):
         # ponytail: drop model prose only when bounded evidence proves it denied changed file kinds.
         repaired_summary = build_approval_repair_summary("", evidence_text)
+    if repaired_summary and contradicts_material_changed_file_scope(reason, repaired_summary):
+        # Drop model prose that trivializes workflow/source/test/config changes as a mere string typo.
+        repaired_summary = build_approval_repair_summary("", evidence_text)
     return repaired_summary or summary
 
 
@@ -645,6 +681,11 @@ def check_structural_approval(control_file: Path) -> int:
         str(value.get("summary", "")),
     ):
         return reject("approval contradicts changed file kinds")
+    if value.get("result") == "APPROVE" and contradicts_material_changed_file_scope(
+        str(value.get("reason", "")),
+        str(value.get("summary", "")),
+    ):
+        return reject("approval trivializes material changed files")
     if value.get("result") == "APPROVE":
         phrase = model_failure_approval_phrase(
             str(value.get("reason", "")),
@@ -715,6 +756,8 @@ def valid_control(
         if not mentions_full_coverage(reason, summary):
             return None
         if contradicts_changed_file_kinds(reason, summary):
+            return None
+        if contradicts_material_changed_file_scope(reason, summary):
             return None
         if model_failure_approval_phrase(reason, summary):
             return None

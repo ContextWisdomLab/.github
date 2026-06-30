@@ -137,6 +137,7 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "naming and reserved-word" in prompt_template
     assert "connected code paths" in prompt_template
     assert "Korean PRs must receive Korean" in prompt_template
+    assert "Never approve material workflow, script, source, config, package, or test changes" in prompt_template
 
 
 def test_merge_scheduler_uses_escalating_mutation_credentials():
