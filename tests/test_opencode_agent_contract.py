@@ -158,8 +158,13 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "OPENCODE_MODEL_CANDIDATES" in workflow
     model_pool_runner = Path("scripts/ci/run_opencode_review_model_pool.sh").read_text(encoding="utf-8")
     assert "assert_reasoning_effort_for_candidate" in model_pool_runner
-    assert 'reasoningEffort == "high"' in model_pool_runner
-    assert "OpenCode reasoning-capable candidate %s must set reasoningEffort=high" in model_pool_runner
+    assert "assert_opencode_reasoning_effort.py" in model_pool_runner
+    assert "--config opencode.jsonc" in model_pool_runner
+    reasoning_effort_guard = Path("scripts/ci/assert_opencode_reasoning_effort.py").read_text(encoding="utf-8")
+    assert 'options.reasoningEffort=high' in reasoning_effort_guard
+    assert 'variants.high.reasoningEffort=high' in reasoning_effort_guard
+    assert "deepseek/deepseek-r1" in reasoning_effort_guard
+    assert "--config \"$OPENCODE_REVIEW_WORKDIR/opencode.jsonc\"" in workflow
     assert 'timeout --kill-after=15s "${export_timeout_seconds}s" opencode export' in model_pool_runner
     assert "session export did not complete within %ss" in model_pool_runner
     assert "approve_low_risk_review_fallback_after_model_exhaustion" in workflow

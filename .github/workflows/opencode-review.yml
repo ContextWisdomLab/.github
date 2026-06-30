@@ -3622,6 +3622,11 @@ jobs:
             if [ -z "${STRIX_GITHUB_MODELS_TOKEN:-}" ]; then
               return 1
             fi
+            if ! python3 "$GITHUB_WORKSPACE/scripts/ci/assert_opencode_reasoning_effort.py" \
+              --config "$OPENCODE_REVIEW_WORKDIR/opencode.jsonc" \
+              "$MODEL"; then
+              return 1
+            fi
 
             prompt_file="$(mktemp)"
             opencode_json_file="$(mktemp)"
