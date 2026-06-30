@@ -560,6 +560,75 @@ def test_valid_control_repairs_summary_from_invalid_utf8_evidence(tmp_path, monk
     assert norm.mentions_full_coverage(repaired["reason"], repaired["summary"])
 
 
+def test_valid_control_repairs_fragile_approval_reason_from_bounded_evidence(tmp_path, monkeypatch):
+    evidence = tmp_path / "bounded-review-evidence.md"
+    evidence.write_text(
+        """\
+# OpenCode bounded PR review evidence
+
+## Review language evidence
+
+- Preferred review language: `English`
+
+## Coverage execution evidence
+
+### Coverage measurement
+
+- Result: PASS
+- Reason: no supported changed source files or package manifests were found, so coverage measurement is not applicable for this head.
+
+## Coverage Decision
+
+- Result: PASS
+- Test coverage: not applicable (no supported changed source files or package manifests)
+- Docstring coverage: not applicable (no supported changed source files or package manifests)
+
+## Changed files
+
+M\t.github/workflows/r.yml
+
+## Changed file history evidence
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_EVIDENCE_FILE", str(evidence))
+    monkeypatch.delenv("OPENCODE_APPROVAL_REPAIR_EVIDENCE_FILE", raising=False)
+    changed_files = tmp_path / "changed-files.txt"
+    changed_files.write_text(".github/workflows/r.yml\n", encoding="utf-8")
+    monkeypatch.setenv("OPENCODE_CHANGED_FILES_FILE", str(changed_files))
+
+    repaired = norm.valid_control(
+        control(
+            reason="Dependency version bump with no source changes",
+            summary=(
+                "Approval sufficiency: Dependency version bump with no source changes. "
+                "Verification posture: No verification needed for workflow-only updates. "
+                "Linter/static: Not applicable. TDD/regression: Not applicable. "
+                "Coverage: Not applicable. Docstring coverage: Not applicable. "
+                "DAG: Not applicable. PoC/execution: Not applicable. "
+                "DDD/domain: Not applicable. CDD/context: Not applicable. "
+                "Similar issues: Not applicable. Claim/concept check: Not applicable. "
+                "Standards search: Not applicable. Compatibility/convention: Not applicable. "
+                "Breaking-change/backcompat: Not applicable. Performance: Not applicable. "
+                "Developer experience: Not applicable. User experience: Not applicable. "
+                "Visual/DOM: Not applicable. Accessibility/i18n: Not applicable. "
+                "Supply-chain/license: Not applicable. Packaging: Not applicable. "
+                "Security/privacy: Not applicable."
+            ),
+        ),
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    )
+
+    assert repaired is not None
+    assert ".github/workflows/r.yml" in repaired["reason"]
+    assert "no source changes" not in repaired["reason"].casefold()
+    assert "no verification needed" not in repaired["summary"].casefold()
+    assert norm.mentions_actual_changed_file(repaired["reason"], repaired["summary"])
+    assert norm.mentions_full_coverage(repaired["reason"], repaired["summary"])
+
+
 def test_valid_control_repair_overrides_earlier_invalid_coverage_labels(tmp_path, monkeypatch):
     evidence = tmp_path / "bounded-review-evidence.md"
     evidence.write_text(
