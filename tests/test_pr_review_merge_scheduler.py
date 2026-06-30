@@ -1858,6 +1858,33 @@ def test_inspect_pr_handles_approved_reviews_and_dispatch(monkeypatch):
     assert "no OpenCode approval" in missing_approval_auto.reason
 
 
+def test_direct_or_auto_falls_back_to_auto_merge_when_branch_policy_blocks_direct_merge(monkeypatch):
+    approved = make_pr(reviews={"nodes": [opencode_review("APPROVED", "head")]})
+    auto_merges = []
+
+    def policy_blocked_merge(repo, pr, dry_run):
+        raise RuntimeError(
+            "Command failed (1): gh pr merge 1 --repo owner/repo --squash --match-head-commit head\n"
+            "X Pull request owner/repo#1 is not mergeable: the base branch policy prohibits the merge."
+        )
+
+    monkeypatch.setattr(sched, "merge_pr", policy_blocked_merge)
+    monkeypatch.setattr(
+        sched,
+        "enable_auto_merge",
+        lambda repo, pr, dry_run: auto_merges.append((repo, pr["number"], dry_run)),
+    )
+
+    decision = inspect(approved, merge_mode="direct_or_auto")
+
+    assert decision.action == "auto_merge"
+    assert "direct merge was blocked by branch policy" in decision.reason
+    assert auto_merges == [("owner/repo", 1, True)]
+
+    with pytest.raises(RuntimeError, match="base branch policy prohibits"):
+        inspect(approved, merge_mode="direct")
+
+
 def test_main_limits_review_dispatches_without_blocking_branch_updates(monkeypatch, capsys):
     prs = [
         make_pr(

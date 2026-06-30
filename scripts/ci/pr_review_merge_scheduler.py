@@ -115,6 +115,12 @@ FAILED_CHECK_CONCLUSIONS = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "START
 ACTION_REQUIRED_CONCLUSIONS = {"ACTION_REQUIRED"}
 REVIEW_BODY_HEAD_SHA_RE = re.compile(r"Head SHA:\s*`([0-9a-fA-F]{40})`")
 ACTIONS_JOB_DETAILS_URL_RE = re.compile(r"/actions/runs/\d+/job/(\d+)(?:[/?#]|$)")
+DIRECT_MERGE_AUTO_FALLBACK_MARKERS = (
+    "base branch policy prohibits the merge",
+    "is not mergeable",
+    "merge requirements",
+    "required status check",
+)
 REST_MERGEABLE_STATE_MAP = {
     "behind": "BEHIND",
     "blocked": "BLOCKED",
@@ -818,6 +824,12 @@ def merge_pr(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
     run(["gh", "pr", "merge", number, "--repo", repo, "--squash", "--match-head-commit", head])
 
 
+def direct_merge_can_fallback_to_auto_merge(error: Exception) -> bool:
+    """Return whether a direct merge failure should queue auto-merge instead."""
+    text = str(error).lower()
+    return any(marker in text for marker in DIRECT_MERGE_AUTO_FALLBACK_MARKERS)
+
+
 def disable_auto_merge(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
     """Disable auto-merge when the current head no longer has fresh review evidence."""
     number = str(pr["number"])
@@ -1302,7 +1314,17 @@ def inspect_pr(
         if merge_mode == "disabled":
             return decide("wait", "current head is approved; merge mode disabled by scheduler inputs")
         if merge_mode in {"direct", "direct_or_auto"}:
-            merge_pr(repo, pr, dry_run=dry_run)
+            try:
+                merge_pr(repo, pr, dry_run=dry_run)
+            except RuntimeError as exc:
+                if merge_mode != "direct_or_auto" or not direct_merge_can_fallback_to_auto_merge(exc):
+                    raise
+                enable_auto_merge(repo, pr, dry_run=dry_run)
+                return decide(
+                    "auto_merge",
+                    "current head is approved; direct merge was blocked by branch policy, "
+                    "so auto-merge was enabled with the same head guard evidence",
+                )
             state_note = "" if merge_state == "CLEAN" else f"; GitHub mergeability is {merge_state}"
             return decide(
                 "merge",
