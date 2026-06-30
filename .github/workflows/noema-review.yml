@@ -1,4 +1,4 @@
-name: Required Deterministic Secondary Review
+name: Required Noema Review
 
 on:
   pull_request_target:
@@ -25,7 +25,7 @@ on:
 
 concurrency:
   group: >-
-    secondary-review-${{ github.event_name }}-${{
+    noema-review-${{ github.event_name }}-${{
     github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}-${{
     github.event_name == 'pull_request_target' && format('pr-{0}-{1}', github.event.pull_request.number, github.event.pull_request.head.sha) ||
     github.event_name == 'workflow_run' && github.event.workflow_run.pull_requests[0].number && format('pr-{0}', github.event.workflow_run.pull_requests[0].number) ||
@@ -54,7 +54,7 @@ jobs:
       TARGET_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
       PR_NUMBER: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.inputs.pr_number || '' }}
     steps:
-      - name: Resolve trusted secondary review source ref
+      - name: Resolve trusted Noema review source ref
         id: trusted_source
         env:
           INPUT_CANONICAL_REF: ${{ github.event.inputs.canonical_ref || '' }}
@@ -63,13 +63,13 @@ jobs:
           set -euo pipefail
           trusted_ref="${INPUT_CANONICAL_REF:-main}"
           case "$WORKFLOW_REF" in
-            ContextualWisdomLab/.github/.github/workflows/secondary-review.yml@*)
+            ContextualWisdomLab/.github/.github/workflows/noema-review.yml@*)
               trusted_ref="${WORKFLOW_REF##*@}"
               ;;
           esac
           printf 'ref=%s\n' "$trusted_ref" >>"$GITHUB_OUTPUT"
 
-      - name: Checkout trusted secondary review gate
+      - name: Checkout trusted Noema review gate
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: ContextualWisdomLab/.github
@@ -77,11 +77,11 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - name: Exchange secondary review app token
-        id: secondary_app_token
+      - name: Exchange Noema app token
+        id: noema_app_token
         env:
-          OIDC_AUDIENCE: ${{ vars.SECONDARY_REVIEW_OIDC_AUDIENCE || 'cwl-deterministic-secondary-review' }}
-          TOKEN_EXCHANGE_URL: ${{ vars.SECONDARY_REVIEW_TOKEN_EXCHANGE_URL || '' }}
+          OIDC_AUDIENCE: ${{ vars.NOEMA_OIDC_AUDIENCE || 'cwl-noema-review' }}
+          TOKEN_EXCHANGE_URL: ${{ vars.NOEMA_TOKEN_EXCHANGE_URL || '' }}
         run: |
           set -euo pipefail
 
@@ -90,13 +90,13 @@ jobs:
           }
 
           if [ -z "${TOKEN_EXCHANGE_URL:-}" ]; then
-            echo "Deterministic secondary review app token exchange unavailable: SECONDARY_REVIEW_TOKEN_EXCHANGE_URL is not configured."
+            echo "Noema app token exchange unavailable: NOEMA_TOKEN_EXCHANGE_URL is not configured."
             mark_unavailable
             exit 0
           fi
 
           if [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
-            echo "Deterministic secondary review app token exchange unavailable: OIDC request environment is missing."
+            echo "Noema app token exchange unavailable: OIDC request environment is missing."
             mark_unavailable
             exit 0
           fi
@@ -113,14 +113,14 @@ jobs:
               -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
               "${request_url}${separator}audience=${OIDC_AUDIENCE}"
           )"; then
-            echo "Deterministic secondary review app token exchange unavailable: OIDC token request did not complete."
+            echo "Noema app token exchange unavailable: OIDC token request did not complete."
             mark_unavailable
             exit 0
           fi
 
           oidc_token="$(jq -r '.value // empty' <<<"$oidc_response")"
           if [ -z "$oidc_token" ]; then
-            echo "Deterministic secondary review app token exchange unavailable: OIDC token response was empty."
+            echo "Noema app token exchange unavailable: OIDC token response was empty."
             mark_unavailable
             exit 0
           fi
@@ -131,14 +131,14 @@ jobs:
               -H "Authorization: Bearer ${oidc_token}" \
               "${TOKEN_EXCHANGE_URL}"
           )"; then
-            echo "Deterministic secondary review app token exchange unavailable: app token request did not complete."
+            echo "Noema app token exchange unavailable: app token request did not complete."
             mark_unavailable
             exit 0
           fi
 
           app_token="$(jq -r '.token // empty' <<<"$token_response")"
           if [ -z "$app_token" ]; then
-            echo "Deterministic secondary review app token exchange unavailable: app token response was empty."
+            echo "Noema app token exchange unavailable: app token response was empty."
             mark_unavailable
             exit 0
           fi
@@ -149,11 +149,11 @@ jobs:
             echo "token=$app_token"
           } >>"$GITHUB_OUTPUT"
 
-      - name: Submit secondary approval when primary review is clean
+      - name: Submit Noema approval when primary review is clean
         env:
-          GH_TOKEN: ${{ steps.secondary_app_token.outputs.token }}
-          SECONDARY_REVIEW_TOKEN_SOURCE: secondary-review-app-oidc
-          SECONDARY_REVIEW_AUTHOR_HINT: secondary-review-bot
+          GH_TOKEN: ${{ steps.noema_app_token.outputs.token }}
+          SECONDARY_REVIEW_TOKEN_SOURCE: noema-review-app-oidc
+          SECONDARY_REVIEW_AUTHOR_HINT: noema-review-bot
         run: |
           set -euo pipefail
           if [ -z "${PR_NUMBER:-}" ]; then
@@ -161,9 +161,9 @@ jobs:
             exit 0
           fi
           if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::notice::Deterministic secondary review app token is unavailable; secondary approval skipped."
+            echo "::notice::Noema app token is unavailable; approval skipped."
             exit 0
           fi
-          python3 scripts/ci/secondary_review_gate.py \
+          python3 scripts/ci/noema_review_gate.py \
             --repo "$TARGET_REPOSITORY" \
             --pr-number "$PR_NUMBER"
