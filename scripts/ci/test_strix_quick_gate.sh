@@ -1004,7 +1004,7 @@ assert_pr_review_merge_scheduler_uses_github_actions_bot_token() {
 	assert_file_contains "$scheduler_file" "same-head OpenCode dispatched" "scheduler records review dispatch after completed security evidence"
 	assert_file_contains "$workflow_file" "--pr-number" "scheduler scopes required-workflow PR events to the current pull request"
 	assert_file_contains "$workflow_file" "--review-workflow \"Required OpenCode Review\"" "scheduler dispatches the canonical required OpenCode Review workflow"
-	assert_file_contains "$readme_file" "github-actions[bot]" "README documents that mechanical branch updates and merges are attributed to GitHub Actions bot"
+	assert_file_contains "$readme_file" "PR_REVIEW_MERGE_TOKEN" "README documents that mechanical branch updates and merges use the central mutation credential"
 	assert_file_contains "$fix_workflow_file" 'workflow_call:' "fix scheduler can run as the central reusable autofix-dispatch workflow"
 	assert_file_contains "$fix_workflow_file" 'repository: ContextualWisdomLab/.github' "fix scheduler checks out the canonical implementation instead of relying on repo-local scheduler code"
 	assert_file_contains "$fix_workflow_file" 'GH_TOKEN: ${{ github.token }}' "fix scheduler uses the caller repository workflow token for dispatch markers"

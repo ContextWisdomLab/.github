@@ -1881,6 +1881,10 @@ evaluate_pull_request_findings() {
 				continue
 			fi
 			found_any_vuln_file=1
+			if vulnerability_file_is_retryable_model_inconsistency "$vuln_file"; then
+				found_retryable_model_inconsistency=1
+				continue
+			fi
 			rank="$(extract_first_severity_rank "$vuln_file")"
 			if [ "$rank" -lt 0 ]; then
 				PR_FINDINGS_DECISION="block_unmapped"
@@ -1888,10 +1892,6 @@ evaluate_pull_request_findings() {
 				return 1
 			fi
 			if [ "$rank" -lt "$threshold_rank" ]; then
-				continue
-			fi
-			if vulnerability_file_is_retryable_model_inconsistency "$vuln_file"; then
-				found_retryable_model_inconsistency=1
 				continue
 			fi
 			mapfile -t vulnerability_locations < <(extract_vulnerability_locations "$vuln_file")
