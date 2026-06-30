@@ -1493,6 +1493,7 @@ protobuf==6.33.6 \
     --hash=sha256:e9db7e292e0ab79dd108d7f1a94fe31601ce1ee3f7b79e0692043423020b0593 \
     --hash=sha256:f443a394af5ed23672bc6c486be138628fbe5c651ccbc536873d7da23d1868cf
     # via
+    #   -r requirements-strix-ci.txt
     #   google-api-core
     #   google-cloud-aiplatform
     #   google-cloud-resource-manager
