@@ -74,7 +74,7 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "review_execution_contracts.py" in workflow
     assert "SANDBOXED_VERIFY_RESULT" in workflow
     assert "SANDBOXED_WEB_E2E_RESULT" in workflow
-    assert "WORKFLOW_GITHUB_TOKEN" in workflow
+    assert "CHECK_LOOKUP_GH_TOKEN" in workflow
     assert "retrying with workflow github token" in workflow
     assert "Review execution contracts" in workflow
     assert "Accessibility/i18n:" in workflow
