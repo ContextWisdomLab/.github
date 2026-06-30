@@ -1843,6 +1843,16 @@ def test_inspect_pr_handles_approved_reviews_and_dispatch(monkeypatch):
     assert inspect(make_pr(reviews={"nodes": [opencode_review("APPROVED", "head")]}, autoMergeRequest={"enabledAt": "now"})).reason == (
         "current head is approved; auto-merge already enabled"
     )
+    approved_with_auto_merge = make_pr(
+        reviews={"nodes": [opencode_review("APPROVED", "head")]},
+        autoMergeRequest={"enabledAt": "now"},
+    )
+    assert inspect(approved_with_auto_merge, enable_auto_merge_flag=False).reason == (
+        "current head is approved; auto-merge already enabled"
+    )
+    assert inspect(approved_with_auto_merge, merge_mode="disabled").reason == (
+        "current head is approved; auto-merge already enabled"
+    )
     assert inspect(approved, enable_auto_merge_flag=False).reason == (
         "current head is approved; auto-merge disabled by scheduler inputs"
     )
@@ -1923,6 +1933,22 @@ def test_inspect_pr_handles_approved_reviews_and_dispatch(monkeypatch):
     assert "--match-head-commit" in direct_or_auto.reason
     assert direct_merges == [("owner/repo", 1, True), ("owner/repo", 1, True), ("owner/repo", 1, True)]
 
+    already_auto_direct_or_auto = inspect(
+        make_pr(
+            autoMergeRequest={"enabledAt": "now"},
+            reviews={"nodes": [opencode_review("APPROVED", "head")]},
+        ),
+        merge_mode="direct_or_auto",
+    )
+    assert already_auto_direct_or_auto.action == "merge"
+    assert "direct merge requested" in already_auto_direct_or_auto.reason
+    assert direct_merges == [
+        ("owner/repo", 1, True),
+        ("owner/repo", 1, True),
+        ("owner/repo", 1, True),
+        ("owner/repo", 1, True),
+    ]
+
     clean_but_compare_behind = inspect(
         make_pr(
             mergeStateStatus="CLEAN",
@@ -1934,6 +1960,7 @@ def test_inspect_pr_handles_approved_reviews_and_dispatch(monkeypatch):
     assert clean_but_compare_behind.action == "merge"
     assert "direct merge requested" in clean_but_compare_behind.reason
     assert direct_merges == [
+        ("owner/repo", 1, True),
         ("owner/repo", 1, True),
         ("owner/repo", 1, True),
         ("owner/repo", 1, True),
@@ -1957,6 +1984,7 @@ def test_inspect_pr_handles_approved_reviews_and_dispatch(monkeypatch):
         ("owner/repo", 1, True),
         ("owner/repo", 1, True),
         ("owner/repo", 1, True),
+        ("owner/repo", 1, True),
     ]
 
     auto_merges = []
@@ -1973,6 +2001,7 @@ def test_inspect_pr_handles_approved_reviews_and_dispatch(monkeypatch):
     assert blocked_direct_or_auto.action == "merge"
     assert "GitHub mergeability is BLOCKED" in blocked_direct_or_auto.reason
     assert direct_merges == [
+        ("owner/repo", 1, True),
         ("owner/repo", 1, True),
         ("owner/repo", 1, True),
         ("owner/repo", 1, True),
@@ -2081,6 +2110,18 @@ def test_direct_or_auto_falls_back_to_auto_merge_when_branch_policy_blocks_direc
 
     assert decision.action == "auto_merge"
     assert "direct merge was blocked by branch policy" in decision.reason
+    assert auto_merges == [("owner/repo", 1, True)]
+
+    already_queued = inspect(
+        make_pr(
+            autoMergeRequest={"enabledAt": "now"},
+            reviews={"nodes": [opencode_review("APPROVED", "head")]},
+        ),
+        merge_mode="direct_or_auto",
+    )
+
+    assert already_queued.action == "auto_merge"
+    assert "existing auto-merge request remains queued" in already_queued.reason
     assert auto_merges == [("owner/repo", 1, True)]
 
     with pytest.raises(RuntimeError, match="base branch policy prohibits"):

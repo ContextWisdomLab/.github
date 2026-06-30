@@ -5046,48 +5046,57 @@ jobs:
           esac
           echo "::endgroup::"
 
-      - name: Dispatch merge scheduler after approval
+      - name: Run merge scheduler after approval
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.PR_REVIEW_MERGE_TOKEN || secrets.OPENCODE_APPROVE_TOKEN || steps.opencode_app_token.outputs.token }}
+          SCHEDULER_MUTATION_TOKEN_SOURCE: ${{ secrets.PR_REVIEW_MERGE_TOKEN != '' && 'PR_REVIEW_MERGE_TOKEN' || secrets.OPENCODE_APPROVE_TOKEN != '' && 'OPENCODE_APPROVE_TOKEN' || steps.opencode_app_token.outputs.available == 'true' && 'opencode-app' || 'missing' }}
           GH_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
           PR_BASE_REF: ${{ github.event.pull_request.base.ref || github.event.inputs.pr_base_ref || '' }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number || '' }}
         run: |
           set -euo pipefail
-          scheduler_ref="$(
-            gh api "repos/${GH_REPOSITORY}" --jq '.default_branch // empty' 2>/dev/null || true
-          )"
-          scheduler_ref="${scheduler_ref:-${PR_BASE_REF:-main}}"
-
-          scheduler_inputs=(
-            -f dry_run=false
-            -f trigger_reviews=false
-            -f enable_auto_merge=true
-            -f merge_mode=direct_or_auto
-            -f update_branches=true
-          )
-          if [ -n "${PR_NUMBER:-}" ]; then
-            scheduler_inputs+=(-f max_prs=1 -f pr_number="$PR_NUMBER")
-          else
-            scheduler_inputs+=(-f max_prs=100)
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::Merge scheduler follow-up skipped after approval because no mutation credential was available. Required-workflow PR events and schedules remain authoritative."
+            exit 0
           fi
 
-          dispatch_status=1
-          dispatch_error="$(mktemp)"
+          default_branch="$(
+            gh api "repos/${GH_REPOSITORY}" --jq '.default_branch // empty' 2>/dev/null || true
+          )"
+          base_branch="${PR_BASE_REF:-${default_branch:-main}}"
+          project_flow="github-flow"
+          case "$base_branch" in
+            develop) project_flow="git-flow" ;;
+            main|master) project_flow="github-flow" ;;
+          esac
+
+          args=(
+            --repo "$GH_REPOSITORY"
+            --base-branch "$base_branch"
+            --max-prs 1
+            --project-flow "$project_flow"
+            --review-workflow "Required OpenCode Review"
+            --security-workflow "Strix Security Scan"
+            --review-dispatch-limit 0
+            --no-trigger-reviews
+            --enable-auto-merge
+            --merge-mode direct_or_auto
+            --update-branches
+          )
+          if [ -n "${PR_NUMBER:-}" ]; then
+            args+=(--pr-number "$PR_NUMBER")
+          fi
+
+          scheduler_status=1
           for attempt in 1 2 3; do
-            : >"$dispatch_error"
-            if gh workflow run pr-review-merge-scheduler.yml \
-              --repo "$GH_REPOSITORY" \
-              --ref "$scheduler_ref" \
-              "${scheduler_inputs[@]}" 2>"$dispatch_error"; then
-              dispatch_status=0
+            if python3 scripts/ci/pr_review_merge_scheduler.py "${args[@]}"; then
+              scheduler_status=0
               break
             fi
-            sed 's/^/scheduler dispatch: /' "$dispatch_error" >&2 || true
             sleep "$((attempt * 5))"
           done
 
-          if [ "$dispatch_status" -ne 0 ]; then
-            printf '::warning::Merge scheduler dispatch failed after approval; leaving OpenCode approval intact. Repository=%s ref=%s. The scheduled and workflow_run scheduler paths remain authoritative.\n' "$GH_REPOSITORY" "$scheduler_ref"
+          if [ "$scheduler_status" -ne 0 ]; then
+            printf '::warning::Merge scheduler follow-up failed after approval; leaving OpenCode review intact. Repository=%s base=%s. The scheduled and PR-event scheduler paths remain authoritative.\n' "$GH_REPOSITORY" "$base_branch"
           fi

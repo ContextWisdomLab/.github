@@ -19,14 +19,14 @@ review is approved, no current-head failed check is present, and GitHub reports
 the PR as behind. After that update, the new head must pass OpenCode, Strix,
 required checks, and review-thread gates again before auto-merge or
 `--match-head-commit` merge can proceed.
-Branch updates run through the workflow `GITHUB_TOKEN`, so GitHub records those
-mechanical updates as `github-actions[bot]` rather than an OpenCode app token or
-a personal token. That path uses the pull-request branch update API and should
-only need `pull-requests: write`; it does not justify widening repository
-`contents` permission. Merge or auto-merge is a separate mutation. When a repo
-wants GitHub Actions to perform the merge itself, that repo needs an explicit
-scheduler-job `contents: write` policy exception and should expect Scorecard or
-token-permission policy review to notice it.
+Branch updates and merges run through the central scheduler mutation credential:
+`PR_REVIEW_MERGE_TOKEN`, `OPENCODE_APPROVE_TOKEN`, the exchanged OpenCode GitHub
+App token, or finally the target workflow token. The scheduler reports the
+credential class in its decision output. The OpenCode review job does not widen
+its own `pull_request_target` job token to repository-write permission; its
+immediate post-approval scheduler follow-up uses only an explicit merge token or
+the OpenCode app token, otherwise it leaves the separate scheduler required
+workflow and schedule authoritative.
 That `update_branch` path is deliberately not used for `DIRTY` or
 `CONFLICTING` PRs: GitHub cannot synthesize a safe conflict resolution for the
 author, so the review must give the author a repair path instead of pretending
@@ -44,9 +44,9 @@ rebase, `git status --short`, resolved-file staging, normal push, and
 Strix, OpenCode, and the scheduler are sourced from the central
 `ContextualWisdomLab/.github` workflows rather than copied into each repository.
 Required-workflow runs execute in the target repository context, so mechanical
-branch updates, stale-thread resolution, and merges use that repository's
-`github-actions[bot]` token while the trusted implementation still comes from
-the central repository. The scheduler dispatches same-head Strix evidence first,
+branch updates, stale-thread resolution, and merges use the configured central
+mutation credential while the trusted implementation still comes from the
+central repository. The scheduler dispatches same-head Strix evidence first,
 then dispatches OpenCode for the same PR head when review evidence is missing or
 stale.
 This avoids running PR-head review, CodeGraph, coverage, or PoC code as an
