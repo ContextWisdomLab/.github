@@ -689,12 +689,14 @@ def extract_dicts(obj: Any) -> list[Any]:
             results.extend(extract_dicts(item))
     return results
 
+
 def iter_json_objects(text: str) -> list[Any]:
     """Extract JSON objects from raw OpenCode output that may include prose."""
     decoder = json.JSONDecoder()
     values: list[Any] = []
 
     try:
+        # Fast path for pure JSON payloads; avoid scanning and duplicate decodes.
         return extract_dicts(json.loads(text))
     except json.JSONDecodeError:
         # OpenCode exports may contain prose around the JSON control object.
