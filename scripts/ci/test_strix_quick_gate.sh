@@ -721,6 +721,7 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" "Exchange OpenCode app token for review writes" "opencode review obtains an app token before publishing review writes"
 	assert_file_contains "$workflow_file" 'GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || steps.opencode_app_token.outputs.token || github.token }}' "opencode approval keeps the configured cross-repo token available for review writes"
 	assert_file_contains "$workflow_file" 'CHECK_LOOKUP_GH_TOKEN: ${{ github.token }}' "opencode approval uses the workflow token for target statusCheckRollup lookups"
+	assert_file_contains "$workflow_file" '[ "${GH_REPOSITORY:-}" = "${GITHUB_REPOSITORY:-}" ]' "opencode approval does not replace the app token with the workflow token for target-repository check lookups"
 	assert_file_contains "$workflow_file" 'check_lookup_token_source="github-token"' "opencode approval marks target statusCheckRollup lookups as workflow-token reads"
 	assert_file_contains "$workflow_file" 'review_write_token="${OPENCODE_APP_TOKEN:-$GH_TOKEN}"' "opencode approval separates review write credentials from check lookup credentials"
 	assert_file_contains "$workflow_file" 'env GH_TOKEN="$review_write_token" gh api -X POST "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}/reviews"' "opencode review writes use the review write token"
