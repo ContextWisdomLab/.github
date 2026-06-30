@@ -120,7 +120,9 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "opencode_review_model_pool" in workflow
     assert "run_opencode_review_model_pool.sh" in workflow
     assert "OPENCODE_MODEL_CANDIDATES" in workflow
-    assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "19800"' in workflow
+    assert 'timeout-minutes: 45' in workflow
+    assert 'OPENCODE_RUN_TIMEOUT_SECONDS: "180"' in workflow
+    assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "2400"' in workflow
     assert "${{ runner.temp }}/opencode-review-model-pool.md" in workflow
 
     strix_workflow = Path(".github/workflows/strix.yml").read_text(encoding="utf-8")
