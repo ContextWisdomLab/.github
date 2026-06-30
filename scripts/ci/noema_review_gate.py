@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Submit a Noema, non-OpenCode PR approval after primary gates pass."""
+"""Run Noema LLM review and submit a non-OpenCode PR review verdict."""
 
 from __future__ import annotations
 
@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import sys
+import urllib.request
 from collections.abc import Sequence
 from typing import Any
 
@@ -24,10 +25,12 @@ PRIMARY_REVIEW_MARKERS = (
 )
 IGNORED_RUNNING_CHECKS = {
     "approve-after-primary-review",
+    "noema-review",
     "Required Noema Review",
 }
 FAILED_CONCLUSIONS = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "ACTION_REQUIRED", "STARTUP_FAILURE"}
 RUNNING_STATES = {"QUEUED", "IN_PROGRESS", "PENDING", "REQUESTED", "WAITING", "EXPECTED"}
+MAX_DIFF_CHARS = 60000
 
 
 def run(args: Sequence[str], *, stdin: str | None = None) -> str:
@@ -46,10 +49,6 @@ def run(args: Sequence[str], *, stdin: str | None = None) -> str:
             f"Command failed ({completed.returncode}): {' '.join(args)}\n{completed.stderr.strip()}"
         )
     return completed.stdout
-
-
-def gh_json(args: Sequence[str]) -> Any:
-    return json.loads(run(["gh", "api", *args]))
 
 
 def split_repo(repo: str) -> tuple[str, str]:
@@ -72,6 +71,7 @@ query($owner: String!, $name: String!, $number: Int!) {
     pullRequest(number: $number) {
       number
       title
+      body
       isDraft
       headRefOid
       reviewDecision
@@ -188,13 +188,13 @@ def blocking_checks(pr: dict[str, Any]) -> list[str]:
     return blockers
 
 
-def existing_secondary_review(pr: dict[str, Any], actor: str) -> bool:
+def existing_noema_review(pr: dict[str, Any], actor: str) -> bool:
     head_sha = str(pr.get("headRefOid") or "")
     marker = "<!-- noema-review-gate"
     for review in (((pr.get("reviews") or {}).get("nodes")) or []):
         if review_commit(review) != head_sha:
             continue
-        if str(review.get("state") or "").upper() != "APPROVED":
+        if str(review.get("state") or "").upper() not in {"APPROVED", "CHANGES_REQUESTED", "COMMENTED"}:
             continue
         if review_author(review) == actor or marker in str(review.get("body") or ""):
             return True
@@ -208,68 +208,168 @@ def current_actor() -> str:
         return ""
 
 
-def approve(repo: str, number: int, pr: dict[str, Any], actor: str) -> None:
+def fetch_diff(repo: str, number: int) -> tuple[str, bool]:
+    diff = run(["gh", "api", f"repos/{repo}/pulls/{number}", "-H", "Accept: application/vnd.github.v3.diff"])
+    truncated = len(diff) > MAX_DIFF_CHARS
+    if truncated:
+        diff = diff[:MAX_DIFF_CHARS]
+    return diff, truncated
+
+
+def extract_json_object(text: str) -> dict[str, Any]:
+    stripped = text.strip()
+    if stripped.startswith("{"):
+        return json.loads(stripped)
+    start = stripped.find("{")
+    end = stripped.rfind("}")
+    if start < 0 or end < start:
+        raise RuntimeError("Noema LLM response did not contain a JSON object")
+    return json.loads(stripped[start : end + 1])
+
+
+def call_llm(repo: str, number: int, pr: dict[str, Any], diff: str, truncated: bool) -> dict[str, Any] | None:
+    api_url = os.environ.get("NOEMA_LLM_API_URL", "").strip()
+    api_key = os.environ.get("NOEMA_LLM_API_KEY", "").strip()
+    model = os.environ.get("NOEMA_LLM_MODEL", "").strip() or "noema-default"
+    if not api_url or not api_key:
+        print("Noema LLM review unavailable: NOEMA_LLM_API_URL or NOEMA_LLM_API_KEY is not configured.")
+        return None
+
+    prompt = {
+        "role": "user",
+        "content": "\n".join(
+            [
+                "You are Noema, an independent pull request reviewer for ContextualWisdomLab.",
+                "Review the PR diff for correctness, security, maintainability, and behavioral regressions.",
+                "Return only JSON with this shape:",
+                '{"decision":"approve|request_changes|comment","summary":"...","findings":[{"severity":"high|medium|low","file":"path","line":1,"message":"..."}]}',
+                "Use request_changes only for blocking, concrete issues. Use approve when no blocking issue is found.",
+                f"Repository: {repo}",
+                f"PR: #{number}",
+                f"Title: {pr.get('title') or ''}",
+                f"Head SHA: {pr.get('headRefOid') or ''}",
+                f"Diff truncated: {truncated}",
+                "Diff:",
+                diff,
+            ]
+        ),
+    }
+    payload = {
+        "model": model,
+        "temperature": 0,
+        "messages": [
+            {"role": "system", "content": "Return strict JSON only. Do not include markdown."},
+            prompt,
+        ],
+    }
+    request = urllib.request.Request(
+        api_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "authorization": f"Bearer {api_key}",
+            "content-type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=120) as response:
+        raw = response.read().decode("utf-8")
+    data = json.loads(raw)
+    content = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+    verdict = extract_json_object(content)
+    decision = str(verdict.get("decision") or "").strip().lower()
+    if decision not in {"approve", "request_changes", "comment"}:
+        raise RuntimeError(f"Noema LLM returned unsupported decision: {decision!r}")
+    return verdict
+
+
+def format_findings(findings: Any) -> list[str]:
+    if not isinstance(findings, list):
+        return []
+    lines: list[str] = []
+    for finding in findings[:20]:
+        if not isinstance(finding, dict):
+            continue
+        severity = str(finding.get("severity") or "info")
+        file_name = str(finding.get("file") or "unknown")
+        line = finding.get("line")
+        location = f"{file_name}:{line}" if isinstance(line, int) and line > 0 else file_name
+        message = str(finding.get("message") or "").strip()
+        if message:
+            lines.append(f"- [{severity}] {location}: {message}")
+    return lines
+
+
+def submit_review(repo: str, number: int, pr: dict[str, Any], actor: str, verdict: dict[str, Any]) -> None:
     head_sha = str(pr.get("headRefOid") or "")
+    decision = str(verdict.get("decision") or "comment").lower()
+    event = "APPROVE" if decision == "approve" else "REQUEST_CHANGES" if decision == "request_changes" else "COMMENT"
     source = os.environ.get("NOEMA_REVIEW_TOKEN_SOURCE") or "NOEMA_REVIEW_TOKEN"
+    summary = str(verdict.get("summary") or "Noema completed an independent LLM review.").strip()
+    findings = format_findings(verdict.get("findings"))
     body = "\n".join(
         [
-            "## Noema review gate",
+            "## Noema LLM review",
             "",
-            "Noema found a current-head primary OpenCode approval, no current-head change requests, no unresolved review threads, and no blocking GitHub checks.",
+            summary,
             "",
-            "This approval is generated by Noema, a dedicated review app identity separate from OpenCode Agent.",
+            "### Findings",
+            *(findings or ["- No blocking findings."]),
             "",
-            "- Result: APPROVE",
+            f"- Result: {event}",
             f"- Head SHA: `{head_sha}`",
             f"- Reviewer credential: `{source}`",
             f"- Actor: `{actor or 'unknown'}`",
             "",
-            f"<!-- noema-review-gate head_sha={head_sha} -->",
+            f"<!-- noema-review-gate head_sha={head_sha} decision={decision} -->",
         ]
     )
     payload = {
         "commit_id": head_sha,
-        "event": "APPROVE",
+        "event": event,
         "body": body,
     }
     run(
         ["gh", "api", "-X", "POST", f"repos/{repo}/pulls/{number}/reviews", "--input", "-"],
         stdin=json.dumps(payload),
     )
-    print(f"Noema approval submitted for {repo}#{number} at {head_sha}.")
+    print(f"Noema {event} review submitted for {repo}#{number} at {head_sha}.")
 
 
-def inspect_and_approve(repo: str, number: int) -> int:
+def inspect_and_review(repo: str, number: int) -> int:
     pr = fetch_pr(repo, number)
     actor = current_actor()
     if actor in PRIMARY_REVIEW_AUTHORS:
         print(
             f"Current token actor {actor!r} is already a primary review actor; "
-            "Noema approval skipped so GitHub receives an independent reviewer."
+            "Noema review skipped so GitHub receives an independent reviewer."
         )
         return 0
     if pr.get("isDraft"):
-        print("PR is draft; Noema approval skipped.")
+        print("PR is draft; Noema review skipped.")
         return 0
-    if existing_secondary_review(pr, actor):
-        print("Current head already has a Noema approval; nothing to do.")
+    if existing_noema_review(pr, actor):
+        print("Current head already has a Noema review; nothing to do.")
         return 0
     if not current_primary_approval(pr):
-        print("Current head does not have a primary OpenCode approval; Noema approval skipped.")
+        print("Current head does not have a primary OpenCode approval; Noema review skipped.")
         return 0
     if has_current_changes_requested(pr):
-        print("Current head has requested changes; Noema approval skipped.")
+        print("Current head has requested changes; Noema review skipped.")
         return 0
     if has_unresolved_threads(pr):
-        print("PR has unresolved review threads; Noema approval skipped.")
+        print("PR has unresolved review threads; Noema review skipped.")
         return 0
     blockers = blocking_checks(pr)
     if blockers:
-        print("Blocking checks remain; Noema approval skipped:")
+        print("Blocking checks remain; Noema review skipped:")
         for blocker in blockers:
             print(f"- {blocker}")
         return 0
-    approve(repo, number, pr, actor)
+    diff, truncated = fetch_diff(repo, number)
+    verdict = call_llm(repo, number, pr, diff, truncated)
+    if verdict is None:
+        return 0
+    submit_review(repo, number, pr, actor, verdict)
     return 0
 
 
@@ -284,7 +384,7 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
     if args.pr_number <= 0:
         raise SystemExit("--pr-number must be positive")
-    return inspect_and_approve(args.repo, args.pr_number)
+    return inspect_and_review(args.repo, args.pr_number)
 
 
 if __name__ == "__main__":

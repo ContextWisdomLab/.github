@@ -39,8 +39,8 @@ permissions:
   id-token: write
 
 jobs:
-  approve-after-primary-review:
-    name: approve-after-primary-review
+  noema-review:
+    name: noema-review
     runs-on: ubuntu-latest
     if: >-
       github.event_name == 'workflow_dispatch'
@@ -149,11 +149,13 @@ jobs:
             echo "token=$app_token"
           } >>"$GITHUB_OUTPUT"
 
-      - name: Submit Noema approval when primary review is clean
+      - name: Run Noema LLM review and submit verdict
         env:
           GH_TOKEN: ${{ steps.noema_app_token.outputs.token }}
-          SECONDARY_REVIEW_TOKEN_SOURCE: noema-review-app-oidc
-          SECONDARY_REVIEW_AUTHOR_HINT: noema-review-bot
+          NOEMA_REVIEW_TOKEN_SOURCE: noema-review-app-oidc
+          NOEMA_LLM_API_URL: ${{ vars.NOEMA_LLM_API_URL || '' }}
+          NOEMA_LLM_MODEL: ${{ vars.NOEMA_LLM_MODEL || '' }}
+          NOEMA_LLM_API_KEY: ${{ secrets.NOEMA_LLM_API_KEY || '' }}
         run: |
           set -euo pipefail
           if [ -z "${PR_NUMBER:-}" ]; then
@@ -161,7 +163,7 @@ jobs:
             exit 0
           fi
           if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::notice::Noema app token is unavailable; approval skipped."
+            echo "::notice::Noema app token is unavailable; review skipped."
             exit 0
           fi
           python3 scripts/ci/noema_review_gate.py \
