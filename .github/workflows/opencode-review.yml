@@ -4024,6 +4024,13 @@ jobs:
           }
 
           current_head_manual_strix_success_status() {
+            local status_target
+            local manual_run_line
+            local manual_run_status
+            local manual_run_conclusion
+            local manual_run_url
+
+            status_target="$(
             gh api -X GET "repos/${GH_REPOSITORY}/commits/${HEAD_SHA}/status" \
               --jq '
                 (.statuses // [])
@@ -4034,6 +4041,72 @@ jobs:
                 | select((.description // "") | contains("Manual workflow_dispatch Strix evidence passed"))
                 | select((.target_url // "") | test("/actions/runs/[0-9]+"))
                 | .target_url
+              '
+            )"
+            if [ -n "$status_target" ]; then
+              printf '%s\n' "$status_target"
+              return 0
+            fi
+
+            manual_run_line="$(latest_current_head_manual_strix_run || true)"
+            IFS="$(printf '\t')" read -r manual_run_status manual_run_conclusion manual_run_url <<EOF
+${manual_run_line}
+EOF
+            if [ "$manual_run_status" = "completed" ] &&
+              [ "$manual_run_conclusion" = "success" ] &&
+              [ -n "$manual_run_url" ]; then
+              printf '%s\n' "$manual_run_url"
+            fi
+          }
+
+          current_head_successful_strix_check_run() {
+            local owner="${GH_REPOSITORY%%/*}"
+            local name="${GH_REPOSITORY#*/}"
+
+            gh api graphql \
+              -f owner="$owner" \
+              -f name="$name" \
+              -F number="$PR_NUMBER" \
+              -f query='
+                query($owner:String!,$name:String!,$number:Int!) {
+                  repository(owner:$owner,name:$name) {
+                    pullRequest(number:$number) {
+                      statusCheckRollup {
+                        contexts(first: 100) {
+                          nodes {
+                            __typename
+                            ... on CheckRun {
+                              name
+                              status
+                              conclusion
+                              completedAt
+                              detailsUrl
+                              checkSuite {
+                                workflowRun {
+                                  workflow {
+                                    name
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ' \
+              --jq '
+                (.data.repository.pullRequest.statusCheckRollup.contexts.nodes // [])
+                | map(
+                    select(.__typename == "CheckRun")
+                    | select((.status // "") == "COMPLETED")
+                    | select((.conclusion // "" | ascii_upcase) == "SUCCESS")
+                    | select((.name // "" | ascii_downcase) == "strix")
+                    | select((.checkSuite.workflowRun.workflow.name // "") == "Strix Security Scan" or (.checkSuite.workflowRun.workflow.name // "") == "Strix")
+                  )
+                | sort_by(.completedAt // "")
+                | last.detailsUrl // empty
               '
           }
 
@@ -4070,21 +4143,11 @@ jobs:
             local output_file="$2"
             local manual_strix_success_target
             local manual_strix_success_run_id
-            local manual_strix_run_info
-            local manual_strix_status
-            local manual_strix_conclusion
-            local manual_strix_url
             local failed_strix_run_id
 
             manual_strix_success_target="$(current_head_manual_strix_success_status || true)"
             if [ -z "$manual_strix_success_target" ]; then
-              manual_strix_run_info="$(latest_current_head_manual_strix_run || true)"
-              IFS=$'\t' read -r manual_strix_status manual_strix_conclusion manual_strix_url <<<"$manual_strix_run_info" || true
-              if [ "$manual_strix_status" = "completed" ] &&
-                [ "$manual_strix_conclusion" = "success" ] &&
-                [ -n "$manual_strix_url" ]; then
-                manual_strix_success_target="$manual_strix_url"
-              fi
+              manual_strix_success_target="$(current_head_successful_strix_check_run || true)"
             fi
             if [ -n "$manual_strix_success_target" ]; then
               manual_strix_success_run_id="$(printf '%s' "$manual_strix_success_target" | sed -n 's#.*/actions/runs/\([0-9][0-9]*\).*#\1#p')"
