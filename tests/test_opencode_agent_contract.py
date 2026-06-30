@@ -165,8 +165,15 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert 'variants.high.reasoningEffort=high' in reasoning_effort_guard
     assert "deepseek/deepseek-r1" in reasoning_effort_guard
     assert "--config \"$OPENCODE_REVIEW_WORKDIR/opencode.jsonc\"" in workflow
+    assert 'timeout --kill-after=15s "${export_timeout_seconds}s" opencode export' in model_pool_runner
+    assert "session export did not complete within %ss" in model_pool_runner
+    assert "approve_low_risk_review_fallback_after_model_exhaustion" in workflow
+    assert "changed_file_is_low_risk_review_fallback" in workflow
+    assert "production source 또는 package manifest 변경이 없습니다" in workflow
+    assert "Source, workflow, config, package, migration, generated artifact 변경은 모델 기반 review 없이 승인하지 않습니다" in workflow
     assert 'timeout-minutes: 45' in workflow
     assert 'OPENCODE_RUN_TIMEOUT_SECONDS: "180"' in workflow
+    assert 'OPENCODE_EXPORT_TIMEOUT_SECONDS: "60"' in workflow
     assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "2400"' in workflow
     assert "${{ runner.temp }}/opencode-review-model-pool.md" in workflow
 

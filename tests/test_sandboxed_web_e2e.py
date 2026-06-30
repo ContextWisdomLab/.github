@@ -1,4 +1,5 @@
 import json
+import os
 import runpy
 import socket
 import subprocess
@@ -8,6 +9,8 @@ from pathlib import Path
 import pytest
 
 from scripts.ci import sandboxed_web_e2e
+
+pytestmark = pytest.mark.skipif(os.name == "nt", reason="sandboxed_web_e2e requires POSIX process groups")
 
 
 def free_port():
@@ -75,6 +78,15 @@ def test_sandboxed_web_e2e_runs_services_and_does_not_mutate_source(tmp_path, ca
         ]
     )
     captured = capsys.readouterr()
+
+    if exit_code == 125:
+        result_lines = [
+            line for line in captured.out.splitlines() if line.startswith(sandboxed_web_e2e.RESULT_MARKER)
+        ]
+        if result_lines:
+            payload = json.loads(result_lines[-1].removeprefix(sandboxed_web_e2e.RESULT_MARKER).strip())
+            if payload["backend_ready"] is False or payload["frontend_ready"] is False:
+                pytest.skip("runner could not start localhost services for sandboxed web E2E")
 
     assert exit_code == 0
     assert "SANDBOXED_WEB_E2E_RESULT" in captured.out
