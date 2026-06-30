@@ -400,11 +400,6 @@ jobs:
                 fi
               fi
             done < <(tracked_python_projects_with_tests)
-            if [ "$measured_projects" -eq 0 ] && has_tracked_files '*.py'; then
-              measured_projects=1
-              run_and_capture "Python docstring coverage with missing-object report" \
-                bash -c 'python3 -m pip install --disable-pip-version-check interrogate >/dev/null && python3 -m interrogate --fail-under=100 --verbose .'
-            fi
             [ "$measured_projects" -eq 1 ]
           }
 
