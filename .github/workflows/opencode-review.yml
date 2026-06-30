@@ -572,13 +572,13 @@ jobs:
             export R_LIBS_USER="${RUNNER_TEMP}/R-library"
             mkdir -p "$R_LIBS_USER"
             run_and_capture "R coverage tooling (covr/testthat)" \
-              Rscript -e 'repos <- "https://cloud.r-project.org"; lib <- Sys.getenv("R_LIBS_USER"); dir.create(lib, recursive = TRUE, showWarnings = FALSE); .libPaths(c(lib, .libPaths())); required <- c("covr", "testthat"); for (pkg in required) if (!requireNamespace(pkg, quietly = TRUE)) install.packages(pkg, repos = repos, lib = lib, dependencies = TRUE); missing <- required[!vapply(required, requireNamespace, logical(1), quietly = TRUE)]; if (length(missing)) stop("R coverage tooling packages unavailable after install: ", paste(missing, collapse = ", "))'
+              Rscript -e 'repos <- "https://cloud.r-project.org"; lib <- Sys.getenv("R_LIBS_USER"); install_deps <- c("Depends", "Imports", "LinkingTo"); dir.create(lib, recursive = TRUE, showWarnings = FALSE); .libPaths(c(lib, .libPaths())); required <- c("covr", "testthat"); if (file.exists("DESCRIPTION")) { desc <- read.dcf("DESCRIPTION")[1, , drop = FALSE]; fields <- intersect(c("Depends", "Imports", "LinkingTo", "Suggests"), colnames(desc)); values <- as.character(desc[, fields, drop = TRUE]); values <- values[!is.na(values)]; package_deps <- trimws(gsub("\\s*\\([^)]*\\)", "", unlist(strsplit(paste(values, collapse = ","), ","), use.names = FALSE))); package_deps <- setdiff(package_deps[nzchar(package_deps)], "R"); required <- unique(c(required, package_deps)); }; for (pkg in required) if (!requireNamespace(pkg, quietly = TRUE)) install.packages(pkg, repos = repos, lib = lib, dependencies = install_deps); missing <- required[!vapply(required, requireNamespace, logical(1), quietly = TRUE)]; if (length(missing)) stop("R coverage tooling packages unavailable after install: ", paste(missing, collapse = ", "))'
             if [ -f DESCRIPTION ]; then
               run_and_capture "R package coverage with missing-line report" \
-                Rscript -e 'cov <- covr::package_coverage(); print(cov); zero <- covr::zero_coverage(cov); if (NROW(zero) > 0) { print(zero); stop("R coverage below 100%; add tests for the listed files/lines.") }'
+                Rscript -e 'lib <- Sys.getenv("R_LIBS_USER"); .libPaths(c(lib, .libPaths())); cov <- covr::package_coverage(); print(cov); zero <- covr::zero_coverage(cov); if (NROW(zero) > 0) { print(zero); stop("R coverage below 100%; add tests for the listed files/lines.") }'
             elif [ -d tests/testthat ]; then
               run_and_capture "R testthat suite" \
-                Rscript -e 'testthat::test_dir("tests/testthat")'
+                Rscript -e 'lib <- Sys.getenv("R_LIBS_USER"); .libPaths(c(lib, .libPaths())); testthat::test_dir("tests/testthat")'
             else
               append "### R test coverage"
               append ""
@@ -2690,6 +2690,7 @@ jobs:
         timeout-minutes: 45
         env:
           GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || steps.opencode_app_token.outputs.token || github.token }}
+          CHECK_LOOKUP_GH_TOKEN: ${{ github.token }}
           GH_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
           STRIX_GITHUB_MODELS_TOKEN: ${{ secrets.STRIX_GITHUB_MODELS_TOKEN || github.token }}
           OPENCODE_APP_TOKEN: ${{ steps.opencode_app_token.outputs.token }}
@@ -2736,6 +2737,11 @@ jobs:
             review_write_token_source="opencode-app"
           fi
           overview_comment_token="$review_write_token"
+          if [ -n "${CHECK_LOOKUP_GH_TOKEN:-}" ]; then
+            GH_TOKEN="$CHECK_LOOKUP_GH_TOKEN"
+            export GH_TOKEN
+            check_lookup_token_source="github-token"
+          fi
           echo "check lookup token source=${check_lookup_token_source}"
           echo "review write token source=${review_write_token_source}"
 
