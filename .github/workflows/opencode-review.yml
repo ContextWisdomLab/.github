@@ -652,7 +652,7 @@ jobs:
             run_and_capture "Docker runtime version" docker version
             while IFS= read -r dockerfile; do
               [ -n "$dockerfile" ] || continue
-              context_dir="$(dirname "$dockerfile")"
+              context_dir="$(docker_build_context_for_file "$dockerfile")"
               tag_suffix="$(printf '%s' "$dockerfile" | tr '[:upper:]' '[:lower:]' | tr '/.' '--' | tr -cd '[:alnum:]-' | cut -c1-80)"
               image_tag="opencode-review-${PR_HEAD_SHA:-head}-${tag_suffix}"
               run_and_capture "Docker build (${dockerfile})" \
@@ -666,6 +666,19 @@ jobs:
                 fi
               done
             fi
+          }
+
+          docker_build_context_for_file() {
+            local dockerfile="$1"
+            local context_dir
+
+            context_dir="$(dirname "$dockerfile")"
+            if grep -Eq '^[[:space:]]*(COPY|ADD)[[:space:]]+(\[)?(\./)?(docker|scripts|[.]github|src|tests|xtrmllmbatch)(/|[[:space:],])' "$dockerfile"; then
+              printf '.\n'
+              return
+            fi
+
+            printf '%s\n' "$context_dir"
           }
 
           append "# Coverage Evidence"
@@ -4090,9 +4103,7 @@ jobs:
             fi
 
             manual_run_line="$(latest_current_head_manual_strix_run || true)"
-            IFS="$(printf '\t')" read -r manual_run_status manual_run_conclusion manual_run_url <<EOF
-${manual_run_line}
-EOF
+            IFS="$(printf '\t')" read -r manual_run_status manual_run_conclusion manual_run_url <<<"$manual_run_line"
             if [ "$manual_run_status" = "completed" ] &&
               [ "$manual_run_conclusion" = "success" ] &&
               [ -n "$manual_run_url" ]; then
