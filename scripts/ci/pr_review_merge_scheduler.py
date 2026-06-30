@@ -448,6 +448,117 @@ def gh_graphql(query: str, **fields: str | int) -> dict[str, Any]:
             time.sleep(delay)
 
 
+def github_resource_inaccessible(exc: RuntimeError) -> bool:
+    """Return whether GitHub denied an API read for the current integration token."""
+
+    return "Resource not accessible by integration" in str(exc)
+
+
+def gh_api_json(path: str) -> Any:
+    """Run a GitHub REST API request through gh and decode the JSON response."""
+
+    return json.loads(run(["gh", "api", path]))
+
+
+def rest_review_node(review: dict[str, Any]) -> dict[str, Any]:
+    """Convert a REST review payload into the GraphQL shape used by the scheduler."""
+
+    commit_id = review.get("commit_id")
+    return {
+        "state": review.get("state"),
+        "body": review.get("body"),
+        "submittedAt": review.get("submitted_at"),
+        "author": {"login": ((review.get("user") or {}).get("login"))},
+        "commit": {"oid": commit_id} if commit_id else None,
+    }
+
+
+def rest_check_node(check: dict[str, Any]) -> dict[str, Any]:
+    """Convert a REST check-run payload into the GraphQL status rollup shape."""
+
+    return {
+        "__typename": "CheckRun",
+        "name": check.get("name"),
+        "status": (check.get("status") or "").upper(),
+        "conclusion": (check.get("conclusion") or "").upper() if check.get("conclusion") else None,
+        "startedAt": check.get("started_at"),
+        "detailsUrl": check.get("details_url"),
+        "checkSuite": {"workflowRun": {"workflow": {}}},
+    }
+
+
+def rest_pr_node(repo: str, pr: dict[str, Any]) -> dict[str, Any]:
+    """Convert a REST pull request payload into the GraphQL shape used by the scheduler."""
+
+    number = int(pr["number"])
+    head = pr.get("head") or {}
+    base = pr.get("base") or {}
+    head_repo = head.get("repo") or {}
+    reviews = gh_api_json(f"repos/{repo}/pulls/{number}/reviews?per_page=100")
+    checks = gh_api_json(f"repos/{repo}/commits/{head.get('sha')}/check-runs?per_page=100")
+    rest_merge_state = REST_MERGEABLE_STATE_MAP.get(
+        str(pr.get("mergeable_state") or "").lower(),
+        str(pr.get("mergeable_state") or "").upper(),
+    )
+    return {
+        "number": number,
+        "title": pr.get("title"),
+        "isDraft": bool(pr.get("draft")),
+        "mergeable": pr.get("mergeable"),
+        "mergeStateStatus": rest_merge_state,
+        "reviewDecision": "REVIEW_REQUIRED",
+        "baseRefName": base.get("ref"),
+        "baseRefOid": base.get("sha"),
+        "headRefName": head.get("ref"),
+        "headRefOid": head.get("sha"),
+        "isCrossRepository": (head_repo.get("full_name") or repo).lower() != repo.lower(),
+        "maintainerCanModify": bool(pr.get("maintainer_can_modify")),
+        "headRepository": {"nameWithOwner": head_repo.get("full_name") or repo},
+        "autoMergeRequest": pr.get("auto_merge"),
+        "reviewThreads": {"nodes": []},
+        "reviews": {"nodes": [rest_review_node(review) for review in reviews]},
+        "statusCheckRollup": {
+            "contexts": {
+                "nodes": [
+                    rest_check_node(check)
+                    for check in (checks.get("check_runs") or [])
+                ]
+            }
+        },
+        "restMergeableState": rest_merge_state,
+    }
+
+
+def fetch_open_prs_rest(repo: str, max_prs: int, base_branch: str | None = None) -> list[dict[str, Any]]:
+    """Fetch open pull requests through REST when GraphQL is unavailable."""
+
+    prs: list[dict[str, Any]] = []
+    page = 1
+    while len(prs) < max_prs:
+        page_size = min(100, max_prs - len(prs))
+        path = (
+            f"repos/{repo}/pulls?state=open&sort=created&direction=asc"
+            f"&per_page={page_size}&page={page}"
+        )
+        if base_branch:
+            path += f"&base={quote(base_branch, safe='')}"
+        payload = gh_api_json(path)
+        if not payload:
+            break
+        prs.extend(rest_pr_node(repo, pr) for pr in payload)
+        if len(payload) < page_size:
+            break
+        page += 1
+    return prs[:max_prs]
+
+
+def fetch_pr_rest(repo: str, number: int) -> list[dict[str, Any]]:
+    """Fetch one pull request through REST when GraphQL is unavailable."""
+
+    pr = gh_api_json(f"repos/{repo}/pulls/{number}")
+    return [rest_pr_node(repo, pr)] if pr else []
+
+
 def fetch_open_prs(repo: str, max_prs: int) -> list[dict[str, Any]]:
     """Fetch open pull requests from GitHub, paginating up to max_prs."""
     owner, name = split_repo(repo)
@@ -463,7 +574,12 @@ def fetch_open_prs(repo: str, max_prs: int) -> list[dict[str, Any]]:
         }
         if cursor:
             fields["cursor"] = cursor
-        payload = gh_graphql(OPEN_PRS_QUERY, **fields)
+        try:
+            payload = gh_graphql(OPEN_PRS_QUERY, **fields)
+        except RuntimeError as exc:
+            if github_resource_inaccessible(exc):
+                return fetch_open_prs_rest(repo, max_prs)
+            raise
         pr_page = payload["data"]["repository"]["pullRequests"]
         prs.extend(pr_page.get("nodes") or [])
         if not pr_page["pageInfo"]["hasNextPage"]:
@@ -477,7 +593,12 @@ def fetch_open_prs(repo: str, max_prs: int) -> list[dict[str, Any]]:
 def fetch_pr(repo: str, number: int) -> list[dict[str, Any]]:
     """Fetch one pull request by number using the same evidence shape as the queue scan."""
     owner, name = split_repo(repo)
-    payload = gh_graphql(PR_BY_NUMBER_QUERY, owner=owner, name=name, number=number)
+    try:
+        payload = gh_graphql(PR_BY_NUMBER_QUERY, owner=owner, name=name, number=number)
+    except RuntimeError as exc:
+        if github_resource_inaccessible(exc):
+            return fetch_pr_rest(repo, number)
+        raise
     pr = payload["data"]["repository"].get("pullRequest")
     prs = [pr] if pr else []
     enrich_rest_mergeable_states(repo, prs)
