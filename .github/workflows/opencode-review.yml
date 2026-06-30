@@ -5253,7 +5253,7 @@ EOF
             --no-trigger-reviews
             --enable-auto-merge
             --merge-mode direct_or_auto
-            --update-branches
+            --no-update-branches
           )
           if [ -n "${PR_NUMBER:-}" ]; then
             args+=(--pr-number "$PR_NUMBER")

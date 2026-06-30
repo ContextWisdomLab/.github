@@ -625,7 +625,7 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" "Merge scheduler follow-up failed after approval; leaving OpenCode review intact." "opencode post-approval scheduler failure is reported as a warning"
 	assert_file_contains "$workflow_file" "--no-trigger-reviews" "opencode post-approval scheduler follow-up avoids duplicate OpenCode review runs"
 	assert_file_contains "$workflow_file" "--enable-auto-merge" "opencode post-approval scheduler follow-up enables approved-head merge handling"
-	assert_file_contains "$workflow_file" "--update-branches" "opencode post-approval scheduler follow-up updates stale approved branches"
+	assert_file_contains "$workflow_file" "--no-update-branches" "opencode post-approval scheduler follow-up preserves the approved head instead of mutating branches"
 	assert_file_contains "$workflow_file" 'build_coverage_evidence_check_failure_body()' "opencode approval can describe a coverage-evidence blocker without publishing a review"
 	assert_file_contains "$workflow_file" 'fail_for_coverage_evidence_without_review' "opencode approval fails the check, not the PR review state, when coverage-evidence did not pass"
 	assert_file_contains "$workflow_file" "leave the PR review unchanged for coverage-evidence blocker states such as cancelled, skipped, failed, unsupported-tooling, or below-100 evidence" "opencode approval does not turn coverage-evidence blocker states into source review findings"

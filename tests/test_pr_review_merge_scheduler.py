@@ -2572,6 +2572,9 @@ def test_main_keeps_scanning_after_action_error(monkeypatch, capsys):
 def test_scrub_sensitive_data_and_run_error():
     assert sched.scrub_sensitive_data("Authorization: Bearer mytoken123") == "Authorization: Bearer ***"
     assert sched.scrub_sensitive_data("token mytoken123") == "token ***"
+    assert sched.scrub_sensitive_data("ghp_1234567890abcdef") == "***"
+    assert sched.scrub_sensitive_data("ghs_1234567890abcdef") == "***"
+    assert sched.scrub_sensitive_data("gho_1234567890abcdef") == "***"
     assert sched.scrub_sensitive_data("ghp_1234567890abcdef1234") == "***"
     assert sched.scrub_sensitive_data("gho_1234567890abcdef1234567890extra") == "***"
     assert sched.scrub_sensitive_data("github_pat_11AAAAA_abcdefg1234567890") == "***"
@@ -2581,6 +2584,11 @@ def test_scrub_sensitive_data_and_run_error():
     assert sched.scrub_sensitive_data("ghs_server_token_value") == "***"
     assert sched.scrub_sensitive_data("ghr_runner_token_value") == "***"
     assert sched.scrub_sensitive_data("github_pat_11AAAAA_abcdefg") == "***"
+    assert sched.scrub_sensitive_data("sk-1234567890abcdef") == "***"
+    assert sched.scrub_sensitive_data("xoxb-1234567890-1234") == "***"
+    assert sched.scrub_sensitive_data("AKIA1234567890ABCDEF") == "***"
+    assert sched.scrub_sensitive_data("password=mysecret") == "password=***"
+    assert sched.scrub_sensitive_data("api_key : 'mysecret'") == "api_key : ***"
     assert sched.scrub_sensitive_data("No secrets here") == "No secrets here"
     assert sched.scrub_sensitive_data("") == ""
     assert sched.scrub_sensitive_data(None) is None
