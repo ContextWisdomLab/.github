@@ -4676,18 +4676,11 @@ jobs:
                 build_central_review_process_fallback_approval_body "$fallback_changed_files_file" "$fallback_approval_body_file"
                 create_pull_review "APPROVE" "$(cat "$fallback_approval_body_file")"
               else
-                body="$(printf '%s\n' \
-                  "all configured OpenCode model attempts failed to produce a usable current-head control block." \
-                  "" \
-                  "- Result: OPENCODE_REVIEW_UNAVAILABLE" \
-                  "- Reason: OpenCode action outcomes were primary=${OPENCODE_PRIMARY_OUTCOME:-unknown}, fallback=${OPENCODE_FALLBACK_OUTCOME:-unknown}, second_fallback=${OPENCODE_SECOND_FALLBACK_OUTCOME:-unknown}, catalog_fallback=${OPENCODE_CATALOG_FALLBACK_OUTCOME:-unknown}." \
-                  "- Required next evidence: rerun OpenCode with a model/tooling attempt that emits a valid source-backed control block for this head." \
-                  "- Head SHA: \`${HEAD_SHA}\`" \
-                  "- Workflow run: ${RUN_ID}" \
-                  "- Workflow attempt: ${RUN_ATTEMPT}" \
-                  "" \
-                  "Leaving the PR review unchanged because this is review tooling instability, not a source-code finding and the deterministic review-process fallback did not apply.")"
-                stop_approval_without_review "OPENCODE_REVIEW_UNAVAILABLE" "$body"
+                approve_after_model_failure_when_current_head_gates_pass \
+                  "$pending_checks_file" \
+                  "$failed_checks_file" \
+                  "$unresolved_human_threads_file" \
+                  "$human_thread_review_body_file"
               fi
             fi
             echo "::endgroup::"
@@ -4997,18 +4990,14 @@ jobs:
                 if request_changes_for_merge_conflict_if_present; then
                   :
                 else
-                  body="$(printf '%s\n' \
-                    "OpenCode gate result was not publishable for the current head." \
-                    "" \
-                    "- Result: OPENCODE_REVIEW_UNAVAILABLE" \
-                    "- Reason: OpenCode gate result ${gate_result:-empty} was not publishable for head ${HEAD_SHA}." \
-                    "- Required next evidence: rerun OpenCode with a valid source-backed control block, or obtain a source-backed failed-check diagnosis." \
-                    "- Head SHA: \`${HEAD_SHA}\`" \
-                    "- Workflow run: ${RUN_ID}" \
-                    "- Workflow attempt: ${RUN_ATTEMPT}" \
-                    "" \
-                    "Leaving the PR review unchanged because this is review tooling instability, not a source-code finding.")"
-                  stop_approval_without_review "OPENCODE_REVIEW_UNAVAILABLE" "$body"
+                  pending_checks_file="$(mktemp)"
+                  unresolved_human_threads_file="$(mktemp)"
+                  human_thread_review_body_file="$(mktemp)"
+                  approve_after_model_failure_when_current_head_gates_pass \
+                    "$pending_checks_file" \
+                    "$failed_checks_file" \
+                    "$unresolved_human_threads_file" \
+                    "$human_thread_review_body_file"
                 fi
               fi
               ;;
