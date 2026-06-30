@@ -191,6 +191,9 @@ EXECUTABLE_KIND_FALSE_PHRASES = (
 
 MATERIAL_CHANGE_FALSE_PHRASES = (
     "change in a string is safe",
+    "docs-only typo",
+    "documentation-only typo",
+    "documentation string typo",
     "just a string change",
     "no tests are needed",
     "no tests needed",
@@ -202,6 +205,8 @@ MATERIAL_CHANGE_FALSE_PHRASES = (
     "string typo fix",
     "string with no functional impact",
     "string-only change",
+    "typo fix in documentation string",
+    "typo-only change",
     "typo fix with no functional impact",
 )
 

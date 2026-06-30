@@ -269,6 +269,44 @@ def test_material_changed_file_scope_rejects_trivial_string_approval(tmp_path, m
     )
 
 
+def test_material_changed_file_scope_rejects_false_documentation_typo_reason(tmp_path, monkeypatch):
+    changed_files = tmp_path / "changed-files.txt"
+    changed_files.write_text(
+        "\n".join(
+            [
+                ".github/workflows/opencode-review.yml",
+                "scripts/ci/run_opencode_review_model_pool.sh",
+                "tests/test_opencode_agent_contract.py",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_CHANGED_FILES_FILE", str(changed_files))
+
+    approval = control(
+        reason="Typo fix in documentation string",
+        summary=FULL_SUMMARY.replace(
+            "scripts/ci/example.py",
+            "scripts/ci/run_opencode_review_model_pool.sh",
+        ),
+    )
+
+    assert norm.contradicts_material_changed_file_scope(
+        approval["reason"],
+        approval["summary"],
+    )
+    assert norm.valid_control(
+        approval,
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    ) is None
+
+    path = tmp_path / "approval.json"
+    path.write_text(json.dumps(approval), encoding="utf-8")
+    assert norm.check_structural_approval(path) == 4
+
+
 def test_label_and_full_coverage_detection():
     combined = FULL_SUMMARY.casefold()
     assert "100%" in norm.label_section(combined, "coverage:")
