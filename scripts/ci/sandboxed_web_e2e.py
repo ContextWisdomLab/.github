@@ -93,7 +93,7 @@ def start_service(label: str, command: str, cwd: Path, env: dict[str, str], logs
     """Start a service command in its own process group."""
     log_path = logs_dir / f"{label}.log"
     log_file = log_path.open("w", encoding="utf-8")
-    process = subprocess.Popen(
+    process = subprocess.Popen(  # nosec B602 - command must run in a shell by definition
         command,
         cwd=cwd,
         env=env,
@@ -112,12 +112,14 @@ def wait_for_url(url: str, timeout: int, service: Service) -> bool:
     """Poll a readiness URL until it responds or the service exits."""
     if not url:
         return True
+    if not (url.startswith("http://") or url.startswith("https://")):
+        raise ValueError(f"URL must start with http:// or https://, got: {url}")
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if service.process.poll() is not None:
             return False
         try:
-            with urllib.request.urlopen(url, timeout=2) as response:
+            with urllib.request.urlopen(url, timeout=2) as response:  # nosec B310
                 if 200 <= response.status < 500:
                     return True
         except (urllib.error.URLError, TimeoutError):
@@ -127,7 +129,7 @@ def wait_for_url(url: str, timeout: int, service: Service) -> bool:
 
 def run_shell(command: str, cwd: Path, env: dict[str, str], timeout: int) -> subprocess.CompletedProcess[str]:
     """Run a shell command and capture its output."""
-    return subprocess.run(
+    return subprocess.run(  # nosec B602 - command must run in a shell by definition
         command,
         cwd=cwd,
         env=env,
