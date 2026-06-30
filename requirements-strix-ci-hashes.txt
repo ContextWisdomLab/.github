@@ -772,9 +772,9 @@ google-crc32c==1.8.0 \
     # via
     #   google-cloud-storage
     #   google-resumable-media
-google-genai==1.75.0 \
-    --hash=sha256:56bac3991b311c93f980c0a2abcd287b672146905df1fbd71c92ed633d5a07cf \
-    --hash=sha256:8dc4c096e7d6288c3087f6893f582fe52468932464781edb8193bd92b9fefb2c
+google-genai==2.10.0 \
+    --hash=sha256:77912cd558cd7dfd5b75c25fd1c609e78d7954dde583331104022a46ea90f9ee \
+    --hash=sha256:d5350311567ae660c24cbc1752aee4b3d660f89c0106d2dcd2a69978c35afe1e
     # via google-cloud-aiplatform
 google-resumable-media==2.10.0 \
     --hash=sha256:88152884bee37b2bf36a0ab81ad8c7fd12212c9803dd981d77c1b35b02d34e7c \
@@ -1334,9 +1334,9 @@ openai==2.43.0 \
     # via
     #   litellm
     #   openai-agents
-openai-agents==0.14.6 \
-    --hash=sha256:e9d16b835f73be4c5e3798694f90d7a62efcade931e59416bc7462c850e15705 \
-    --hash=sha256:fdd3fb459892c8af5d0b522908b544e96f6217c7254ba55e966424493b43c1ed
+openai-agents==0.17.7 \
+    --hash=sha256:51b5ae43756eea37032e430f95979ba3999af6b1ade397df6c0ffeaf1939646a \
+    --hash=sha256:ca76e7f882c9d8f06e3dfb8064cc33bcb5a5f34a29816cb9af863f395964ff0c
     # via strix-agent
 packaging==26.2 \
     --hash=sha256:5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e \
