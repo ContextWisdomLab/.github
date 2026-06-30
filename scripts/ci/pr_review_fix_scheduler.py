@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -133,7 +134,13 @@ def dispatch_autofix(repo: str, pr: dict[str, Any], *, workflow: str, dry_run: b
     run(args)
 
 
-def inspect_pr(repo: str, pr: dict[str, Any], args: argparse.Namespace) -> tuple[str, tuple[str, ...]]:
+def inspect_pr(
+    repo: str,
+    pr: dict[str, Any],
+    args: argparse.Namespace,
+    *,
+    comments: list[dict[str, Any]] | None = None,
+) -> tuple[str, tuple[str, ...]]:
     """Inspect one PR and optionally dispatch autofix."""
     number = int(pr["number"])
     if pr.get("isDraft"):
@@ -147,7 +154,9 @@ def inspect_pr(repo: str, pr: dict[str, Any], args: argparse.Namespace) -> tuple
     if not needs_fix:
         return "skip", ("no current-head change request or active unresolved review thread",)
 
-    comments = issue_comments(repo, number)
+    if comments is None:
+        comments = issue_comments(repo, number)
+
     if recent_fix_marker_exists(comments, str(pr["headRefOid"]), args.retry_hours * 3600):
         return "wait", ("recent autofix marker exists for this head",)
 
@@ -163,13 +172,53 @@ def process_queue(args: argparse.Namespace) -> int:
     inspected = 0
     decisions: list[dict[str, Any]] = []
 
+    prs_needing_comments = []
+    for pr in prs:
+        if pr.get("isDraft"):
+            continue
+        if pr.get("baseRefName") != args.base_branch:
+            continue
+        if not same_repository_head(args.repo, pr):
+            continue
+        needs_fix, _ = needs_autofix(pr)
+        if needs_fix:
+            prs_needing_comments.append(pr)
+
+    comments_by_pr: dict[int, list[dict[str, Any]]] = {}
+    if len(prs_needing_comments) <= 1:
+        # Fast path for single items
+        for pr in prs_needing_comments:
+            pr_number = int(pr["number"])
+            comments_by_pr[pr_number] = issue_comments(args.repo, pr_number)
+    else:
+        # ⚡ Bolt: Avoid N+1 API blocking by parallelizing independent issue_comments fetches
+        # Impact: Reduces wait time from O(N) API calls to O(N/max_workers) for queue scanning
+        max_workers = min(10, len(prs_needing_comments))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            def fetch_comments(pr_number: int) -> tuple[int, list[dict[str, Any]]]:
+                return pr_number, issue_comments(args.repo, pr_number)
+
+            futures = [executor.submit(fetch_comments, int(pr["number"])) for pr in prs_needing_comments]
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    pr_number, comments = future.result()
+                    comments_by_pr[pr_number] = comments
+                except Exception:
+                    pass
+
     for pr in prs:
         inspected += 1
         if dispatched >= args.max_dispatches:
             decisions.append({"pr": pr["number"], "action": "skip", "reasons": ["autofix dispatch limit reached"]})
             continue
         try:
-            action, reasons = inspect_pr(args.repo, pr, args)
+            pr_number = int(pr["number"])
+            action, reasons = inspect_pr(
+                args.repo,
+                pr,
+                args,
+                comments=comments_by_pr.get(pr_number),
+            )
         except RuntimeError as exc:
             action, reasons = "error", (str(exc),)
         if action == "dispatch":
