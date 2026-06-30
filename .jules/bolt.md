@@ -1,3 +1,6 @@
+## 2024-05-19 - Pre-compile regex patterns to optimize deep label-scanning loops
+**Learning:** Found a codebase-specific anti-pattern in `scripts/ci/opencode_review_normalize_output.py` where deep label-scanning loops over long review texts were redundantly recompiling regexes for verification labels inside the `label_matches` inner function. This caused measurable overhead in the CI review script.
+**Action:** When performing deep text inspection using repetitive substring or pattern matching across a known set of keys or labels, pre-compile the regex objects at the module level.
 ## 2024-06-21 - Python JSON Decoding Optimization
 **Learning:** In Python, string slicing `text[index:]` inside a loop can cause O(N^2) complexity and severe memory copying overhead. When decoding JSON incrementally from a large text blob, `json.JSONDecoder().raw_decode(text, index)` can parse from a given index without slicing. Combining this with `text.find("{", index)` to skip irrelevant characters is significantly faster than `enumerate(text)`.
 **Action:** Always prefer `raw_decode(text, index)` and `string.find()` over string slicing and character-by-character iteration when scanning large files for JSON objects.
@@ -7,6 +10,9 @@
 ## 2024-11-20 - JSON Decoding Performance - Index Advancement
 **Learning:** Even when avoiding string slicing using `json.JSONDecoder().raw_decode(text, index)`, failing to correctly advance the index by ignoring the returned `end` index (`value, _ = decoder.raw_decode(...)`) forces the search loop to repeatedly attempt to decode nested JSON structures (e.g., inner braces `{`) sequentially. This leads to massive O(N^2) time complexity and redundant parsing for large, deeply nested JSON objects.
 **Action:** Always capture and use the new end index returned by `raw_decode` (e.g., `value, next_idx = decoder.raw_decode(text, index)`) to jump over the completely parsed object and proceed efficiently.
+## 2026-06-27 - Pre-compile Regex Patterns for Deep Label Scanning
+**Learning:** Found a codebase-specific anti-pattern in `scripts/ci/opencode_review_normalize_output.py` where deep label-scanning loops over long review texts were redundantly recompiling regexes for verification labels inside the `label_matches` inner function. This caused measurable overhead in the CI review script.
+**Action:** When performing deep text inspection using repetitive substring or pattern matching across a known set of keys or labels, pre-compile the regex objects at the module level.
 ## 2026-06-25 - Avoid N+1 API blocking in PR checks
-**Learning:** In backend processing scripts, synchronous iterations calling an external service, such as fetching `restMergeableState` per PR, cause N+1 API bottlenecks and stall pipeline execution linearly. Bounded parallelism reduces wall-clock latency toward O(ceil(N / max_workers)) batches, not O(1).
-**Action:** Use `concurrent.futures.ThreadPoolExecutor` for independent network calls in a loop, short-circuit empty inputs, and bound `max_workers` to avoid API rate limits.
+**Learning:** In backend processing scripts, synchronous iterations calling an external service, such as fetching `restMergeableState` per PR, cause N+1 API bottlenecks and stall pipeline execution linearly. This matters for PR schedulers handling multiple items.
+**Action:** Use `concurrent.futures.ThreadPoolExecutor` for independent network calls in a loop when there are multiple items, keep empty and single-item inputs on the cheap serial path, and bound `max_workers` to avoid API rate limits.

@@ -59,14 +59,28 @@ def test_structural_review_detection_accepts_phrases_patterns_and_clean_text():
     assert norm.admits_missing_structural_review("No changed files", "")
     assert norm.admits_missing_structural_review("Could not inspect the changed files", "")
     assert norm.admits_missing_structural_review("", "Source files were not inspected")
+    assert norm.admits_missing_structural_review("structural exploration was not possible", "summary")
+    assert norm.admits_missing_structural_review("reason", "evidence was truncated")
+    assert norm.admits_missing_structural_review("", "structural analysis was incomplete")
+    assert norm.admits_missing_structural_review("", "zero changed files")
+    assert norm.admits_missing_structural_review("STRUCTURAL EXPLORATION WAS NOT POSSIBLE", "")
     assert not norm.admits_missing_structural_review("scripts/ci/example.py checked", "")
 
 
 def test_changed_file_and_verification_posture_detection():
     assert norm.mentions_changed_file_evidence("README.md", "")
     assert norm.mentions_changed_file_evidence("scripts/ci/example.py", "")
+    assert norm.mentions_changed_file_evidence("", "Checked some_script.sh")
+    assert norm.mentions_changed_file_evidence("Modified a.ts", "and b.tsx")
+    assert norm.mentions_changed_file_evidence("updated package.json", "")
+    assert norm.mentions_changed_file_evidence("checked Dockerfile", "")
+    assert norm.mentions_changed_file_evidence("reviewed AGENTS.md", "")
+    assert norm.mentions_changed_file_evidence("The file dir/sub/app.js is good", "")
+    assert norm.mentions_changed_file_evidence("Fixed bug in module.rs", "")
     assert not norm.mentions_changed_file_evidence("No path here", "")
     assert not norm.mentions_changed_file_evidence("Security/privacy: checked", "")
+    assert not norm.mentions_changed_file_evidence("changed some code", "no file listed here")
+    assert not norm.mentions_changed_file_evidence("invalid.ext", "not a valid extension")
     assert norm.mentions_verification_posture("", FULL_SUMMARY)
     assert not norm.mentions_verification_posture("", FULL_SUMMARY.replace("CodeGraph", "graph"))
 
@@ -188,6 +202,8 @@ def test_label_and_full_coverage_detection():
     combined = FULL_SUMMARY.casefold()
     assert "100%" in norm.label_section(combined, "coverage:")
     assert norm.label_section(combined, "missing:") == ""
+    text_coverage = "performance: FAST docstring coverage: 100% something else coverage: 100%"
+    assert norm.label_section(text_coverage, "performance:") == " FAST "
     assert norm.mentions_full_coverage("", FULL_SUMMARY)
     no_source_summary = FULL_SUMMARY.replace(
         "coverage execution evidence proves 100% test coverage",
@@ -665,10 +681,11 @@ M\tscripts/ci/example.py
 
 
 def test_iter_json_objects_extracts_raw_and_embedded_json():
-    assert norm.iter_json_objects('{"a": 1}') == [{"a": 1}, {"a": 1}]
+    assert norm.iter_json_objects('{"a": 1}') == [{"a": 1}]
     assert norm.iter_json_objects('prefix {"b": 2} suffix') == [{"b": 2}]
-    assert norm.iter_json_objects('prefix {"outer": {"inner": 1}} suffix') == [
-        {"outer": {"inner": 1}}
+    assert norm.iter_json_objects('prefix {"wrapper": {"control": true}} suffix') == [
+        {"wrapper": {"control": True}},
+        {"control": True},
     ]
     assert norm.iter_json_objects("prefix {  } suffix") == [{}]
     assert norm.iter_json_objects("prefix {not json}") == []
