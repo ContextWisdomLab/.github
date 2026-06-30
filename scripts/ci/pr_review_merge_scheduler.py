@@ -645,7 +645,7 @@ def fetch_open_prs(repo: str, max_prs: int) -> list[dict[str, Any]]:
         try:
             payload = gh_graphql(OPEN_PRS_QUERY, **fields)
         except RuntimeError as exc:
-            if github_resource_inaccessible(exc):
+            if github_resource_inaccessible(exc) or is_transient_github_api_error(exc):
                 return fetch_open_prs_rest(repo, max_prs)
             raise
         pr_page = payload["data"]["repository"]["pullRequests"]
@@ -664,7 +664,7 @@ def fetch_pr(repo: str, number: int) -> list[dict[str, Any]]:
     try:
         payload = gh_graphql(PR_BY_NUMBER_QUERY, owner=owner, name=name, number=number)
     except RuntimeError as exc:
-        if github_resource_inaccessible(exc):
+        if github_resource_inaccessible(exc) or is_transient_github_api_error(exc):
             return fetch_pr_rest(repo, number)
         raise
     pr = payload["data"]["repository"].get("pullRequest")
