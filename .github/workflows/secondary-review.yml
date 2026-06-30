@@ -1,0 +1,97 @@
+name: Required Secondary Review
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_run:
+    workflows: ["Required OpenCode Review", "Strix Security Scan"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to review
+        required: true
+        type: string
+      target_repository:
+        description: Repository that owns the pull request, in owner/name form
+        required: false
+        default: ""
+        type: string
+      canonical_ref:
+        description: Ref of ContextualWisdomLab/.github to use for trusted review scripts
+        required: false
+        default: main
+        type: string
+
+concurrency:
+  group: >-
+    secondary-review-${{ github.event_name }}-${{
+    github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}-${{
+    github.event_name == 'pull_request_target' && format('pr-{0}-{1}', github.event.pull_request.number, github.event.pull_request.head.sha) ||
+    github.event_name == 'workflow_run' && github.event.workflow_run.pull_requests[0].number && format('pr-{0}', github.event.workflow_run.pull_requests[0].number) ||
+    github.event.inputs.pr_number || github.run_id }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+
+jobs:
+  approve-after-primary-review:
+    name: approve-after-primary-review
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || github.event_name == 'workflow_run'
+      || (
+        github.event_name == 'pull_request_target'
+        && github.event.pull_request.head.repo.full_name == github.repository
+      )
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      TARGET_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
+      PR_NUMBER: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.inputs.pr_number || '' }}
+      REVIEW_TOKEN_SOURCE: ${{ secrets.SECONDARY_REVIEW_TOKEN != '' && 'SECONDARY_REVIEW_TOKEN' || secrets.PR_REVIEW_MERGE_TOKEN != '' && 'PR_REVIEW_MERGE_TOKEN' || '' }}
+    steps:
+      - name: Resolve trusted secondary review source ref
+        id: trusted_source
+        env:
+          INPUT_CANONICAL_REF: ${{ github.event.inputs.canonical_ref || '' }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          trusted_ref="${INPUT_CANONICAL_REF:-main}"
+          case "$WORKFLOW_REF" in
+            ContextualWisdomLab/.github/.github/workflows/secondary-review.yml@*)
+              trusted_ref="${WORKFLOW_REF##*@}"
+              ;;
+          esac
+          printf 'ref=%s\n' "$trusted_ref" >>"$GITHUB_OUTPUT"
+
+      - name: Checkout trusted secondary review gate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: ContextualWisdomLab/.github
+          ref: ${{ steps.trusted_source.outputs.ref }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Submit secondary approval when primary review is clean
+        env:
+          GH_TOKEN: ${{ secrets.SECONDARY_REVIEW_TOKEN || secrets.PR_REVIEW_MERGE_TOKEN }}
+          SECONDARY_REVIEW_TOKEN_SOURCE: ${{ env.REVIEW_TOKEN_SOURCE }}
+          SECONDARY_REVIEW_AUTHOR_HINT: secondary-review-bot
+        run: |
+          set -euo pipefail
+          if [ -z "${PR_NUMBER:-}" ]; then
+            echo "No pull request number was available for this event; skipping."
+            exit 0
+          fi
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::notice::SECONDARY_REVIEW_TOKEN is not configured and PR_REVIEW_MERGE_TOKEN is unavailable; secondary approval skipped."
+            exit 0
+          fi
+          python3 scripts/ci/secondary_review_gate.py \
+            --repo "$TARGET_REPOSITORY" \
+            --pr-number "$PR_NUMBER"
