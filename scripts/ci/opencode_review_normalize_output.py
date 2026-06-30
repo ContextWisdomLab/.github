@@ -557,7 +557,7 @@ def check_structural_approval(control_file: Path) -> int:
         str(value.get("summary", "")),
     ):
         return reject("approval admits missing structural review")
-    if value.get("result") == "APPROVE" and not mentions_changed_file_evidence(
+    if value.get("result") == "APPROVE" and not mentions_actual_changed_file(
         str(value.get("reason", "")),
         str(value.get("summary", "")),
     ):
@@ -669,13 +669,25 @@ def valid_control(
     }
 
 
+def extract_dicts(obj: Any) -> list[Any]:
+    """Recursively extract all dictionaries from a JSON-like object."""
+    results = []
+    if isinstance(obj, dict):
+        results.append(obj)
+        for v in obj.values():
+            results.extend(extract_dicts(v))
+    elif isinstance(obj, list):
+        for item in obj:
+            results.extend(extract_dicts(item))
+    return results
+
 def iter_json_objects(text: str) -> list[Any]:
     """Extract JSON objects from raw OpenCode output that may include prose."""
     decoder = json.JSONDecoder()
     values: list[Any] = []
 
     try:
-        values.append(json.loads(text))
+        return extract_dicts(json.loads(text))
     except json.JSONDecodeError:
         # OpenCode exports may contain prose around the JSON control object.
         pass
@@ -693,7 +705,7 @@ def iter_json_objects(text: str) -> list[Any]:
             continue
         try:
             value, new_index = decoder.raw_decode(text, index)
-            values.append(value)
+            values.extend(extract_dicts(value))
             # ⚡ Bolt: Advance index to avoid O(N^2) redundant parsing of nested JSON blocks
             index = new_index
             continue
