@@ -132,6 +132,7 @@ REST_MERGEABLE_STATE_MAP = {
     "unstable": "UNSTABLE",
 }
 REST_MERGEABLE_STATES = set(REST_MERGEABLE_STATE_MAP.values())
+REST_MERGEABLE_STATE_WORKERS = 10
 
 
 @dataclass
@@ -702,12 +703,16 @@ def enrich_rest_mergeable_states(repo: str, prs: list[dict[str, Any]]) -> None:
         except RuntimeError as exc:
             pr["compareBranchFreshnessError"] = bounded_error_summary(str(exc))
 
+    if not prs:
+        return
+
     if len(prs) <= 1:
         for pr in prs:
             enrich(pr)
         return
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(prs), 10)) as executor:
+    max_workers = min(REST_MERGEABLE_STATE_WORKERS, len(prs))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         for _ in executor.map(enrich, prs):
             pass
 
