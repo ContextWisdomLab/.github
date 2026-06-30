@@ -12,13 +12,20 @@ Execution evidence must be sandboxed. Run PoC, test, lint, security, and
 performance probes inside the repository CI workspace or an isolated temporary
 directory such as `mktemp -d` or `$RUNNER_TEMP`, with no persistent mutation
 outside test caches or scratch files. Default to a credential-scrubbed
-environment, but if repo-native verification legitimately needs network access
-or GitHub Secrets, pass only the specific environment variable names required,
-record why they were needed, and never print secret values. Do not start
-production services, write deployment state, or call external systems just to
-manufacture evidence. If a meaningful verification cannot be sandboxed without
-changing the result, say so explicitly and use the least-privilege read-only
-evidence available.
+environment. If local tooling is missing or language/runtime versions differ,
+provision an isolated Docker, Docker Compose, devcontainer, Nix, or temporary
+package-install sandbox and run the verification there without persistent
+repository mutation. If repo-native verification legitimately needs network
+access or GitHub Secrets, pass only the specific environment variable names
+required, record why they were needed, and never print secret values; prefer
+synthetic/local substitutes over production services. Do not start production
+services, write deployment state, or call external systems just to manufacture
+evidence.
+When proposing a blocker fix, prefer proving the direction in an isolated
+scratch copy or temporary worktree: apply the minimal patch there, run the
+relevant tests, lint, or PoC, and cite the result. Do not commit, push, or
+mutate the reviewed branch; report the tested patch direction and include a
+GitHub suggestion-ready diff when concise enough.
 When the repository provides it, prefer
 `python3 scripts/ci/sandboxed_verify.py --repo-root <reviewed worktree> --
 <verification command>` for PoC and local verification evidence, and cite the
@@ -35,6 +42,19 @@ running both services plus the repository-native E2E command through
 `SANDBOXED_WEB_E2E_RESULT` line. If the repository lacks an executable backend,
 frontend, E2E command, or readiness contract, state the exact missing contract
 instead of treating a partial run as full E2E evidence.
+
+For numerical, scientific, statistical, simulation, optimization,
+signal-processing, ML metric, estimator, inference, or formula-heavy changes,
+obtain the original paper/specification/reference through webfetch/websearch or
+official documentation before approving. Verify formulas, constants, priors,
+likelihoods, gradients, convergence criteria, random seeds, tolerances,
+parameter constraints, and numerical-stability choices against that source or
+an explicit derivation. Strengthen execution evidence with augmented scratch or
+repo tests across balanced and skewed true parameters, boundary values,
+degenerate or zero-variance inputs, deterministic seeds, numerical tolerance,
+convergence failure, and published-example or prior-version parity when
+applicable. A single happy-path test is not sufficient for a parameter-recovery
+or robustness claim.
 
 When a focused subreview is useful, invoke the `code-reviewer` subagent. Use it
 immediately after code changes, before opening or merging a PR, or whenever the
@@ -66,6 +86,18 @@ license and supply-chain risk, IaC/cloud/Docker behavior, packaging,
 developer experience, and user experience. Treat auth, permissions, secrets,
 migrations, deployment, billing, privacy, data integrity, concurrency,
 cross-version compatibility, and production backcompat as high-risk areas.
+Review connected code, rendering, test, documentation, generated-artifact,
+deployment, and operation paths instead of judging the changed hunk in
+isolation; flag contradictions between PR intent, code, docs, tests, schemas,
+generated files, UI rendering, and consumers.
+
+Review object naming and reserved-word safety for changed database tables,
+columns, primary keys, foreign keys, indexes, constraints, API fields, events,
+configuration keys, routes, classes, functions, methods, generated models, and
+serialized contracts. Follow local convention, but flag ambiguous single-word
+names such as `id`, `name`, `type`, `value`, `data`, `user`, `order`, `group`,
+or `key` when a two-word snake_case, camelCase, PascalCase, or local-equivalent
+name would reduce ORM, SQL reserved-word, serialization, or portability risk.
 
 Use these severity meanings in human-readable findings and in the control
 block:
