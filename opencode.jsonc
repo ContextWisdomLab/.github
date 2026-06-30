@@ -129,6 +129,11 @@
           "options": {
             "reasoningEffort": "high"
           },
+          "variants": {
+            "high": {
+              "reasoningEffort": "high"
+            }
+          },
           "limit": {
             "context": 200000,
             "output": 100000
@@ -140,6 +145,11 @@
           "reasoning": true,
           "options": {
             "reasoningEffort": "high"
+          },
+          "variants": {
+            "high": {
+              "reasoningEffort": "high"
+            }
           },
           "limit": {
             "context": 200000,
@@ -153,6 +163,11 @@
           "options": {
             "reasoningEffort": "high"
           },
+          "variants": {
+            "high": {
+              "reasoningEffort": "high"
+            }
+          },
           "limit": {
             "context": 200000,
             "output": 100000
@@ -164,6 +179,11 @@
           "reasoning": true,
           "options": {
             "reasoningEffort": "high"
+          },
+          "variants": {
+            "high": {
+              "reasoningEffort": "high"
+            }
           },
           "limit": {
             "context": 128000,
@@ -185,6 +205,11 @@
           "options": {
             "reasoningEffort": "high"
           },
+          "variants": {
+            "high": {
+              "reasoningEffort": "high"
+            }
+          },
           "limit": {
             "context": 200000,
             "output": 100000
@@ -197,6 +222,11 @@
           "options": {
             "reasoningEffort": "high"
           },
+          "variants": {
+            "high": {
+              "reasoningEffort": "high"
+            }
+          },
           "limit": {
             "context": 200000,
             "output": 100000
@@ -208,6 +238,11 @@
           "reasoning": true,
           "options": {
             "reasoningEffort": "high"
+          },
+          "variants": {
+            "high": {
+              "reasoningEffort": "high"
+            }
           },
           "limit": {
             "context": 200000,

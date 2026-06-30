@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 
@@ -50,9 +51,44 @@ def test_code_reviewer_subagent_contract_is_configured():
     for model_name in high_reasoning_models:
         assert models[model_name]["reasoning"] is True
         assert models[model_name]["options"]["reasoningEffort"] == "high"
+        assert models[model_name]["variants"]["high"]["reasoningEffort"] == "high"
     for model_name, model_config in models.items():
         if model_config.get("reasoning") is True:
             assert model_config["options"]["reasoningEffort"] == "high", model_name
+            assert model_config["variants"]["high"]["reasoningEffort"] == "high", model_name
+
+
+def test_opencode_model_pool_sets_high_effort_for_capable_candidates():
+    """Guard every review-pool candidate against silent reasoning-effort drift."""
+    config = json.loads(Path("opencode.jsonc").read_text(encoding="utf-8"))
+    workflow = Path(".github/workflows/opencode-review.yml").read_text(encoding="utf-8")
+    models = config["provider"]["github-models"]["models"]
+    candidates_match = re.search(r'OPENCODE_MODEL_CANDIDATES: "([^"]+)"', workflow)
+
+    assert candidates_match is not None
+    candidates = candidates_match.group(1).split()
+    candidate_models = [candidate.removeprefix("github-models/") for candidate in candidates]
+
+    assert set(candidate_models) == set(models)
+
+    def is_reasoning_capable(model_name: str) -> bool:
+        return (
+            model_name.startswith("openai/gpt-5")
+            or model_name.startswith("openai/o3")
+            or model_name.startswith("openai/o4")
+            or model_name.startswith("deepseek/deepseek-r1")
+        )
+
+    for model_name in candidate_models:
+        model_config = models[model_name]
+        if is_reasoning_capable(model_name):
+            assert model_config["reasoning"] is True, model_name
+            assert model_config["options"]["reasoningEffort"] == "high", model_name
+            assert model_config["variants"]["high"]["reasoningEffort"] == "high", model_name
+        else:
+            assert model_config.get("reasoning") is not True, model_name
+            assert "reasoningEffort" not in model_config.get("options", {}), model_name
+            assert "variants" not in model_config, model_name
 
 
 def test_code_reviewer_prompt_preserves_review_only_policy():
