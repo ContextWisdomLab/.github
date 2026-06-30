@@ -4049,9 +4049,7 @@ jobs:
             fi
 
             manual_run_line="$(latest_current_head_manual_strix_run || true)"
-            IFS="$(printf '\t')" read -r manual_run_status manual_run_conclusion manual_run_url <<EOF
-${manual_run_line}
-EOF
+            IFS="$(printf '\t')" read -r manual_run_status manual_run_conclusion manual_run_url <<<"$manual_run_line" || true
             if [ "$manual_run_status" = "completed" ] &&
               [ "$manual_run_conclusion" = "success" ] &&
               [ -n "$manual_run_url" ]; then
