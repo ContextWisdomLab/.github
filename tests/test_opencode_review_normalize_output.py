@@ -217,6 +217,58 @@ def test_changed_file_kind_contradictions_are_rejected(tmp_path, monkeypatch):
     assert not norm.contradicts_changed_file_kinds(approval["reason"], approval["summary"])
 
 
+def test_material_changed_file_scope_rejects_trivial_string_approval(tmp_path, monkeypatch):
+    changed_files = tmp_path / "changed-files.txt"
+    changed_files.write_text(
+        "\n".join(
+            [
+                ".github/workflows/strix.yml",
+                "scripts/ci/test_strix_quick_gate.sh",
+                "tests/test_opencode_agent_contract.py",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_CHANGED_FILES_FILE", str(changed_files))
+
+    summary = (
+        "Approval sufficiency: The change is a simple typo fix in a string with no functional impact. "
+        "Verification posture: No verification needed for a string typo fix. "
+        "Linter/static: The file was not checked by a linter but the change in a string is safe. "
+        "TDD/regression: No tests are needed for a string change.\n"
+        + FULL_SUMMARY.replace("scripts/ci/example.py", ".github/workflows/strix.yml")
+    )
+    approval = control(
+        reason="Typo fix with no functional impact",
+        summary=summary,
+    )
+
+    assert norm.changed_file_is_material(".github/workflows/strix.yml")
+    assert norm.changed_file_is_material("scripts/ci/test_strix_quick_gate.sh")
+    assert norm.changed_file_is_material("tests/test_opencode_agent_contract.py")
+    assert not norm.changed_file_is_material("README.md")
+    assert norm.contradicts_material_changed_file_scope(
+        approval["reason"],
+        approval["summary"],
+    )
+    assert norm.valid_control(
+        approval,
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    ) is None
+
+    path = tmp_path / "approval.json"
+    path.write_text(json.dumps(approval), encoding="utf-8")
+    assert norm.check_structural_approval(path) == 4
+
+    changed_files.write_text("README.md\n", encoding="utf-8")
+    assert not norm.contradicts_material_changed_file_scope(
+        approval["reason"],
+        approval["summary"],
+    )
+
+
 def test_label_and_full_coverage_detection():
     combined = FULL_SUMMARY.casefold()
     assert "100%" in norm.label_section(combined, "coverage:")
@@ -594,6 +646,60 @@ Security/privacy: Not applicable.
     assert "no executable changes" not in repaired["summary"]
     assert "no test changes" not in repaired["summary"]
     assert not norm.contradicts_changed_file_kinds(repaired["reason"], repaired["summary"])
+
+
+def test_valid_control_repair_drops_material_trivialization(tmp_path, monkeypatch):
+    evidence = tmp_path / "bounded-review-evidence.md"
+    changed_files = tmp_path / "changed-files.txt"
+    evidence.write_text(
+        """\
+# OpenCode bounded PR review evidence
+
+## Coverage execution evidence
+
+# Coverage Evidence
+
+## Coverage Decision
+
+- Result: PASS
+- Test coverage: 100%
+- Docstring coverage: 100%
+
+## Changed files
+
+M\t.github/workflows/strix.yml
+M\tscripts/ci/test_strix_quick_gate.sh
+""",
+        encoding="utf-8",
+    )
+    changed_files.write_text(
+        ".github/workflows/strix.yml\nscripts/ci/test_strix_quick_gate.sh\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_APPROVAL_REPAIR_EVIDENCE_FILE", str(evidence))
+    monkeypatch.setenv("OPENCODE_CHANGED_FILES_FILE", str(changed_files))
+
+    repaired = norm.valid_control(
+        control(
+            reason="Current-head evidence was reviewed.",
+            summary=(
+                "The change is a simple typo fix in a string with no functional impact. "
+                "No tests are needed for a string change."
+            ),
+        ),
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    )
+
+    assert repaired is not None
+    assert ".github/workflows/strix.yml" in repaired["summary"]
+    assert "simple typo fix" not in repaired["summary"]
+    assert "no tests are needed" not in repaired["summary"].casefold()
+    assert not norm.contradicts_material_changed_file_scope(
+        repaired["reason"],
+        repaired["summary"],
+    )
 
 
 def test_valid_control_does_not_repair_unsafe_or_unproven_approval(tmp_path, monkeypatch):

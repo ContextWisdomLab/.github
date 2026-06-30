@@ -1523,7 +1523,9 @@ jobs:
           []; Put all required Verification posture labels inside the JSON summary string itself. Never approve
           with a reason or summary that says no changes, and never say no source files changed, no test files
           changed, or no executable changes when exact changed-file evidence lists workflow, script, source, or
-          test files. If bounded failed GitHub Check evidence contains active failed checks, treat it as a blocker
+          test files. Never approve material workflow, script, source, config, package, or test changes with a
+          reason or summary that says simple typo fix, string-only change, no verification needed, or no tests
+          needed. If bounded failed GitHub Check evidence contains active failed checks, treat it as a blocker
           until diagnosed. A successful same-head manual workflow_dispatch Strix run may supersede a stale failed
           PR statusCheckRollup Strix context only when failed-check evidence explicitly lists it under Superseded
           failed checks with the exact target URL. Multiple Strix model reports must not be collapsed; preserve
@@ -1547,6 +1549,7 @@ jobs:
           Exact gate phrases: Before APPROVE, the summary must include at least one exact changed file path inspected as changed-file evidence.
           Exact gate phrases: when result is APPROVE the JSON findings value must be exactly [].
           Exact gate phrases: never say no source files changed, no test files changed, or no executable changes when exact changed-file evidence lists workflow, script, source, or test files.
+          Exact gate phrases: Never approve material workflow, script, source, config, package, or test changes with a reason or summary that says simple typo fix, string-only change, no verification needed, or no tests needed.
           Only mergeStateStatus DIRTY or CONFLICTING means a merge conflict. mergeStateStatus BLOCKED is a branch policy, review, or check state, not conflict guidance. When the PR mergeability evidence reports mergeStateStatus DIRTY or CONFLICTING, include a merge-conflict repair
           direction that names the base/head branch relationship, instructs the author to merge or rebase the
           latest base branch into the PR branch, resolve conflict markers in changed files, rerun focused checks,
@@ -1660,7 +1663,9 @@ jobs:
           []; Put all required Verification posture labels inside the JSON summary string itself. Never approve
           with a reason or summary that says no changes, and never say no source files changed, no test files
           changed, or no executable changes when exact changed-file evidence lists workflow, script, source, or
-          test files. If bounded failed GitHub Check evidence contains active failed checks, treat it as a blocker
+          test files. Never approve material workflow, script, source, config, package, or test changes with a
+          reason or summary that says simple typo fix, string-only change, no verification needed, or no tests
+          needed. If bounded failed GitHub Check evidence contains active failed checks, treat it as a blocker
           until diagnosed. A successful same-head manual workflow_dispatch Strix run may supersede a stale failed
           PR statusCheckRollup Strix context only when failed-check evidence explicitly lists it under Superseded
           failed checks with the exact target URL. Multiple Strix model reports must not be collapsed; preserve
@@ -1684,6 +1689,7 @@ jobs:
           Exact gate phrases: Before APPROVE, the summary must include at least one exact changed file path inspected as changed-file evidence.
           Exact gate phrases: when result is APPROVE the JSON findings value must be exactly [].
           Exact gate phrases: never say no source files changed, no test files changed, or no executable changes when exact changed-file evidence lists workflow, script, source, or test files.
+          Exact gate phrases: Never approve material workflow, script, source, config, package, or test changes with a reason or summary that says simple typo fix, string-only change, no verification needed, or no tests needed.
           Only mergeStateStatus DIRTY or CONFLICTING means a merge conflict. mergeStateStatus BLOCKED is a branch policy, review, or check state, not conflict guidance. When the PR mergeability evidence reports mergeStateStatus DIRTY or CONFLICTING, include a merge-conflict repair
           direction that names the base/head branch relationship, instructs the author to merge or rebase the
           latest base branch into the PR branch, resolve conflict markers in changed files, rerun focused checks,
