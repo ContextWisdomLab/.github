@@ -487,6 +487,7 @@ A\t.github/workflows/opencode-review.yml
     assert repaired is not None
     assert "scripts/ci/example.py" in repaired["summary"]
     assert "CodeGraph" in repaired["summary"]
+    assert "No blockers were found" not in repaired["summary"]
     assert norm.mentions_verification_posture(repaired["reason"], repaired["summary"])
     assert norm.mentions_full_coverage(repaired["reason"], repaired["summary"])
 
@@ -516,6 +517,7 @@ def test_valid_control_repairs_summary_from_invalid_utf8_evidence(tmp_path, monk
 
     assert repaired is not None
     assert "scripts/ci/opencode_review_normalize_output.py" in repaired["summary"]
+    assert "No blockers were found" not in repaired["summary"]
     assert norm.mentions_verification_posture(repaired["reason"], repaired["summary"])
     assert norm.mentions_full_coverage(repaired["reason"], repaired["summary"])
 
@@ -577,6 +579,7 @@ Security/privacy: Not applicable.
 
     assert repaired is not None
     assert "scripts/ci/opencode_review_normalize_output.py" in repaired["summary"]
+    assert "Not applicable." not in repaired["summary"]
     assert norm.mentions_full_coverage(repaired["reason"], repaired["summary"])
 
 
