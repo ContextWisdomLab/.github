@@ -121,5 +121,5 @@ def test_opencode_runs_merge_scheduler_after_review_without_repo_local_dispatch(
     assert "secrets.PR_REVIEW_MERGE_TOKEN || secrets.OPENCODE_APPROVE_TOKEN || steps.opencode_app_token.outputs.token" in workflow
     assert "--no-trigger-reviews" in workflow
     assert "--enable-auto-merge" in workflow
-    assert "--update-branches" in workflow
+    assert "--no-update-branches" in workflow
     assert "Merge scheduler follow-up skipped after approval because no mutation credential was available" in workflow
