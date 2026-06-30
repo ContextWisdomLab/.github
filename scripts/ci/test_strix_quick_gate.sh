@@ -3823,6 +3823,19 @@ EOS
 		echo "Penetration test failed: changed internal dot-directory target"
 		exit 1
 		;;
+	pr-critical-changed-json-target)
+		mkdir -p "$STRIX_REPORTS_DIR/fake-pr-changed-json-target/vulnerabilities"
+		cat >"$STRIX_REPORTS_DIR/fake-pr-changed-json-target/vulnerabilities/vuln-0001.md" <<EOS
+**Severity:** MEDIUM
+{
+  "severity": "medium",
+  "target": "/workspace/$(basename -- "$target_path")/frontend/src/components/CalendarLayout.tsx",
+  "title": "Missing CSRF Protection in Calendar API Endpoints"
+}
+EOS
+		echo "Penetration test failed: changed JSON target"
+		exit 1
+		;;
 	pr-critical-changed-subdir-target)
 		mkdir -p "$STRIX_REPORTS_DIR/fake-pr-changed-subdir/vulnerabilities"
 		cat >"$STRIX_REPORTS_DIR/fake-pr-changed-subdir/vulnerabilities/vuln-0001.md" <<'EOS'
@@ -4275,6 +4288,9 @@ EOS
 	elif [ "$scenario" = "pr-critical-changed-internal-dotdir-target" ]; then
 		mkdir -p "$repo_root_dir/.github/workflows"
 		echo 'name: OpenCode Review' >"$repo_root_dir/.github/workflows/opencode-review.yml"
+	elif [ "$scenario" = "pr-critical-changed-json-target" ]; then
+		mkdir -p "$repo_root_dir/frontend/src/components"
+		echo 'export function CalendarLayout() { return null }' >"$repo_root_dir/frontend/src/components/CalendarLayout.tsx"
 	elif [ "$scenario" = "opencode-documented-env-api-key-fallback-success" ]; then
 		mkdir -p "$repo_root_dir/.github/workflows"
 		cat >"$repo_root_dir/.github/workflows/opencode-review.yml" <<'EOS'
@@ -4638,6 +4654,28 @@ run_filtered_gate_case_if_requested() {
 			"2" \
 			"vertex_ai/missing-primary|vertex_ai/fallback-one" \
 			"<unset>|<unset>"
+		;;
+	pr-critical-changed-json-target)
+		run_gate_case "pr-critical-changed-json-target" \
+			"vertex_ai/gemini-2.5-pro" \
+			"" \
+			"1" \
+			"Strix finding intersects files changed in this pull request." \
+			"1" \
+			"vertex_ai/gemini-2.5-pro" \
+			"<unset>" \
+			"vertex_ai" \
+			"__DEFAULT__" \
+			"" \
+			"0" \
+			"MEDIUM" \
+			"0" \
+			"" \
+			"" \
+			"1200" \
+			"0" \
+			"pull_request" \
+			"frontend/src/components/CalendarLayout.tsx"
 		;;
 	*)
 		record_failure "unknown STRIX_TEST_CASE_FILTER '${STRIX_TEST_CASE_FILTER:-}'"
@@ -9179,6 +9217,27 @@ run_gate_case "pr-critical-changed-internal-dotdir-target" \
 	"0" \
 	"pull_request" \
 	".github/workflows/opencode-review.yml"
+
+run_gate_case "pr-critical-changed-json-target" \
+	"vertex_ai/gemini-2.5-pro" \
+	"" \
+	"1" \
+	"Strix finding intersects files changed in this pull request." \
+	"1" \
+	"vertex_ai/gemini-2.5-pro" \
+	"<unset>" \
+	"vertex_ai" \
+	"__DEFAULT__" \
+	"" \
+	"0" \
+	"MEDIUM" \
+	"0" \
+	"" \
+	"" \
+	"1200" \
+	"0" \
+	"pull_request" \
+	"frontend/src/components/CalendarLayout.tsx"
 
 run_gate_case "pr-critical-changed-subdir-target" \
 	"openai/gpt-4o-mini" \
