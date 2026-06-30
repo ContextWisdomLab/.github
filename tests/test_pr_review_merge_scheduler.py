@@ -1446,8 +1446,10 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     dispatched = []
     monkeypatch.setattr(sched, "dispatch_strix_evidence", lambda repo, workflow, pr, dry_run: dispatched.append(workflow))
     monkeypatch.setattr(sched, "dispatch_opencode_review", lambda repo, workflow, pr, dry_run: dispatched.append(workflow))
-    assert inspect(stale_behind).action == "security_dispatch"
-    assert dispatched == ["Strix Security Scan"]
+    stale_behind_decision = inspect(stale_behind)
+    assert stale_behind_decision.action == "update_branch"
+    assert "branch is outdated before review dispatch" in stale_behind_decision.reason
+    assert dispatched == []
 
     behind = make_pr(mergeStateStatus="BEHIND", reviews={"nodes": [opencode_review("APPROVED", "head")]})
     assert inspect(behind, update_branches=False).reason == "current-head OpenCode review approved; branch update disabled"
@@ -1868,6 +1870,74 @@ def test_inspect_pr_notes_when_update_branch_head_is_not_observed(monkeypatch):
     assert decision.notes == (
         "update-branch was accepted, but the scheduler did not observe a refreshed PR head within the poll window; the next scheduler run must re-read the PR before review or merge",
     )
+
+
+def test_inspect_pr_updates_outdated_branch_before_review_dispatch(monkeypatch):
+    updated = []
+    dispatched = []
+    old_head_pr = make_pr(
+        mergeStateStatus="BEHIND",
+        compareBehindBy=111,
+        statusCheckRollup={"contexts": {"nodes": [strix_check(), opencode_check(status="COMPLETED")]}},
+    )
+    new_head_pr = make_pr(
+        headRefOid="new-head",
+        statusCheckRollup={"contexts": {"nodes": [strix_check()]}},
+    )
+
+    monkeypatch.setattr(sched, "update_branch", lambda repo, pr, dry_run: updated.append((repo, pr["headRefOid"], dry_run)))
+    monkeypatch.setattr(sched, "wait_for_updated_branch_head", lambda repo, pr: new_head_pr)
+    monkeypatch.setattr(
+        sched,
+        "dispatch_opencode_review",
+        lambda repo, workflow, pr, dry_run: dispatched.append((repo, workflow, pr["headRefOid"], dry_run)),
+    )
+
+    decision = inspect(old_head_pr, dry_run=False)
+
+    assert decision.action == "update_branch"
+    assert decision.reason.startswith(
+        "current head has no OpenCode approval; branch is outdated before review dispatch"
+    )
+    assert updated == [("owner/repo", "head", False)]
+    assert dispatched == [("owner/repo", "OpenCode Review", "new-head", False)]
+    assert decision.notes == (
+        "updated head new-head observed after update-branch; same-head Strix evidence is complete, so OpenCode review was dispatched",
+    )
+
+
+def test_inspect_pr_update_before_review_dispatch_boundaries():
+    behind_pr = make_pr(mergeStateStatus="BEHIND", compareBehindBy=3)
+
+    disabled = inspect(behind_pr, update_branches=False)
+    assert disabled.action == "wait"
+    assert disabled.reason == "current head has no OpenCode approval; branch update disabled before review dispatch"
+
+    external = inspect(
+        make_pr(
+            mergeStateStatus="BEHIND",
+            compareBehindBy=3,
+            isCrossRepository=True,
+            maintainerCanModify=False,
+            headRepository={"nameWithOwner": "fork/repo"},
+        )
+    )
+    assert external.action == "wait"
+    assert external.reason == (
+        "current head has no OpenCode approval; branch is outdated before review dispatch, "
+        "but head repo fork/repo is not writable by the scheduler credential"
+    )
+
+    blocked_but_behind = inspect(
+        make_pr(
+            mergeStateStatus="BLOCKED",
+            restMergeableState="BLOCKED",
+            compareBehindBy=7,
+        )
+    )
+    assert blocked_but_behind.action == "update_branch"
+    assert "base branch is 7 commit(s) ahead before review dispatch" in blocked_but_behind.reason
+    assert "GitHub mergeability is BLOCKED" in blocked_but_behind.reason
 
 
 def test_post_update_branch_followup_covers_dispatch_boundaries(monkeypatch):

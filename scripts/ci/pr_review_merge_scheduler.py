@@ -1427,6 +1427,28 @@ def inspect_pr(
         """Create a decision after applying shared cleanup notes."""
         return finish(Decision(number, action, reason))
 
+    def request_branch_update(freshness_reason: str, *, suffix: str = "") -> Decision:
+        """Request update-branch and attach any same-head evidence follow-up."""
+        update_branch(repo, pr, dry_run=dry_run)
+        followup_note = post_update_branch_followup(
+            repo,
+            pr,
+            dry_run=dry_run,
+            trigger_reviews=trigger_reviews,
+            review_dispatch_allowed=review_dispatch_allowed,
+            workflow=workflow,
+            security_workflow=security_workflow,
+            stale_opencode_minutes=stale_opencode_minutes,
+        )
+        decision = Decision(
+            number,
+            "update_branch",
+            f"{freshness_reason}; branch update requested with {mutation_token_label()} "
+            f"inside GitHub Actions as {mutation_actor_label()}{suffix}",
+            (followup_note,) if followup_note else (),
+        )
+        return finish(decision)
+
     merge_state = effective_merge_state(pr)
     unresolved = unresolved_thread_count(pr)
     if unresolved:
@@ -1569,7 +1591,6 @@ def inspect_pr(
             return decide("wait", "auto-merge already enabled; branch update disabled")
         if not can_update_pr_head(repo, pr):
             return decide("wait", non_mutable_head_reason(repo, pr))
-        update_branch(repo, pr, dry_run=dry_run)
         suffix = "; existing auto-merge request remains queued" if auto_merge_enabled else ""
         if current_head_approved and merge_state == "BEHIND":
             freshness_reason = "current-head OpenCode review approved"
@@ -1585,24 +1606,31 @@ def inspect_pr(
                 "auto-merge already enabled; "
                 f"base branch is {behind_by} commit(s) ahead even though GitHub mergeability is {merge_state}"
             )
-        followup_note = post_update_branch_followup(
-            repo,
-            pr,
-            dry_run=dry_run,
-            trigger_reviews=trigger_reviews,
-            review_dispatch_allowed=review_dispatch_allowed,
-            workflow=workflow,
-            security_workflow=security_workflow,
-            stale_opencode_minutes=stale_opencode_minutes,
-        )
-        decision = Decision(
-            number,
-            "update_branch",
-            f"{freshness_reason}; branch update requested with {mutation_token_label()} "
-            f"inside GitHub Actions as {mutation_actor_label()}{suffix}",
-            (followup_note,) if followup_note else (),
-        )
-        return finish(decision)
+        return request_branch_update(freshness_reason, suffix=suffix)
+
+    opencode_state = opencode_progress_state(pr, stale_after_minutes=stale_opencode_minutes)
+    if opencode_state == "running":
+        return decide("wait", "OpenCode review is already in progress")
+
+    if behind_by and trigger_reviews:
+        if not update_branches:
+            return decide("wait", "current head has no OpenCode approval; branch update disabled before review dispatch")
+        if not can_update_pr_head(repo, pr):
+            head_repo = (pr.get("headRepository") or {}).get("nameWithOwner") or "<unknown>"
+            return decide(
+                "wait",
+                f"current head has no OpenCode approval; branch is outdated before review dispatch, "
+                f"but head repo {head_repo} is not writable by the scheduler credential",
+            )
+        if merge_state == "BEHIND":
+            freshness_reason = "current head has no OpenCode approval; branch is outdated before review dispatch"
+        else:
+            freshness_reason = (
+                "current head has no OpenCode approval; "
+                f"base branch is {behind_by} commit(s) ahead before review dispatch even though "
+                f"GitHub mergeability is {merge_state}"
+            )
+        return request_branch_update(freshness_reason)
 
     if merge_state == "UNKNOWN":
         if pr.get("autoMergeRequest"):
@@ -1641,9 +1669,6 @@ def inspect_pr(
         enable_auto_merge(repo, pr, dry_run=dry_run)
         return decide("auto_merge", "current head is approved; auto-merge enabled")
 
-    opencode_state = opencode_progress_state(pr, stale_after_minutes=stale_opencode_minutes)
-    if opencode_state == "running":
-        return decide("wait", "OpenCode review is already in progress")
     if opencode_state == "stale" and not trigger_reviews:
         return decide(
             "wait",
@@ -2267,7 +2292,8 @@ def self_test() -> None:
         security_workflow="Strix Security Scan",
         base_branch="main",
     )
-    assert decision.action == "security_dispatch"
+    assert decision.action == "update_branch"
+    assert "branch is outdated before review dispatch" in decision.reason
     sample["statusCheckRollup"]["contexts"]["nodes"] = [
         {
             "__typename": "CheckRun",
@@ -2288,7 +2314,8 @@ def self_test() -> None:
         security_workflow="Strix Security Scan",
         base_branch="main",
     )
-    assert decision.action == "review_dispatch"
+    assert decision.action == "update_branch"
+    assert "branch is outdated before review dispatch" in decision.reason
     sample["reviews"]["nodes"][0]["commit"]["oid"] = "abc"
     decision = inspect_pr(
         "owner/repo",
