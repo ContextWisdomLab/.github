@@ -5075,5 +5075,18 @@ jobs:
           done
 
           if [ "$dispatch_status" -ne 0 ]; then
-            printf '::warning::Merge scheduler dispatch failed after approval; leaving OpenCode approval intact. Repository=%s ref=%s. The scheduled and workflow_run scheduler paths remain authoritative.\n' "$GH_REPOSITORY" "$scheduler_ref"
+            merge_error="$(mktemp)"
+            if gh pr merge "$PR_NUMBER" \
+              --repo "$GH_REPOSITORY" \
+              --merge \
+              --match-head-commit "$HEAD_SHA" \
+              --subject "Merge PR #${PR_NUMBER}" \
+              --body "Merged after OpenCode approval and successful required checks." \
+              2>"$merge_error"; then
+              rm -f "$dispatch_error" "$merge_error"
+              exit 0
+            fi
+            sed 's/^/direct merge fallback: /' "$merge_error" >&2 || true
+            rm -f "$merge_error"
+            printf '::warning::Merge scheduler dispatch failed after approval and direct merge fallback did not complete; leaving OpenCode approval intact. Repository=%s ref=%s. The scheduled and workflow_run scheduler paths remain authoritative.\n' "$GH_REPOSITORY" "$scheduler_ref"
           fi
