@@ -329,6 +329,11 @@ def test_rest_mergeable_state_helpers(monkeypatch):
     assert calls == [["gh", "api", "repos/owner/repo/compare/main...feature%2Fupdate-branch"]]
 
     prs = [{"number": 8, "baseRefName": "main", "headRefName": "feature"}]
+    empty_prs = []
+    sched.enrich_rest_mergeable_states("owner/repo", empty_prs)
+    assert empty_prs == []
+
+    prs = [{"number": 8, "baseRefName": "main", "headRefName": "feature"}]
     monkeypatch.setattr(sched, "fetch_rest_mergeable_state", lambda repo, number: f"{repo}:{number}")
     monkeypatch.setattr(
         sched,
@@ -591,6 +596,34 @@ def test_enrich_rest_mergeable_states_attaches_state_and_errors(monkeypatch):
     assert prs[1]["restMergeableStateError"] == "API limit"
     assert prs[1]["compareStatus"] is None
     assert prs[1]["compareBehindBy"] is None
+
+
+def test_enrich_rest_mergeable_states_uses_bounded_executor_for_multiple_prs(monkeypatch):
+    seen_workers = []
+
+    class FakeExecutor:
+        def __init__(self, *, max_workers):
+            seen_workers.append(max_workers)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def map(self, func, items):
+            return [func(item) for item in items]
+
+    monkeypatch.setattr(sched.concurrent.futures, "ThreadPoolExecutor", FakeExecutor)
+    monkeypatch.setattr(sched, "fetch_rest_mergeable_state", lambda repo, number: f"{repo}:{number}")
+    monkeypatch.setattr(sched, "fetch_compare_branch_freshness", lambda repo, pr: {})
+
+    prs = [{"number": number} for number in range(1, sched.REST_MERGEABLE_STATE_WORKERS + 3)]
+    sched.enrich_rest_mergeable_states("owner/repo", prs)
+
+    assert seen_workers == [sched.REST_MERGEABLE_STATE_WORKERS]
+    assert prs[0]["restMergeableState"] == "owner/repo:1"
+    assert prs[-1]["restMergeableState"] == f"owner/repo:{sched.REST_MERGEABLE_STATE_WORKERS + 2}"
 
 
 def test_context_review_and_check_helpers():
