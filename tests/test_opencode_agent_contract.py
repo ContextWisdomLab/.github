@@ -97,6 +97,8 @@ def test_merge_scheduler_uses_escalating_mutation_credentials():
     assert "steps.scheduler_app_token.outputs.token" in workflow
     assert "SCHEDULER_READ_TOKEN: ${{ github.token }}" in workflow
     assert "SCHEDULER_MUTATION_TOKEN_SOURCE" in workflow
+    assert 'default: "-1"' in workflow
+    assert 'review_dispatch_limit="-1"' in workflow
 
 
 def test_opencode_runs_merge_scheduler_after_review_without_repo_local_dispatch():
