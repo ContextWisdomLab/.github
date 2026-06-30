@@ -133,6 +133,11 @@ REST_MERGEABLE_STATE_MAP = {
 }
 REST_MERGEABLE_STATES = set(REST_MERGEABLE_STATE_MAP.values())
 REST_MERGEABLE_STATE_WORKERS = 10
+DETERMINISTIC_APPROVAL_MARKERS = (
+    "deterministic current-head evidence",
+    "deterministic fallback approval",
+    "did not emit a usable current-head control block",
+)
 
 
 @dataclass
@@ -955,14 +960,25 @@ def is_opencode_review(review: dict[str, Any]) -> bool:
     return review_author_login(review) in {"opencode-agent", "opencode-agent[bot]"}
 
 
+def is_deterministic_fallback_approval(review: dict[str, Any]) -> bool:
+    """Return whether an old fail-open approval body is not review evidence."""
+    if (review.get("state") or "").upper() != "APPROVED":
+        return False
+    body = (review.get("body") or "").lower()
+    return any(marker in body for marker in DETERMINISTIC_APPROVAL_MARKERS)
+
+
 def current_head_review_state(pr: dict[str, Any], state: str) -> bool:
     """Return whether OpenCode's latest current-head review has the target state."""
+    target_state = state.upper()
     for review in reversed((pr.get("reviews") or {}).get("nodes") or []):
         if not is_opencode_review(review):
             continue
         if not review_matches_current_head(review, pr):
             continue
-        return (review.get("state") or "").upper() == state
+        if target_state == "APPROVED" and is_deterministic_fallback_approval(review):
+            return False
+        return (review.get("state") or "").upper() == target_state
     return False
 
 
