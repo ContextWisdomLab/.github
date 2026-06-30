@@ -652,18 +652,25 @@ jobs:
             run_and_capture "Docker runtime version" docker version
             while IFS= read -r dockerfile; do
               [ -n "$dockerfile" ] || continue
-              context_dir="."
+              context_dir="$(dirname "$dockerfile")"
+              if [ "$context_dir" = "." ]; then
+                dockerfile_arg="$dockerfile"
+              else
+                dockerfile_arg="$(basename "$dockerfile")"
+              fi
               tag_suffix="$(printf '%s' "$dockerfile" | tr '[:upper:]' '[:lower:]' | tr '/.' '--' | tr -cd '[:alnum:]-' | cut -c1-80)"
               image_tag="opencode-review-${PR_HEAD_SHA:-head}-${tag_suffix}"
               run_and_capture "Docker build (${dockerfile})" \
-                docker build --pull=false -f "$dockerfile" -t "$image_tag" "$context_dir"
+                docker build --pull=false -f "$dockerfile_arg" -t "$image_tag" "$context_dir"
             done < <(git ls-files 'Dockerfile' '*/Dockerfile' 'Dockerfile.*' '*/Dockerfile.*')
-            for compose_file in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
-              if [ -f "$compose_file" ]; then
-                run_and_capture "Docker Compose config (${compose_file})" docker compose -f "$compose_file" config
-                run_and_capture "Docker Compose build (${compose_file})" docker compose -f "$compose_file" build
-              fi
-            done
+            if has_changed_tracked_files 'docker-compose.yml' 'docker-compose.yaml' 'compose.yml' 'compose.yaml'; then
+              for compose_file in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
+                if [ -f "$compose_file" ]; then
+                  run_and_capture "Docker Compose config (${compose_file})" docker compose -f "$compose_file" config
+                  run_and_capture "Docker Compose build (${compose_file})" docker compose -f "$compose_file" build
+                fi
+              done
+            fi
           }
 
           append "# Coverage Evidence"
