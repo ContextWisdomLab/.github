@@ -4997,6 +4997,9 @@ jobs:
                 if request_changes_for_merge_conflict_if_present; then
                   :
                 else
+                  if approve_after_model_failure_when_current_head_gates_pass "$pending_checks_file" "$failed_checks_file" "$unresolved_human_threads_file" "$human_thread_review_body_file"; then
+                    :
+                  else
                   body="$(printf '%s\n' \
                     "OpenCode gate result was not publishable for the current head." \
                     "" \
@@ -5009,6 +5012,7 @@ jobs:
                     "" \
                     "Leaving the PR review unchanged because this is review tooling instability, not a source-code finding.")"
                   stop_approval_without_review "OPENCODE_REVIEW_UNAVAILABLE" "$body"
+                  fi
                 fi
               fi
               ;;

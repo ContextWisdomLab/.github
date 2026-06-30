@@ -572,6 +572,7 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" 'unresolved_human_threads_file="$(mktemp)"' "deterministic model-failure approval writes human-thread evidence to a real temp file"
 	assert_file_contains "$workflow_file" 'collect_unresolved_human_review_threads "$unresolved_threads_file"' "deterministic model-failure approval rechecks human review threads"
 	assert_file_contains "$workflow_file" "Deterministic fallback approval was used only after model-output instability and did not bypass coverage, failed-check, mergeability, or human-review gates." "deterministic model-failure approval body documents the guarded evidence path"
+	assert_file_contains "$workflow_file" 'approve_after_model_failure_when_current_head_gates_pass "$pending_checks_file" "$failed_checks_file" "$unresolved_human_threads_file" "$human_thread_review_body_file"' "opencode approval retries deterministic fallback when selected model output is not publishable"
 	assert_file_contains "$workflow_file" 'Detect central review-process fallback scope' "opencode approval detects central review-process fallback scope before model attempts"
 	assert_file_contains "$workflow_file" 'id: central_review_process_fallback_scope' "opencode approval exposes central review-process fallback scope as a step output"
 	assert_file_contains "$workflow_file" 'steps.central_review_process_fallback_scope.outputs.eligible != '\''true'\''' "opencode model attempts are skipped for eligible central review-process fallback diffs"
