@@ -230,10 +230,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             exit_code = completed.returncode
             return exit_code
         except subprocess.TimeoutExpired as exc:
-            if exc.stdout:
-                print(exc.stdout, end="")
-            if exc.stderr:
-                print(exc.stderr, end="", file=sys.stderr)
+            stdout = sandboxed_verify.timeout_output_text(exc.stdout)
+            stderr = sandboxed_verify.timeout_output_text(exc.stderr)
+            if stdout:
+                print(stdout, end="" if stdout.endswith("\n") else "\n")
+            if stderr:
+                print(stderr, end="" if stderr.endswith("\n") else "\n", file=sys.stderr)
             print(f"sandboxed-web-e2e: e2e command timed out after {args.e2e_timeout}s", file=sys.stderr)
             exit_code = 124
             return exit_code
