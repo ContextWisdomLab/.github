@@ -2752,7 +2752,7 @@ jobs:
             review_write_token_source="opencode-app"
           fi
           overview_comment_token="$review_write_token"
-          if [ -n "${CHECK_LOOKUP_GH_TOKEN:-}" ]; then
+          if [ -n "${CHECK_LOOKUP_GH_TOKEN:-}" ] && { [ -z "${OPENCODE_APP_TOKEN:-}" ] || [ "${GH_REPOSITORY:-}" = "${GITHUB_REPOSITORY:-}" ]; }; then
             GH_TOKEN="$CHECK_LOOKUP_GH_TOKEN"
             export GH_TOKEN
             check_lookup_token_source="github-token"
