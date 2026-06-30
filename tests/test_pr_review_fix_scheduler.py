@@ -94,7 +94,7 @@ def test_context_run_json_and_pr_fetch(monkeypatch):
     """Context gh wrappers decode JSON and surface command errors."""
     calls = []
 
-    def fake_run(argv, check, stdout, stderr, text):
+    def fake_run(argv, check, stdout, stderr, text, shell=False):
         calls.append(argv)
         return subprocess.CompletedProcess(argv, 0, stdout='{"ok": true}', stderr="")
 
@@ -103,7 +103,7 @@ def test_context_run_json_and_pr_fetch(monkeypatch):
     assert context.pr_view("owner/repo", 3) == {"ok": True}
     assert calls[1][:4] == ["gh", "pr", "view", "3"]
 
-    def failed_run(argv, check, stdout, stderr, text):
+    def failed_run(argv, check, stdout, stderr, text, shell=False):
         return subprocess.CompletedProcess(argv, 1, stdout="", stderr="bad gh")
 
     monkeypatch.setattr(context.subprocess, "run", failed_run)
