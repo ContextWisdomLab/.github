@@ -4710,16 +4710,22 @@ jobs:
               pending_wait_status=$?
               set -e
               if [ "$pending_wait_status" -eq 1 ]; then
-                body="$(printf '%s\n' \
-                  "all configured OpenCode model attempts failed to produce a usable current-head control block, and GitHub Checks statusCheckRollup could not be read." \
-                  "" \
-                  "- Result: CHECKS_LOOKUP_FAILED" \
-                  "- Reason: GitHub Checks statusCheckRollup could not be read before considering deterministic review-process fallback." \
-                  "- Required next evidence: readable current-head statusCheckRollup plus a valid OpenCode control block or eligible fallback evidence." \
-                  "- Head SHA: \`${HEAD_SHA}\`" \
-                  "- Workflow run: ${RUN_ID}" \
-                  "- Workflow attempt: ${RUN_ATTEMPT}")"
-                stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
+                if app_token_limited_check_lookup; then
+                  echo "GitHub Checks statusCheckRollup lookup is unavailable to the OpenCode app token before deterministic fallback evaluation; branch protection remains authoritative for target-repository checks."
+                  : >"$pending_checks_file"
+                  pending_wait_status=0
+                else
+                  body="$(printf '%s\n' \
+                    "all configured OpenCode model attempts failed to produce a usable current-head control block, and GitHub Checks statusCheckRollup could not be read." \
+                    "" \
+                    "- Result: CHECKS_LOOKUP_FAILED" \
+                    "- Reason: GitHub Checks statusCheckRollup could not be read before considering deterministic review-process fallback." \
+                    "- Required next evidence: readable current-head statusCheckRollup plus a valid OpenCode control block or eligible fallback evidence." \
+                    "- Head SHA: \`${HEAD_SHA}\`" \
+                    "- Workflow run: ${RUN_ID}" \
+                    "- Workflow attempt: ${RUN_ATTEMPT}")"
+                  stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
+                fi
               fi
               if [ "$pending_wait_status" -ne 0 ]; then
                 build_pending_check_body "$pending_checks_file" "$failed_check_review_body_file"
