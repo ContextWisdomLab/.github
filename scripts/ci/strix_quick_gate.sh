@@ -1713,6 +1713,7 @@ text = Path(sys.argv[1]).read_text(encoding='utf-8', errors='replace')
 patterns = [
     re.compile(r'(?P<path>/workspace/[^`\r\n]*\.[A-Za-z0-9_]+|[A-Za-z0-9_./ \[\]-]+\.[A-Za-z0-9_]+):\d+'),
     re.compile(r'(?P<path>/workspace/[A-Za-z0-9_./ \[\]-]*(?:Dockerfile|Containerfile|Makefile))'),
+    re.compile(r'["\'](?:target|file|path)["\']\s*:\s*["\'](?P<path>/workspace/[^"`\r\n]*\.[A-Za-z0-9_]+|[A-Za-z0-9_./\[\]-][A-Za-z0-9_./ \[\]-]*\.[A-Za-z0-9_]+)["\']', re.IGNORECASE),
     re.compile(r'<file>\s*(?P<path>/workspace/[^<`\r\n│]*\.[A-Za-z0-9_]+|[A-Za-z0-9_./\[\]-][A-Za-z0-9_./ \[\]-]*\.[A-Za-z0-9_]+)\s*</file>'),
     re.compile(r'^[^\S\r\n│]*[│]?[ \t]*(?:\*\*)?Target:(?:\*\*)?[ \t]*(?:File:[ \t]*)?(?P<path>/workspace/[^`\r\n│]*\.[A-Za-z0-9_]+|[A-Za-z0-9_./\[\]-][A-Za-z0-9_./ \[\]-]*\.[A-Za-z0-9_]+)', re.MULTILINE),
     re.compile(r'^[^\S\r\n│]*[│]?[ \t]*(?:\*\*)?Target:(?:\*\*)?[ \t]*(?:File:[ \t]*)?(?P<path>/workspace/[A-Za-z0-9_./ \[\]-]*(?:Dockerfile|Containerfile|Makefile)|(?:Dockerfile|Containerfile|Makefile))', re.MULTILINE),
@@ -1881,6 +1882,10 @@ evaluate_pull_request_findings() {
 				continue
 			fi
 			found_any_vuln_file=1
+			if vulnerability_file_is_retryable_model_inconsistency "$vuln_file"; then
+				found_retryable_model_inconsistency=1
+				continue
+			fi
 			rank="$(extract_first_severity_rank "$vuln_file")"
 			if [ "$rank" -lt 0 ]; then
 				PR_FINDINGS_DECISION="block_unmapped"
@@ -1888,10 +1893,6 @@ evaluate_pull_request_findings() {
 				return 1
 			fi
 			if [ "$rank" -lt "$threshold_rank" ]; then
-				continue
-			fi
-			if vulnerability_file_is_retryable_model_inconsistency "$vuln_file"; then
-				found_retryable_model_inconsistency=1
 				continue
 			fi
 			mapfile -t vulnerability_locations < <(extract_vulnerability_locations "$vuln_file")
@@ -2524,6 +2525,10 @@ is_github_models_unavailable_model_error() {
 
 is_rate_limit_error() {
 	if grep -Fq 'RateLimitError' "$STRIX_LOG"; then
+		return 0
+	fi
+
+	if grep -Fq 'Too many requests. For more on scraping GitHub' "$STRIX_LOG"; then
 		return 0
 	fi
 
