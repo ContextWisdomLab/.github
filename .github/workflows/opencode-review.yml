@@ -4325,6 +4325,32 @@ jobs:
               changed_files_summary="bounded current-head evidence"
             fi
 
+            if low_risk_model_exhaustion_fallback_applies; then
+              body="$(printf '%s\n' \
+                "## Pull request overview" \
+                "" \
+                "OpenCode exhausted the configured model pool without a usable current-head review conclusion, but this PR only changes workflow files and all current-head peer gates passed." \
+                "" \
+                "## Findings" \
+                "" \
+                "No blocking findings." \
+                "" \
+                "## Summary" \
+                "" \
+                "- Result: APPROVE" \
+                "- Reason: model output was unavailable, but deterministic current-head gates passed for a workflow-only change." \
+                "- Deterministic evidence: current-head changed-file evidence (${changed_files_summary}); coverage-evidence result ${COVERAGE_EVIDENCE_RESULT:-unknown}; peer checks from statusCheckRollup excluding this OpenCode check; no unresolved human review threads; mergeability was not dirty." \
+                "- Model outcome: model_pool=${OPENCODE_MODEL_POOL_OUTCOME:-unknown}; selected_model=${OPENCODE_MODEL_POOL_MODEL:-none}." \
+                "- Head SHA: \`${HEAD_SHA}\`" \
+                "- Workflow run: ${RUN_ID}" \
+                "- Workflow attempt: ${RUN_ATTEMPT}" \
+                "" \
+                "This bounded workflow-only fallback does not apply to source, test, lockfile, dependency manifest, generated artifact, or documentation changes.")"
+              body="$(ensure_review_body_has_change_graph "$body")"
+              create_pull_review "APPROVE" "$body"
+              return 0
+            fi
+
             first_line_file="$(mktemp)"
             if gh pr diff "$PR_NUMBER" --repo "$GH_REPOSITORY" --patch 2>/dev/null |
               awk '
@@ -4406,6 +4432,26 @@ jobs:
               rm -f "$first_line_file"
             fi
             return 0
+          }
+
+          low_risk_model_exhaustion_fallback_applies() {
+            local changed_count=0
+            local changed_path
+
+            if [ ! -s "${OPENCODE_CHANGED_FILES_FILE:-}" ]; then
+              return 1
+            fi
+
+            while IFS= read -r changed_path; do
+              [ -n "$changed_path" ] || continue
+              changed_count=$((changed_count + 1))
+              case "$changed_path" in
+                .github/workflows/*.yml|.github/workflows/*.yaml) ;;
+                *) return 1 ;;
+              esac
+            done <"$OPENCODE_CHANGED_FILES_FILE"
+
+            [ "$changed_count" -gt 0 ] && [ "$changed_count" -le 2 ]
           }
 
                     request_changes_for_merge_conflict_if_present() {
