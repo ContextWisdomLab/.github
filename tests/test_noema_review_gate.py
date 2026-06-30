@@ -74,6 +74,8 @@ def test_review_state_helpers_cover_current_head_logic():
     assert noema.review_commit(current) == "head"
     assert noema.review_commit({}) == ""
     assert noema.current_primary_approval(pr) == current
+    assert noema.current_primary_approval(make_pr(reviews={"nodes": [old, current]})) == current
+    assert noema.current_primary_approval(make_pr(reviews={"nodes": [review("COMMENTED", body=marker_body)]})) is None
     assert noema.current_primary_approval(make_pr(reviews={"nodes": [review(login="human", body=marker_body)]})) is None
     assert noema.has_current_changes_requested(make_pr(reviews={"nodes": [review("CHANGES_REQUESTED")]}))
     assert not noema.has_current_changes_requested(make_pr(reviews={"nodes": [review("CHANGES_REQUESTED", commit="old")]}))
@@ -108,7 +110,19 @@ def test_check_helpers_and_existing_noema_review():
     assert noema.check_label(status_context) == "ci"
     assert noema.check_label(check_run) == "CI / build"
     blockers = noema.blocking_checks(
-        make_pr(statusCheckRollup={"contexts": {"nodes": [status_context, check_run, failed_run, running_run]}})
+        make_pr(
+            statusCheckRollup={
+                "contexts": {
+                    "nodes": [
+                        status_context,
+                        check_run,
+                        failed_run,
+                        running_run,
+                        {"__typename": "CheckRun", "name": "Required Noema Review", "status": "IN_PROGRESS"},
+                    ]
+                }
+            }
+        )
     )
     assert "ci: FAILURE" in blockers
     assert "CI / lint: FAILURE" in blockers
@@ -117,6 +131,7 @@ def test_check_helpers_and_existing_noema_review():
         make_pr(reviews={"nodes": [review(login="noema", body="<!-- noema-review-gate head_sha=head -->")]}),
         "noema",
     )
+    assert not noema.existing_noema_review(make_pr(reviews={"nodes": [review("DISMISSED", login="noema")]}), "noema")
     assert not noema.existing_noema_review(make_pr(reviews={"nodes": [review(commit="old", login="noema")]}), "noema")
 
 
