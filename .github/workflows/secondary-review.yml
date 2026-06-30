@@ -1,4 +1,4 @@
-name: Required Secondary Review
+name: Required Deterministic Secondary Review
 
 on:
   pull_request_target:
@@ -80,7 +80,7 @@ jobs:
       - name: Exchange secondary review app token
         id: secondary_app_token
         env:
-          OIDC_AUDIENCE: ${{ vars.SECONDARY_REVIEW_OIDC_AUDIENCE || 'secondary-review-github-action' }}
+          OIDC_AUDIENCE: ${{ vars.SECONDARY_REVIEW_OIDC_AUDIENCE || 'cwl-deterministic-secondary-review' }}
           TOKEN_EXCHANGE_URL: ${{ vars.SECONDARY_REVIEW_TOKEN_EXCHANGE_URL || '' }}
         run: |
           set -euo pipefail
@@ -90,13 +90,13 @@ jobs:
           }
 
           if [ -z "${TOKEN_EXCHANGE_URL:-}" ]; then
-            echo "Secondary review app token exchange unavailable: SECONDARY_REVIEW_TOKEN_EXCHANGE_URL is not configured."
+            echo "Deterministic secondary review app token exchange unavailable: SECONDARY_REVIEW_TOKEN_EXCHANGE_URL is not configured."
             mark_unavailable
             exit 0
           fi
 
           if [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
-            echo "Secondary review app token exchange unavailable: OIDC request environment is missing."
+            echo "Deterministic secondary review app token exchange unavailable: OIDC request environment is missing."
             mark_unavailable
             exit 0
           fi
@@ -113,14 +113,14 @@ jobs:
               -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
               "${request_url}${separator}audience=${OIDC_AUDIENCE}"
           )"; then
-            echo "Secondary review app token exchange unavailable: OIDC token request did not complete."
+            echo "Deterministic secondary review app token exchange unavailable: OIDC token request did not complete."
             mark_unavailable
             exit 0
           fi
 
           oidc_token="$(jq -r '.value // empty' <<<"$oidc_response")"
           if [ -z "$oidc_token" ]; then
-            echo "Secondary review app token exchange unavailable: OIDC token response was empty."
+            echo "Deterministic secondary review app token exchange unavailable: OIDC token response was empty."
             mark_unavailable
             exit 0
           fi
@@ -131,14 +131,14 @@ jobs:
               -H "Authorization: Bearer ${oidc_token}" \
               "${TOKEN_EXCHANGE_URL}"
           )"; then
-            echo "Secondary review app token exchange unavailable: app token request did not complete."
+            echo "Deterministic secondary review app token exchange unavailable: app token request did not complete."
             mark_unavailable
             exit 0
           fi
 
           app_token="$(jq -r '.token // empty' <<<"$token_response")"
           if [ -z "$app_token" ]; then
-            echo "Secondary review app token exchange unavailable: app token response was empty."
+            echo "Deterministic secondary review app token exchange unavailable: app token response was empty."
             mark_unavailable
             exit 0
           fi
@@ -161,7 +161,7 @@ jobs:
             exit 0
           fi
           if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::notice::Secondary review app token is unavailable; secondary approval skipped."
+            echo "::notice::Deterministic secondary review app token is unavailable; secondary approval skipped."
             exit 0
           fi
           python3 scripts/ci/secondary_review_gate.py \
