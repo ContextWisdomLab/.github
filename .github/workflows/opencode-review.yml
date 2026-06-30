@@ -650,6 +650,12 @@ jobs:
               return
             fi
             run_and_capture "Docker runtime version" docker version
+            changed_dockerfiles="$(mktemp)"
+            while IFS= read -r dockerfile; do
+              if [ -f "$dockerfile" ]; then
+                printf '%s\n' "$dockerfile"
+              fi
+            done >"$changed_dockerfiles" < <(changed_files_for_coverage | grep -E '(^|/)Dockerfile(\..*)?$' || true)
             while IFS= read -r dockerfile; do
               [ -n "$dockerfile" ] || continue
               context_dir="$(dirname "$dockerfile")"
@@ -657,7 +663,7 @@ jobs:
               image_tag="opencode-review-${PR_HEAD_SHA:-head}-${tag_suffix}"
               run_and_capture "Docker build (${dockerfile})" \
                 docker build --pull=false -f "$dockerfile" -t "$image_tag" "$context_dir"
-            done < <(git ls-files 'Dockerfile' '*/Dockerfile' 'Dockerfile.*' '*/Dockerfile.*')
+            done <"$changed_dockerfiles"
             if has_changed_tracked_files 'docker-compose.yml' 'docker-compose.yaml' 'compose.yml' 'compose.yaml'; then
               for compose_file in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
                 if [ -f "$compose_file" ]; then
