@@ -50,6 +50,9 @@ def test_code_reviewer_subagent_contract_is_configured():
     for model_name in high_reasoning_models:
         assert models[model_name]["reasoning"] is True
         assert models[model_name]["options"]["reasoningEffort"] == "high"
+    for model_name, model_config in models.items():
+        if model_config.get("reasoning") is True:
+            assert model_config["options"]["reasoningEffort"] == "high", model_name
 
 
 def test_code_reviewer_prompt_preserves_review_only_policy():
@@ -119,6 +122,9 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "OPENCODE_MODEL_CANDIDATES" in workflow
     assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "19800"' in workflow
     assert "${{ runner.temp }}/opencode-review-model-pool.md" in workflow
+
+    strix_workflow = Path(".github/workflows/strix.yml").read_text(encoding="utf-8")
+    assert "STRIX_REASONING_EFFORT: high" in strix_workflow
 
     prompt_template = Path("scripts/ci/opencode_review_prompt_template.md").read_text(encoding="utf-8")
     assert "${OPENCODE_REVIEW_INTRO}" in prompt_template
