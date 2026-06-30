@@ -2739,6 +2739,9 @@ jobs:
           set -euo pipefail
           echo "::group::OpenCode Review Approval Gate"
           echo "PR=#${PR_NUMBER} head_sha=${HEAD_SHA} run_id=${RUN_ID} run_attempt=${RUN_ATTEMPT}"
+          if [ -n "${OPENCODE_APP_TOKEN:-}" ] && [ "${GH_REPOSITORY:-}" != "${GITHUB_REPOSITORY:-}" ]; then
+            GH_TOKEN="$OPENCODE_APP_TOKEN"
+          fi
           check_lookup_token_source="configured"
           if [ -n "${OPENCODE_APP_TOKEN:-}" ] && [ "${GH_TOKEN:-}" = "${OPENCODE_APP_TOKEN:-}" ]; then
             check_lookup_token_source="opencode-app"
