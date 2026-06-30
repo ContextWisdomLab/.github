@@ -616,28 +616,21 @@ Security/privacy: workflow-token, review-gate, and repository-automation securit
 
 def repair_approval_summary(reason: str, summary: str) -> str:
     """Repair an APPROVE summary only from objective bounded evidence."""
+    evidence_file = approval_repair_evidence_file()
+    if evidence_file is not None:
+        evidence_text = read_text_lossy(evidence_file)
+        if evidence_text is not None:
+            repaired_summary = build_approval_repair_summary("", evidence_text)
+            if repaired_summary:
+                return repaired_summary
+
     if (
         mentions_changed_file_evidence(reason, summary)
         and mentions_verification_posture(reason, summary)
         and mentions_full_coverage(reason, summary)
     ):
         return summary
-
-    evidence_file = approval_repair_evidence_file()
-    if evidence_file is None:
-        return summary
-    evidence_text = read_text_lossy(evidence_file)
-    if evidence_text is None:
-        return summary
-
-    repaired_summary = build_approval_repair_summary(summary, evidence_text)
-    if repaired_summary and contradicts_changed_file_kinds(reason, repaired_summary):
-        # ponytail: drop model prose only when bounded evidence proves it denied changed file kinds.
-        repaired_summary = build_approval_repair_summary("", evidence_text)
-    if repaired_summary and contradicts_material_changed_file_scope(reason, repaired_summary):
-        # Drop model prose that trivializes workflow/source/test/config changes as a mere string typo.
-        repaired_summary = build_approval_repair_summary("", evidence_text)
-    return repaired_summary or summary
+    return summary
 
 
 def check_structural_approval(control_file: Path) -> int:
