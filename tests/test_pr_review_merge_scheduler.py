@@ -549,6 +549,50 @@ def test_graphql_read_errors_only_fall_back_for_integration_denials(monkeypatch)
         sched.fetch_pr("owner/repo", 1)
 
 
+def test_enrich_rest_mergeable_states_skips_executor_for_small_inputs(monkeypatch):
+    def fail_executor(*args, **kwargs):
+        raise AssertionError("single PR enrichment should not create an executor")
+
+    monkeypatch.setattr(sched.concurrent.futures, "ThreadPoolExecutor", fail_executor)
+    monkeypatch.setattr(sched, "fetch_rest_mergeable_state", lambda repo, number: f"{repo}:{number}")
+    monkeypatch.setattr(sched, "fetch_compare_branch_freshness", lambda repo, pr: {})
+
+    empty_prs: list[dict[str, object]] = []
+    sched.enrich_rest_mergeable_states("owner/repo", empty_prs)
+    assert empty_prs == []
+
+    one_pr = [{"number": 10}]
+    sched.enrich_rest_mergeable_states("owner/repo", one_pr)
+    assert one_pr == [
+        {
+            "number": 10,
+            "restMergeableState": "owner/repo:10",
+            "compareStatus": None,
+            "compareBehindBy": None,
+        }
+    ]
+
+
+def test_enrich_rest_mergeable_states_attaches_state_and_errors(monkeypatch):
+    def mock_fetch(repo, number):
+        if number == 1:
+            return "CLEAN"
+        raise RuntimeError("API limit")
+
+    monkeypatch.setattr(sched, "fetch_rest_mergeable_state", mock_fetch)
+    monkeypatch.setattr(sched, "fetch_compare_branch_freshness", lambda repo, pr: {})
+
+    prs = [{"number": 1}, {"number": 2}]
+    sched.enrich_rest_mergeable_states("owner/repo", prs)
+
+    assert prs[0]["restMergeableState"] == "CLEAN"
+    assert prs[0]["compareStatus"] is None
+    assert prs[0]["compareBehindBy"] is None
+    assert prs[1]["restMergeableStateError"] == "API limit"
+    assert prs[1]["compareStatus"] is None
+    assert prs[1]["compareBehindBy"] is None
+
+
 def test_context_review_and_check_helpers():
     assert sched.context_nodes({}) == []
     assert sched.context_nodes(make_pr()) == []

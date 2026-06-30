@@ -688,6 +688,7 @@ def fetch_compare_branch_freshness(repo: str, pr: dict[str, Any]) -> dict[str, A
 
 def enrich_rest_mergeable_states(repo: str, prs: list[dict[str, Any]]) -> None:
     """Attach REST mergeability evidence to GraphQL pull request payloads."""
+
     def enrich(pr: dict[str, Any]) -> None:
         """Attach REST mergeability evidence to one pull request payload."""
         try:
@@ -701,7 +702,12 @@ def enrich_rest_mergeable_states(repo: str, prs: list[dict[str, Any]]) -> None:
         except RuntimeError as exc:
             pr["compareBranchFreshnessError"] = bounded_error_summary(str(exc))
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(prs) or 1)) as executor:
+    if len(prs) <= 1:
+        for pr in prs:
+            enrich(pr)
+        return
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(prs), 10)) as executor:
         for _ in executor.map(enrich, prs):
             pass
 
