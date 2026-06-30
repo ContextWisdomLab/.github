@@ -25,6 +25,7 @@ def run_json(args: list[str]) -> Any:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        shell=False,
     )
     if completed.returncode != 0:
         raise RuntimeError(completed.stderr.strip())
