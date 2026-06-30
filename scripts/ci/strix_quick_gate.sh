@@ -42,6 +42,7 @@ STRIX_TRANSIENT_RETRY_BACKOFF_SECONDS="${STRIX_TRANSIENT_RETRY_BACKOFF_SECONDS:-
 STRIX_FAIL_ON_MIN_SEVERITY="${STRIX_FAIL_ON_MIN_SEVERITY:-MEDIUM}"
 STRIX_FAIL_ON_PROVIDER_SIGNAL="${STRIX_FAIL_ON_PROVIDER_SIGNAL:-0}"
 RUN_START_EPOCH="$(date +%s)"
+TOTAL_TIMEOUT_EXCEEDED=0
 PREEXISTING_REPORT_DIRS=()
 REPO_NAME="${REPO_ROOT##*/}"
 # shellcheck source=scripts/ci/strix_model_utils.sh
@@ -1880,6 +1881,10 @@ evaluate_pull_request_findings() {
 				continue
 			fi
 			found_any_vuln_file=1
+			if vulnerability_file_is_retryable_model_inconsistency "$vuln_file"; then
+				found_retryable_model_inconsistency=1
+				continue
+			fi
 			rank="$(extract_first_severity_rank "$vuln_file")"
 			if [ "$rank" -lt 0 ]; then
 				PR_FINDINGS_DECISION="block_unmapped"
@@ -1887,10 +1892,6 @@ evaluate_pull_request_findings() {
 				return 1
 			fi
 			if [ "$rank" -lt "$threshold_rank" ]; then
-				continue
-			fi
-			if vulnerability_file_is_retryable_model_inconsistency "$vuln_file"; then
-				found_retryable_model_inconsistency=1
 				continue
 			fi
 			mapfile -t vulnerability_locations < <(extract_vulnerability_locations "$vuln_file")
@@ -2160,15 +2161,18 @@ run_strix_once() {
 	local child_model
 	local resolved_target_path
 	local timeout_seconds="$STRIX_PROCESS_TIMEOUT_SECONDS"
+	local total_budget_limited_timeout=0
 	if [ "$STRIX_TOTAL_TIMEOUT_SECONDS" -gt 0 ]; then
 		local remaining_budget
 		remaining_budget="$(remaining_total_budget)"
 		if [ "$remaining_budget" -le 0 ]; then
+			TOTAL_TIMEOUT_EXCEEDED=1
 			printf "Strix quick scan exceeded total timeout of %ss.\n" "$STRIX_TOTAL_TIMEOUT_SECONDS" | tee "$STRIX_LOG" >&2
 			return 1
 		fi
 		if [ "$timeout_seconds" -eq 0 ] || [ "$remaining_budget" -lt "$timeout_seconds" ]; then
 			timeout_seconds="$remaining_budget"
+			total_budget_limited_timeout=1
 		fi
 	fi
 	if ! llm_api_base_value="$(resolved_llm_api_base_for_model "$model")"; then
@@ -2333,6 +2337,10 @@ PY
 
 	if [ "$rc" -eq 124 ]; then
 		echo "Strix run timed out after ${timeout_seconds}s." | tee -a "$STRIX_LOG" >&2
+		if [ "$total_budget_limited_timeout" -eq 1 ]; then
+			TOTAL_TIMEOUT_EXCEEDED=1
+			printf "Strix quick scan exceeded total timeout of %ss.\n" "$STRIX_TOTAL_TIMEOUT_SECONDS" | tee -a "$STRIX_LOG" >&2
+		fi
 	fi
 
 	sanitize_known_strix_report_warnings "$ACTIVE_REPORTS_DIR" "${resolved_target_path%/}/strix_runs"
@@ -2435,12 +2443,16 @@ run_strix_with_transient_retry() {
 		if [ "$run_rc" -eq 2 ]; then
 			return 2
 		fi
+		if [ "$TOTAL_TIMEOUT_EXCEEDED" -eq 1 ]; then
+			return 1
+		fi
 
 		if [ "$attempt" -ge "$max_attempts" ]; then
 			return 1
 		fi
 
 		if [ "$STRIX_TOTAL_TIMEOUT_SECONDS" -gt 0 ] && [ "$(remaining_total_budget)" -le 0 ]; then
+			TOTAL_TIMEOUT_EXCEEDED=1
 			printf "Strix quick scan exceeded total timeout of %ss.\n" "$STRIX_TOTAL_TIMEOUT_SECONDS" | tee "$STRIX_LOG" >&2
 			return 1
 		fi
@@ -2512,6 +2524,10 @@ is_github_models_unavailable_model_error() {
 
 is_rate_limit_error() {
 	if grep -Fq 'RateLimitError' "$STRIX_LOG"; then
+		return 0
+	fi
+
+	if grep -Fq 'Too many requests. For more on scraping GitHub' "$STRIX_LOG"; then
 		return 0
 	fi
 
@@ -3366,6 +3382,9 @@ run_current_target_scan() {
 	if [ "$primary_scan_rc" -eq 2 ]; then
 		return 2
 	fi
+	if [ "$TOTAL_TIMEOUT_EXCEEDED" -eq 1 ]; then
+		return 1
+	fi
 
 	local strict_primary_provider_fallback=0
 	if [ "$INFRA_ERROR_DETECTED" -eq 1 ] && provider_signal_fail_closed_enabled; then
@@ -3415,6 +3434,9 @@ run_current_target_scan() {
 				echo "Skipping fallback model '$candidate' — same as primary model." >&2
 			fi
 			continue
+		fi
+		if [ "$TOTAL_TIMEOUT_EXCEEDED" -eq 1 ]; then
+			return 1
 		fi
 
 		fallback_tried=1
