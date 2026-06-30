@@ -31,6 +31,7 @@ def render_prompt(text: str, environ: Mapping[str, str]) -> str:
 
 
 def main(argv: list[str]) -> int:
+    """Run the prompt template renderer."""
     if len(argv) != 1:
         print("usage: render_opencode_prompt_template.py PROMPT_FILE", file=sys.stderr)
         return 2
