@@ -109,6 +109,10 @@ APPROVAL_VERIFICATION_LABELS = (
     "security/privacy:",
 )
 
+APPROVAL_VERIFICATION_PATTERNS = {
+    label: re.compile(re.escape(label)) for label in APPROVAL_VERIFICATION_LABELS
+}
+
 SOURCE_LIKE_CHANGED_FILE_EXTENSIONS = frozenset(
     {
         ".bash",
@@ -318,28 +322,32 @@ def mentions_verification_posture(reason: str, summary: str) -> bool:
 def label_section(text: str, label: str) -> str:
     """Return text after a verification label until the next known label."""
 
-    def label_matches(candidate: str) -> list[re.Match[str]]:
-        """Return exact verification-label matches without suffix collisions."""
-        matches = []
-        for match in re.finditer(re.escape(candidate), text):
+    def label_starts(candidate: str) -> list[int]:
+        """Return exact verification-label starts without suffix collisions."""
+        starts = []
+        pattern = APPROVAL_VERIFICATION_PATTERNS.get(candidate)
+        if pattern is None:
+            pattern = re.compile(re.escape(candidate))
+        for match in pattern.finditer(text):
+            index = match.start()
             if (
                 candidate == "coverage:"
-                and text[max(0, match.start() - 10) : match.start()] == "docstring "
+                and text[max(0, index - 10) : index] == "docstring "
             ):
                 continue
-            matches.append(match)
-        return matches
+            starts.append(index)
+        return starts
 
-    matches = label_matches(label)
-    if not matches:
+    starts = label_starts(label)
+    if not starts:
         return ""
-    start = matches[-1].end()
+    start = starts[-1] + len(label)
     next_starts = [
-        match.start()
+        candidate_start
         for candidate in APPROVAL_VERIFICATION_LABELS
         if candidate != label
-        for match in label_matches(candidate)
-        if match.start() >= start
+        for candidate_start in label_starts(candidate)
+        if candidate_start >= start
     ]
     end = min(next_starts) if next_starts else len(text)
     return text[start:end]
@@ -669,13 +677,25 @@ def valid_control(
     }
 
 
+def extract_dicts(obj: Any) -> list[Any]:
+    """Recursively extract all dictionaries from a JSON-like object."""
+    results = []
+    if isinstance(obj, dict):
+        results.append(obj)
+        for v in obj.values():
+            results.extend(extract_dicts(v))
+    elif isinstance(obj, list):
+        for item in obj:
+            results.extend(extract_dicts(item))
+    return results
+
 def iter_json_objects(text: str) -> list[Any]:
     """Extract JSON objects from raw OpenCode output that may include prose."""
     decoder = json.JSONDecoder()
     values: list[Any] = []
 
     try:
-        values.append(json.loads(text))
+        return extract_dicts(json.loads(text))
     except json.JSONDecodeError:
         # OpenCode exports may contain prose around the JSON control object.
         pass
@@ -693,7 +713,7 @@ def iter_json_objects(text: str) -> list[Any]:
             continue
         try:
             value, new_index = decoder.raw_decode(text, index)
-            values.append(value)
+            values.extend(extract_dicts(value))
             # ⚡ Bolt: Advance index to avoid O(N^2) redundant parsing of nested JSON blocks
             index = new_index
             continue
