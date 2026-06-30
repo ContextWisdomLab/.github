@@ -156,6 +156,10 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "opencode_review_model_pool" in workflow
     assert "run_opencode_review_model_pool.sh" in workflow
     assert "OPENCODE_MODEL_CANDIDATES" in workflow
+    model_pool_runner = Path("scripts/ci/run_opencode_review_model_pool.sh").read_text(encoding="utf-8")
+    assert "assert_reasoning_effort_for_candidate" in model_pool_runner
+    assert 'reasoningEffort == "high"' in model_pool_runner
+    assert "OpenCode reasoning-capable candidate %s must set reasoningEffort=high" in model_pool_runner
     assert 'timeout-minutes: 45' in workflow
     assert 'OPENCODE_RUN_TIMEOUT_SECONDS: "180"' in workflow
     assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "2400"' in workflow

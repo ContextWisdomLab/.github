@@ -52,6 +52,39 @@ write_prompt() {
 		python3 "$GITHUB_WORKSPACE/scripts/ci/render_opencode_prompt_template.py" "$prompt_file"
 }
 
+reasoning_capable_model() {
+	case "$1" in
+	openai/gpt-5* | openai/o3* | openai/o4* | deepseek/deepseek-r1*)
+		return 0
+		;;
+	*)
+		return 1
+		;;
+	esac
+}
+
+assert_reasoning_effort_for_candidate() {
+	local model_candidate="$1"
+	local provider="${model_candidate%%/*}"
+	local model_name="${model_candidate#*/}"
+
+	if ! reasoning_capable_model "$model_name"; then
+		return 0
+	fi
+	if [ "$provider" = "$model_candidate" ] || [ -z "$model_name" ]; then
+		printf 'OpenCode candidate %s is not provider-qualified.\n' "$model_candidate"
+		return 1
+	fi
+	if ! jq -e --arg provider "$provider" --arg model "$model_name" '
+		.provider[$provider].models[$model].reasoning == true
+		and .provider[$provider].models[$model].options.reasoningEffort == "high"
+		and .provider[$provider].models[$model].variants.high.reasoningEffort == "high"
+	' opencode.jsonc >/dev/null; then
+		printf 'OpenCode reasoning-capable candidate %s must set reasoningEffort=high in opencode.jsonc.\n' "$model_candidate"
+		return 1
+	fi
+}
+
 run_one_model_attempt() {
 	local model_candidate="$1"
 	local attempt="$2"
@@ -115,6 +148,7 @@ main() {
 	cd "$OPENCODE_REVIEW_WORKDIR"
 
 	for model_candidate in $OPENCODE_MODEL_CANDIDATES; do
+		assert_reasoning_effort_for_candidate "$model_candidate"
 		safe_model="${model_candidate//\//-}"
 		prompt_file="${RUNNER_TEMP}/opencode-review-${safe_model}-prompt.md"
 		candidate_output_file="${RUNNER_TEMP}/opencode-review-${safe_model}.md"
