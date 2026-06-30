@@ -6,7 +6,7 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review, auto_merge_enabled]
   workflow_run:
-    workflows: ["Required OpenCode Review"]
+    workflows: ["Required OpenCode Review", "Strix Security Scan"]
     types: [completed]
   workflow_call:
     inputs:
@@ -20,20 +20,30 @@ on:
         required: false
         default: "100"
         type: string
+      pr_number:
+        description: Optional single pull request number to inspect immediately
+        required: false
+        default: ""
+        type: string
       trigger_reviews:
         description: Dispatch OpenCode Review for PR heads without current approval
         required: false
         default: true
         type: boolean
+      review_dispatch_limit:
+        description: Maximum OpenCode/Strix review dispatch actions per scheduler run
+        required: false
+        default: "1"
+        type: string
       enable_auto_merge:
         description: Enable auto-merge for current-head approved PRs
         required: false
         default: true
         type: boolean
       merge_mode:
-        description: "Merge behavior for current-head approved PRs: auto, direct, or disabled"
+        description: "Merge behavior for current-head approved PRs: direct_or_auto, auto, direct, or disabled"
         required: false
-        default: auto
+        default: direct_or_auto
         type: string
       update_branches:
         description: Update outdated PR branches after OpenCode approval
@@ -61,7 +71,7 @@ on:
         default: "main"
         type: string
   schedule:
-    - cron: "17 */2 * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -73,20 +83,28 @@ on:
         description: Maximum open PRs to inspect
         required: false
         default: "100"
+      pr_number:
+        description: Optional single pull request number to inspect immediately
+        required: false
+        default: ""
       trigger_reviews:
         description: Dispatch OpenCode Review for PR heads without current approval
         required: false
         default: true
         type: boolean
+      review_dispatch_limit:
+        description: Maximum OpenCode/Strix review dispatch actions per scheduler run
+        required: false
+        default: "1"
       enable_auto_merge:
         description: Enable auto-merge for current-head approved PRs
         required: false
         default: true
         type: boolean
       merge_mode:
-        description: "Merge behavior for current-head approved PRs: auto, direct, or disabled"
+        description: "Merge behavior for current-head approved PRs: direct_or_auto, auto, direct, or disabled"
         required: false
-        default: auto
+        default: direct_or_auto
       update_branches:
         description: Update outdated PR branches after OpenCode approval
         required: false
@@ -98,7 +116,15 @@ on:
         default: "45"
 
 concurrency:
-  group: central-pr-review-merge-scheduler-${{ github.repository }}-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.ref || github.run_id }}
+  group: >-
+    central-pr-review-merge-scheduler-${{ github.repository }}-${{
+    github.event_name == 'pull_request_target' && format('pr-{0}', github.event.pull_request.number) ||
+    github.event_name == 'workflow_run' && github.event.workflow_run.pull_requests[0].number && format('pr-{0}', github.event.workflow_run.pull_requests[0].number) ||
+    github.event_name == 'workflow_call' && inputs.pr_number != '' && format('pr-{0}', inputs.pr_number) ||
+    github.event_name == 'workflow_call' && inputs.base_branch != '' && format('call-{0}', inputs.base_branch) ||
+    github.event_name == 'workflow_dispatch' && inputs.pr_number != '' && format('pr-{0}', inputs.pr_number) ||
+    github.event_name == 'workflow_dispatch' && github.run_id ||
+    github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -108,6 +134,7 @@ jobs:
       actions: write
       checks: read
       contents: write
+      id-token: write
       pull-requests: write
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -116,13 +143,80 @@ jobs:
       DRY_RUN: ${{ inputs.dry_run == true }}
       MAX_PRS: ${{ inputs.max_prs || '100' }}
       PROJECT_FLOW_INPUT: ${{ inputs.project_flow || vars.PROJECT_FLOW || '' }}
-      PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || '' }}
-      TRIGGER_REVIEWS: ${{ github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'pull_request_target' || inputs.trigger_reviews == true }}
+      PULL_REQUEST_NUMBER: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || inputs.pr_number || '' }}
+      TRIGGER_REVIEWS: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_run' || github.event_name == 'push' || github.event_name == 'pull_request_target' || inputs.trigger_reviews == true }}
+      REVIEW_DISPATCH_LIMIT_INPUT: ${{ inputs.review_dispatch_limit || vars.REVIEW_DISPATCH_LIMIT || '' }}
       ENABLE_AUTO_MERGE: ${{ github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'pull_request_target' || github.event_name == 'workflow_run' || inputs.enable_auto_merge == true }}
-      MERGE_MODE: ${{ inputs.merge_mode || vars.PR_MERGE_MODE || 'auto' }}
+      MERGE_MODE: ${{ inputs.merge_mode || vars.PR_MERGE_MODE || 'direct_or_auto' }}
       UPDATE_BRANCHES: ${{ github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'pull_request_target' || github.event_name == 'workflow_run' || inputs.update_branches == true }}
       STALE_OPENCODE_MINUTES: ${{ inputs.stale_opencode_minutes || vars.STALE_OPENCODE_MINUTES || '45' }}
     steps:
+      - name: Exchange OpenCode app token for scheduler mutations
+        id: scheduler_app_token
+        env:
+          OIDC_AUDIENCE: opencode-github-action
+          OPENCODE_API_BASE_URL: https://api.opencode.ai
+        run: |
+          set -euo pipefail
+
+          mark_unavailable() {
+            echo "available=false" >>"$GITHUB_OUTPUT"
+          }
+
+          if [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]; then
+            echo "OpenCode app token exchange unavailable: OIDC request environment is missing."
+            mark_unavailable
+            exit 0
+          fi
+
+          request_url="${ACTIONS_ID_TOKEN_REQUEST_URL}"
+          separator="&"
+          case "$request_url" in
+            *\?*) ;;
+            *) separator="?" ;;
+          esac
+
+          if ! oidc_response="$(
+            curl -fsS \
+              -H "Authorization: Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+              "${request_url}${separator}audience=${OIDC_AUDIENCE}"
+          )"; then
+            echo "OpenCode app token exchange unavailable: OIDC token request did not complete."
+            mark_unavailable
+            exit 0
+          fi
+
+          oidc_token="$(jq -r '.value // empty' <<<"$oidc_response")"
+          if [ -z "$oidc_token" ]; then
+            echo "OpenCode app token exchange unavailable: OIDC token response was empty."
+            mark_unavailable
+            exit 0
+          fi
+
+          if ! token_response="$(
+            curl -fsS \
+              -X POST \
+              -H "Authorization: Bearer ${oidc_token}" \
+              "${OPENCODE_API_BASE_URL}/exchange_github_app_token"
+          )"; then
+            echo "OpenCode app token exchange unavailable: app token request did not complete."
+            mark_unavailable
+            exit 0
+          fi
+
+          app_token="$(jq -r '.token // empty' <<<"$token_response")"
+          if [ -z "$app_token" ]; then
+            echo "OpenCode app token exchange unavailable: app token response was empty."
+            mark_unavailable
+            exit 0
+          fi
+
+          echo "::add-mask::$app_token"
+          {
+            echo "available=true"
+            echo "token=$app_token"
+          } >>"$GITHUB_OUTPUT"
+
       - name: Resolve trusted scheduler source ref
         id: trusted_source
         env:
@@ -149,6 +243,10 @@ jobs:
         run: python3 scripts/ci/pr_review_merge_scheduler.py --self-test
 
       - name: Inspect PR review and merge queue
+        env:
+          GH_TOKEN: ${{ secrets.PR_REVIEW_MERGE_TOKEN || secrets.OPENCODE_APPROVE_TOKEN || steps.scheduler_app_token.outputs.token || github.token }}
+          SCHEDULER_READ_TOKEN: ${{ github.token }}
+          SCHEDULER_MUTATION_TOKEN_SOURCE: ${{ secrets.PR_REVIEW_MERGE_TOKEN != '' && 'PR_REVIEW_MERGE_TOKEN' || secrets.OPENCODE_APPROVE_TOKEN != '' && 'OPENCODE_APPROVE_TOKEN' || steps.scheduler_app_token.outputs.available == 'true' && 'opencode-app' || 'github-token' }}
         run: |
           set -euo pipefail
           project_flow="$PROJECT_FLOW_INPUT"
@@ -159,12 +257,25 @@ jobs:
               *) project_flow="github-flow" ;;
             esac
           fi
+          review_dispatch_limit="$REVIEW_DISPATCH_LIMIT_INPUT"
+          if [ -z "$review_dispatch_limit" ]; then
+            if [ -n "$PULL_REQUEST_NUMBER" ]; then
+              review_dispatch_limit="1"
+            else
+              case "$GITHUB_EVENT_NAME" in
+                schedule|workflow_dispatch|workflow_run) review_dispatch_limit="1" ;;
+                push) review_dispatch_limit="0" ;;
+                *) review_dispatch_limit="0" ;;
+              esac
+            fi
+          fi
           args=(
             --repo "$GITHUB_REPOSITORY"
             --base-branch "$DEFAULT_BRANCH"
             --max-prs "$MAX_PRS"
             --project-flow "$project_flow"
             --review-workflow "Required OpenCode Review"
+            --review-dispatch-limit "$review_dispatch_limit"
             --stale-opencode-minutes "$STALE_OPENCODE_MINUTES"
           )
           if [ -n "$PULL_REQUEST_NUMBER" ]; then
