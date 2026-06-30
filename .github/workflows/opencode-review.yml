@@ -2985,8 +2985,10 @@ jobs:
             if ! env GH_TOKEN="$review_write_token" gh api -X POST "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}/reviews" --input "$review_payload_file" >/dev/null 2>"$gh_error_file"; then
               warn_gh_publication_failure "pull review" "$gh_error_file"
               rm -f "$gh_error_file" "$review_payload_file"
-              update_review_overview "$event" "$body"
-              return 0
+              update_review_overview "$event" "$body" || true
+              printf '::error::OpenCode could not publish the pull review for head %s, so the review state was not changed.\n' "$HEAD_SHA"
+              echo "::endgroup::"
+              exit 1
             fi
             rm -f "$gh_error_file" "$review_payload_file"
             update_review_overview "$event" "$body"
