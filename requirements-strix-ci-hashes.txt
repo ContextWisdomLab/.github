@@ -799,9 +799,9 @@ graphql-core==3.2.11 \
     --hash=sha256:0b3e35ff41e9adba53021ab0cef475eb18f57c7f53f0f2ca55567fbf3c537ea0 \
     --hash=sha256:e7e156d10beb127cab5c89ff0da71416fc73d27c484a4757d3b2d35633774802
     # via gql
-griffelib==2.0.2 \
-    --hash=sha256:3cf20b3bc470e83763ffbf236e0076b1211bac1bc67de13daf494640f2de707e \
-    --hash=sha256:925c857658fb1ba40c0772c37acbc2ab650bd794d9c1b9726922e36ea4117ea1
+griffelib==2.1.0 \
+    --hash=sha256:762a186d2c6fd6794d4ea20d428d597ffb857cb56b66421651cbba15bdd5e813 \
+    --hash=sha256:cc7b3d2d2865ad0b909fcc38086e3f554b5ea7acbaa7bbb7ecaa3f5dfb7d9f00
     # via openai-agents
 grpc-google-iam-v1==0.14.4 \
     --hash=sha256:392b3796947ed6334e61171d9ab06bf7eb357f554e5fc7556ad7aab6d0e17038 \
