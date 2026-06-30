@@ -2407,6 +2407,7 @@ def test_scrub_sensitive_data_and_run_error():
     assert sched.scrub_sensitive_data("gho_installation_token_value") == "***"
     assert sched.scrub_sensitive_data("ghu_user_token_value") == "***"
     assert sched.scrub_sensitive_data("ghs_server_token_value") == "***"
+    assert sched.scrub_sensitive_data("ghr_runner_token_value") == "***"
     assert sched.scrub_sensitive_data("github_pat_11AAAAA_abcdefg") == "***"
     assert sched.scrub_sensitive_data("No secrets here") == "No secrets here"
     assert sched.scrub_sensitive_data("") == ""
