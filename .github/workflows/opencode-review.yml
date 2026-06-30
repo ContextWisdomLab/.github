@@ -4037,6 +4037,57 @@ jobs:
               '
           }
 
+          current_head_successful_strix_check_run() {
+            local owner="${GH_REPOSITORY%%/*}"
+            local name="${GH_REPOSITORY#*/}"
+
+            gh api graphql \
+              -f owner="$owner" \
+              -f name="$name" \
+              -F number="$PR_NUMBER" \
+              -f query='
+                query($owner:String!,$name:String!,$number:Int!) {
+                  repository(owner:$owner,name:$name) {
+                    pullRequest(number:$number) {
+                      statusCheckRollup {
+                        contexts(first: 100) {
+                          nodes {
+                            __typename
+                            ... on CheckRun {
+                              name
+                              status
+                              conclusion
+                              completedAt
+                              detailsUrl
+                              checkSuite {
+                                workflowRun {
+                                  workflow {
+                                    name
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ' \
+              --jq '
+                (.data.repository.pullRequest.statusCheckRollup.contexts.nodes // [])
+                | map(
+                    select(.__typename == "CheckRun")
+                    | select((.status // "") == "COMPLETED")
+                    | select((.conclusion // "" | ascii_upcase) == "SUCCESS")
+                    | select((.name // "" | ascii_downcase) == "strix")
+                    | select((.checkSuite.workflowRun.workflow.name // "") == "Strix Security Scan" or (.checkSuite.workflowRun.workflow.name // "") == "Strix")
+                  )
+                | sort_by(.completedAt // "")
+                | last.detailsUrl // empty
+              '
+          }
+
           latest_current_head_manual_strix_run() {
             local runs_json
             runs_json="$(mktemp)"
@@ -4073,6 +4124,9 @@ jobs:
             local failed_strix_run_id
 
             manual_strix_success_target="$(current_head_manual_strix_success_status || true)"
+            if [ -z "$manual_strix_success_target" ]; then
+              manual_strix_success_target="$(current_head_successful_strix_check_run || true)"
+            fi
             if [ -n "$manual_strix_success_target" ]; then
               manual_strix_success_run_id="$(printf '%s' "$manual_strix_success_target" | sed -n 's#.*/actions/runs/\([0-9][0-9]*\).*#\1#p')"
               while IFS= read -r rollup_line; do
