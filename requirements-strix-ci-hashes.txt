@@ -772,9 +772,9 @@ google-crc32c==1.8.0 \
     # via
     #   google-cloud-storage
     #   google-resumable-media
-google-genai==1.75.0 \
-    --hash=sha256:56bac3991b311c93f980c0a2abcd287b672146905df1fbd71c92ed633d5a07cf \
-    --hash=sha256:8dc4c096e7d6288c3087f6893f582fe52468932464781edb8193bd92b9fefb2c
+google-genai==2.10.0 \
+    --hash=sha256:77912cd558cd7dfd5b75c25fd1c609e78d7954dde583331104022a46ea90f9ee \
+    --hash=sha256:d5350311567ae660c24cbc1752aee4b3d660f89c0106d2dcd2a69978c35afe1e
     # via google-cloud-aiplatform
 google-resumable-media==2.10.0 \
     --hash=sha256:88152884bee37b2bf36a0ab81ad8c7fd12212c9803dd981d77c1b35b02d34e7c \
