@@ -64,13 +64,24 @@ def test_process_queue_dispatches_same_repo_current_head(monkeypatch, capsys):
     monkeypatch.setattr(fix, "fetch_open_prs", lambda repo, max_prs: [pr])
     monkeypatch.setattr(fix, "needs_autofix", lambda pr: (True, ("current-head OpenCode requested changes",)))
     monkeypatch.setattr(fix, "issue_comments", lambda repo, number: [])
-    monkeypatch.setattr(fix, "dispatch_autofix", lambda repo, pr, workflow, dry_run: calls.append(("dispatch", repo, pr["number"], workflow, dry_run)))
+    monkeypatch.setattr(
+        fix,
+        "dispatch_autofix",
+        lambda repo, pr, workflow, workflow_repository, dry_run: calls.append((
+            "dispatch",
+            repo,
+            pr["number"],
+            workflow,
+            workflow_repository,
+            dry_run,
+        )),
+    )
     monkeypatch.setattr(fix, "create_fix_marker", lambda repo, pr, dry_run: calls.append(("marker", repo, pr["number"], dry_run)))
 
     assert fix.main(["--repo", "owner/repo", "--base-branch", "main", "--dry-run"]) == 0
 
     assert calls == [
-        ("dispatch", "owner/repo", 7, "pr-review-autofix.yml", True),
+        ("dispatch", "owner/repo", 7, "pr-review-autofix.yml", "ContextualWisdomLab/.github", True),
         ("marker", "owner/repo", 7, True),
     ]
     payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
@@ -247,13 +258,27 @@ def test_fix_run_json_comment_marker_and_dispatch(monkeypatch, capsys):
 
     pr = make_pr()
     fix.create_fix_marker("owner/repo", pr, dry_run=True)
-    fix.dispatch_autofix("owner/repo", pr, workflow="fix.yml", dry_run=True)
+    fix.dispatch_autofix(
+        "owner/repo",
+        pr,
+        workflow="fix.yml",
+        workflow_repository="ContextualWisdomLab/.github",
+        dry_run=True,
+    )
     assert "DRY-RUN: would create autofix marker" in capsys.readouterr().out
 
     fix.create_fix_marker("owner/repo", pr, dry_run=False)
-    fix.dispatch_autofix("owner/repo", pr, workflow="fix.yml", dry_run=False)
+    fix.dispatch_autofix(
+        "owner/repo",
+        pr,
+        workflow="fix.yml",
+        workflow_repository="ContextualWisdomLab/.github",
+        dry_run=False,
+    )
     assert calls[-2][:5] == ["gh", "api", "-X", "POST", "repos/owner/repo/issues/7/comments"]
-    assert calls[-1][:5] == ["gh", "workflow", "run", "fix.yml", "--repo"]
+    assert calls[-1][:6] == ["gh", "workflow", "run", "fix.yml", "--repo", "ContextualWisdomLab/.github"]
+    assert "-f" in calls[-1]
+    assert "target_repository=owner/repo" in calls[-1]
 
 
 def test_fix_inspect_skip_wait_and_error_paths(monkeypatch):
@@ -300,11 +325,13 @@ def test_fix_parse_args_and_self_test(monkeypatch):
 
     for bad_args in (
         ["--base-branch", "main"],
+        ["--repo", "bad repo", "--base-branch", "main"],
         ["--repo", "owner/repo"],
         ["--repo", "owner/repo", "--base-branch", "main", "--pr-number", "-1"],
         ["--repo", "owner/repo", "--base-branch", "main", "--max-prs", "0"],
         ["--repo", "owner/repo", "--base-branch", "main", "--max-dispatches", "0"],
         ["--repo", "owner/repo", "--base-branch", "main", "--retry-hours", "0"],
+        ["--repo", "owner/repo", "--base-branch", "main", "--autofix-repository", "bad"],
     ):
         monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
         monkeypatch.delenv("DEFAULT_BRANCH", raising=False)
