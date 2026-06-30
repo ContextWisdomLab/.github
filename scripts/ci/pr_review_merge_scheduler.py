@@ -1153,6 +1153,15 @@ def auto_merge_wait_reason(merge_state: str) -> str:
     )
 
 
+def current_head_can_attempt_merge(pr: dict[str, Any], merge_state: str) -> bool:
+    """Return whether merge should be attempted before branch freshness repair."""
+    if merge_state in {"DIRTY", "CONFLICTING", "UNKNOWN"}:
+        return False
+    if merge_state == "CLEAN":
+        return True
+    return (pr.get("mergeable") or "").upper() == "MERGEABLE"
+
+
 def inspect_pr(
     repo: str,
     pr: dict[str, Any],
@@ -1280,7 +1289,10 @@ def inspect_pr(
             )
         return decide("wait", reason)
 
-    if current_head_approved and merge_state == "CLEAN":
+    merge_before_update = current_head_can_attempt_merge(pr, merge_state) and (
+        merge_state == "CLEAN" or merge_mode in {"direct", "direct_or_auto"}
+    )
+    if current_head_approved and merge_before_update:
         if pr.get("autoMergeRequest"):
             return decide("wait", auto_merge_wait_reason(merge_state))
         if not same_repository_head(repo, pr):
@@ -1291,9 +1303,11 @@ def inspect_pr(
             return decide("wait", "current head is approved; merge mode disabled by scheduler inputs")
         if merge_mode in {"direct", "direct_or_auto"}:
             merge_pr(repo, pr, dry_run=dry_run)
+            state_note = "" if merge_state == "CLEAN" else f"; GitHub mergeability is {merge_state}"
             return decide(
                 "merge",
-                "current head is approved; direct merge requested with workflow GH_TOKEN and --match-head-commit",
+                "current head is approved; direct merge requested with workflow GH_TOKEN "
+                f"and --match-head-commit{state_note}",
             )
         if merge_mode != "auto":
             return decide("wait", f"current head is approved; unsupported merge mode: {merge_mode}")
