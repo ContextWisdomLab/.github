@@ -801,6 +801,18 @@ M\tREADME.md
         "opencode.jsonc",
         "README.md",
     ]
+    assert norm.changed_files_from_evidence(
+        """\
+## Changed files
+
+- .jules/sentinel.md
+- frontend/src/components/EmailDetail.test.tsx
+- [tree truncated after 5 paths]
+"""
+    ) == [
+        ".jules/sentinel.md",
+        "frontend/src/components/EmailDetail.test.tsx",
+    ]
 
     summary = norm.build_approval_repair_summary(
         "No blockers were found.",
