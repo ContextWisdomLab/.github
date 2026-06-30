@@ -1332,13 +1332,15 @@ def inspect_pr(
         merge_state == "CLEAN" or merge_mode in {"direct", "direct_or_auto"}
     )
     if current_head_approved and merge_before_update:
-        if pr.get("autoMergeRequest"):
-            return decide("wait", auto_merge_wait_reason(merge_state))
         if not same_repository_head(repo, pr):
             return decide("wait", external_head_merge_reason(repo, pr))
         if not enable_auto_merge_flag:
+            if pr.get("autoMergeRequest"):
+                return decide("wait", auto_merge_wait_reason(merge_state))
             return decide("wait", "current head is approved; auto-merge disabled by scheduler inputs")
         if merge_mode == "disabled":
+            if pr.get("autoMergeRequest"):
+                return decide("wait", auto_merge_wait_reason(merge_state))
             return decide("wait", "current head is approved; merge mode disabled by scheduler inputs")
         if merge_mode in {"direct", "direct_or_auto"}:
             try:
@@ -1346,6 +1348,12 @@ def inspect_pr(
             except RuntimeError as exc:
                 if merge_mode != "direct_or_auto" or not direct_merge_can_fallback_to_auto_merge(exc):
                     raise
+                if pr.get("autoMergeRequest"):
+                    return decide(
+                        "auto_merge",
+                        "current head is approved; direct merge was blocked by branch policy, "
+                        "so the existing auto-merge request remains queued with the same head guard evidence",
+                    )
                 enable_auto_merge(repo, pr, dry_run=dry_run)
                 return decide(
                     "auto_merge",
@@ -1360,6 +1368,8 @@ def inspect_pr(
             )
         if merge_mode != "auto":
             return decide("wait", f"current head is approved; unsupported merge mode: {merge_mode}")
+        if pr.get("autoMergeRequest"):
+            return decide("wait", auto_merge_wait_reason(merge_state))
         enable_auto_merge(repo, pr, dry_run=dry_run)
         return decide("auto_merge", "current head is approved; auto-merge enabled")
 
