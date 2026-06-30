@@ -59,14 +59,28 @@ def test_structural_review_detection_accepts_phrases_patterns_and_clean_text():
     assert norm.admits_missing_structural_review("No changed files", "")
     assert norm.admits_missing_structural_review("Could not inspect the changed files", "")
     assert norm.admits_missing_structural_review("", "Source files were not inspected")
+    assert norm.admits_missing_structural_review("structural exploration was not possible", "summary")
+    assert norm.admits_missing_structural_review("reason", "evidence was truncated")
+    assert norm.admits_missing_structural_review("", "structural analysis was incomplete")
+    assert norm.admits_missing_structural_review("", "zero changed files")
+    assert norm.admits_missing_structural_review("STRUCTURAL EXPLORATION WAS NOT POSSIBLE", "")
     assert not norm.admits_missing_structural_review("scripts/ci/example.py checked", "")
 
 
 def test_changed_file_and_verification_posture_detection():
     assert norm.mentions_changed_file_evidence("README.md", "")
     assert norm.mentions_changed_file_evidence("scripts/ci/example.py", "")
+    assert norm.mentions_changed_file_evidence("", "Checked some_script.sh")
+    assert norm.mentions_changed_file_evidence("Modified a.ts", "and b.tsx")
+    assert norm.mentions_changed_file_evidence("updated package.json", "")
+    assert norm.mentions_changed_file_evidence("checked Dockerfile", "")
+    assert norm.mentions_changed_file_evidence("reviewed AGENTS.md", "")
+    assert norm.mentions_changed_file_evidence("The file dir/sub/app.js is good", "")
+    assert norm.mentions_changed_file_evidence("Fixed bug in module.rs", "")
     assert not norm.mentions_changed_file_evidence("No path here", "")
     assert not norm.mentions_changed_file_evidence("Security/privacy: checked", "")
+    assert not norm.mentions_changed_file_evidence("changed some code", "no file listed here")
+    assert not norm.mentions_changed_file_evidence("invalid.ext", "not a valid extension")
     assert norm.mentions_verification_posture("", FULL_SUMMARY)
     assert not norm.mentions_verification_posture("", FULL_SUMMARY.replace("CodeGraph", "graph"))
 
@@ -231,7 +245,7 @@ def test_label_and_full_coverage_detection():
     assert not norm.mentions_full_coverage("", FULL_SUMMARY.replace("proves 100%", "not proven"))
 
 
-def test_check_structural_approval_rejects_invalid_or_unsafe_approvals(tmp_path):
+def test_check_structural_approval_rejects_invalid_or_unsafe_approvals(tmp_path, monkeypatch):
     assert norm.check_structural_approval(tmp_path / "missing.json") == 65
     bad_json = tmp_path / "bad.json"
     bad_json.write_text("{", encoding="utf-8")
@@ -250,6 +264,14 @@ def test_check_structural_approval_rejects_invalid_or_unsafe_approvals(tmp_path)
         path = tmp_path / f"case-{index}.json"
         path.write_text(json.dumps(value), encoding="utf-8")
         assert norm.check_structural_approval(path) == 4
+
+    changed_files = tmp_path / "changed-files.txt"
+    changed_files.write_text("tests/actual_changed_file.py\n", encoding="utf-8")
+    monkeypatch.setenv("OPENCODE_CHANGED_FILES_FILE", str(changed_files))
+    wrong_file = tmp_path / "wrong-file.json"
+    wrong_file.write_text(json.dumps(control()), encoding="utf-8")
+    assert norm.check_structural_approval(wrong_file) == 4
+    monkeypatch.delenv("OPENCODE_CHANGED_FILES_FILE")
 
     request_changes = tmp_path / "request.json"
     request_changes.write_text(json.dumps(control(result="REQUEST_CHANGES")), encoding="utf-8")
@@ -305,7 +327,11 @@ def test_valid_control_filters_shape_head_and_review_contract():
     assert norm.valid_control(dict(request, findings=["bad"]), **kwargs) is None
     assert norm.valid_control(dict(request, findings=[finding(line=True)]), **kwargs) is None
     assert norm.valid_control(dict(request, findings=[finding(line=0)]), **kwargs) is None
+    assert norm.valid_control(dict(request, findings=[finding(line="10")]), **kwargs) is None
     assert norm.valid_control(dict(request, findings=[finding(title="")]), **kwargs) is None
+    invalid_finding = finding()
+    invalid_finding.pop("severity")
+    assert norm.valid_control(dict(request, findings=[invalid_finding]), **kwargs) is None
     assert (
         norm.valid_control(
             dict(
@@ -665,6 +691,49 @@ def test_iter_json_objects_extracts_raw_and_embedded_json():
     assert norm.iter_json_objects("no json here") == []
 
 
+def test_escapes_html_comment_breakout(tmp_path):
+    output = tmp_path / "opencode.txt"
+    control_data = control(
+        result="REQUEST_CHANGES",
+        findings=[
+            {
+                "path": "test.py",
+                "line": 1,
+                "severity": "high",
+                "title": "Test finding",
+                "problem": "--> injected string with < and > and &",
+                "root_cause": "test",
+                "fix_direction": "test",
+                "regression_test_direction": "test",
+                "suggested_diff": "test",
+            }
+        ],
+    )
+    output.write_text("prefix\n" + json.dumps(control_data) + "\nsuffix", encoding="utf-8")
+    assert norm.main(["prog", "head", "run", "attempt", str(output)]) == 0
+    text = output.read_text(encoding="utf-8")
+
+    control_block_marker = "<!-- opencode-review-control-v1\n"
+    control_block_start = text.find(control_block_marker)
+    control_block_end = text.rfind("\n-->")
+    assert control_block_start != -1
+    assert control_block_end != -1
+    assert control_block_start < control_block_end
+
+    # Extract the JSON control block itself to ensure no unescaped `<, >, &` exists.
+    control_block_start += len(control_block_marker)
+    json_text = text[control_block_start:control_block_end]
+
+    escaped_fragments = ("\\u003c", "\\u003e", "\\u0026")
+    raw_comment_breakout_fragments = ("-->", "<", ">", "&")
+
+    assert all(fragment in json_text for fragment in escaped_fragments)
+    assert all(fragment not in json_text for fragment in raw_comment_breakout_fragments)
+
+    parsed_control = json.loads(json_text)
+    assert parsed_control["findings"][0]["problem"] == "--> injected string with < and > and &"
+
+
 def test_main_normalizes_valid_output_and_reports_failures(tmp_path, capsys):
     output = tmp_path / "opencode.txt"
     output.write_text("prefix\n" + json.dumps(control()) + "\nsuffix", encoding="utf-8")
@@ -719,9 +788,7 @@ def test_main_normalizes_and_escapes_html_markers(tmp_path):
     assert "<script>" not in saved_text
     assert "\\u003cscript\\u003e" in saved_text
     inner = saved_text.split("<!-- opencode-review-control-v1")[1]
+    json_line = inner.splitlines()[1]
+    assert json.loads(json_line)["summary"] == control_data["summary"]
     assert "-->" in inner
     assert "-->" not in inner.split("-->", 1)[0].strip()
-
-def test_extract_dicts_with_lists():
-    assert norm.extract_dicts([{"a": 1}]) == [{"a": 1}]
-    assert norm.extract_dicts({"a": [{"b": 2}]}) == [{"a": [{"b": 2}]}, {"b": 2}]
