@@ -3669,6 +3669,16 @@ EOS
 		echo "Penetration test failed: changed critical finding"
 		exit 1
 		;;
+	pr-changed-file-nonintersecting-line)
+		mkdir -p "$STRIX_REPORTS_DIR/fake-pr-nonintersecting-line/vulnerabilities"
+		cat >"$STRIX_REPORTS_DIR/fake-pr-nonintersecting-line/vulnerabilities/vuln-0001.md" <<'EOS'
+Severity: CRITICAL
+Location 1:
+frontend/src/App.tsx:1
+EOS
+		echo "Penetration test failed: same changed file but baseline line finding"
+		exit 1
+		;;
 	pr-critical-changed-bracketed-next-route)
 		mkdir -p "$STRIX_REPORTS_DIR/fake-pr-changed-bracketed-next-route/vulnerabilities"
 		cat >"$STRIX_REPORTS_DIR/fake-pr-changed-bracketed-next-route/vulnerabilities/vuln-0001.md" <<'EOS'
@@ -4300,6 +4310,14 @@ EOS
 	elif [ "$scenario" = "pr-critical-changed-json-target" ]; then
 		mkdir -p "$repo_root_dir/frontend/src/components"
 		echo 'export function CalendarLayout() { return null }' >"$repo_root_dir/frontend/src/components/CalendarLayout.tsx"
+	elif [ "$scenario" = "pr-changed-file-nonintersecting-line" ]; then
+		mkdir -p "$repo_root_dir/frontend/src"
+		{
+			echo 'import React from "react";'
+			for line_number in $(seq 2 140); do
+				printf 'const value%s = %s;\n' "$line_number" "$line_number"
+			done
+		} >"$repo_root_dir/frontend/src/App.tsx"
 	elif [ "$scenario" = "opencode-documented-env-api-key-fallback-success" ]; then
 		mkdir -p "$repo_root_dir/.github/workflows"
 		cat >"$repo_root_dir/.github/workflows/opencode-review.yml" <<'EOS'
@@ -4354,6 +4372,24 @@ EOS
 		for large_scope_index in $(seq 1 38); do
 			printf 'file %s\n' "$large_scope_index" >"$repo_root_dir/backend/large-scope/file-$large_scope_index.py"
 		done
+	fi
+
+	local scenario_base_sha=""
+	local scenario_head_sha=""
+	if [ "$scenario" = "pr-changed-file-nonintersecting-line" ]; then
+		(
+			cd "$repo_root_dir"
+			git init -q
+			git config user.email "ci@example.com"
+			git config user.name "CI"
+			git add frontend/src/App.tsx
+			git commit -qm 'base commit'
+			sed -i '120s/$/ \/\/ changed search line/' frontend/src/App.tsx
+			git add frontend/src/App.tsx
+			git commit -qm 'head commit'
+		)
+		scenario_base_sha="$(git -C "$repo_root_dir" rev-list --max-parents=0 HEAD)"
+		scenario_head_sha="$(git -C "$repo_root_dir" rev-parse HEAD)"
 	fi
 
 	set +e
@@ -4461,6 +4497,10 @@ EOS
 		env_cmd+=(PR_BASE_SHA="test-base-sha")
 		env_cmd+=(PR_HEAD_SHA="test-head-sha")
 		env_cmd+=(GH_TOKEN="ghs_test_token")
+	fi
+	if [ -n "$scenario_base_sha" ] && [ -n "$scenario_head_sha" ]; then
+		env_cmd+=(PR_BASE_SHA="$scenario_base_sha")
+		env_cmd+=(PR_HEAD_SHA="$scenario_head_sha")
 	fi
 	if [ -n "$authoritative_sca_runs_json" ]; then
 		local gh_api_response_file="$tmp_dir/gh-api-response.json"
@@ -9079,6 +9119,26 @@ run_gate_case "pr-critical-changed" \
 	"0" \
 	"pull_request" \
 	"sync-module-system/smart-crawling-biz/src/main/java/org/empasy/sync/modules/system/controller/SysPositionController.java"
+
+run_gate_case "pr-changed-file-nonintersecting-line" \
+	"openai/gpt-4o-mini" \
+	"" \
+	"0" \
+	"Strix findings are limited to unchanged files in this pull request; allowing pipeline continuation." \
+	"1" \
+	"openai/gpt-4o-mini" \
+	"https://example.invalid" \
+	"vertex_ai" \
+	"__DEFAULT__" \
+	"" \
+	"0" \
+	"CRITICAL" \
+	"0" \
+	"" \
+	"" \
+	"1200" \
+	"0" \
+	"pull_request"
 
 run_gate_case "pr-critical-changed-bracketed-next-route" \
 	"openai/gpt-4o-mini" \
