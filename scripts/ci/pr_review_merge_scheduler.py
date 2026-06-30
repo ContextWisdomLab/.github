@@ -163,6 +163,33 @@ def scrub_sensitive_data(text: str | None) -> str | None:
     return text
 
 
+def mutation_token_source() -> str:
+    """Return the configured scheduler mutation credential source."""
+    return (os.environ.get("SCHEDULER_MUTATION_TOKEN_SOURCE") or "github-token").strip() or "github-token"
+
+
+def mutation_token_label() -> str:
+    """Return a non-secret label for the scheduler mutation credential."""
+    source = mutation_token_source()
+    labels = {
+        "PR_REVIEW_MERGE_TOKEN": "PR_REVIEW_MERGE_TOKEN",
+        "OPENCODE_APPROVE_TOKEN": "OPENCODE_APPROVE_TOKEN",
+        "opencode-app": "OpenCode app token",
+        "github-token": "workflow GITHUB_TOKEN",
+    }
+    return labels.get(source, "workflow GH_TOKEN")
+
+
+def mutation_actor_label() -> str:
+    """Return the expected GitHub actor class for scheduler mutations."""
+    source = mutation_token_source()
+    if source == "github-token":
+        return "github-actions[bot]"
+    if source == "opencode-app":
+        return "OpenCode GitHub App"
+    return "configured workflow credential"
+
+
 def contract_decision(decision: Decision) -> str:
     """Map scheduler actions into the bounded PR decision contract."""
     if decision.action == "update_branch":
@@ -297,8 +324,8 @@ def decision_guidance(decision: Decision) -> dict[str, Any] | None:
     if decision.action == "update_branch":
         return {
             "type": "github_actions_update_branch",
-            "actor": "github-actions[bot]",
-            "token": "workflow GITHUB_TOKEN",
+            "actor": mutation_actor_label(),
+            "token": mutation_token_label(),
             "required_permission": "pull-requests: write",
             "head_guard": "expected_head_sha",
             "summary": "GitHub Actions requests the PR branch update mechanically; the updated head must be reviewed again before merge.",
@@ -313,8 +340,8 @@ def decision_guidance(decision: Decision) -> dict[str, Any] | None:
     if decision.action == "merge":
         return {
             "type": "github_actions_direct_merge",
-            "actor": "github-actions[bot]",
-            "token": "workflow GITHUB_TOKEN",
+            "actor": mutation_actor_label(),
+            "token": mutation_token_label(),
             "required_permission": "contents: write",
             "head_guard": "gh pr merge --match-head-commit",
             "summary": "GitHub Actions performed an immediate guarded merge because repo policy does not use native auto-merge for this queue.",
@@ -999,12 +1026,12 @@ def require_github_actions_mutation_actor(action: str) -> None:
     if os.environ.get("GITHUB_ACTIONS") != "true":
         raise RuntimeError(
             f"{action} refused outside GitHub Actions; dispatch PR Review Merge Scheduler "
-            "so the workflow GITHUB_TOKEN performs the mutation as github-actions[bot]"
+            "so the workflow mutation credential performs the guarded GitHub mutation"
         )
     if not os.environ.get("GH_TOKEN"):
         raise RuntimeError(
             f"{action} refused without GH_TOKEN; configure the scheduler job to pass "
-            "secrets.GITHUB_TOKEN through GH_TOKEN so the mutation is attributable to github-actions[bot]"
+            "PR_REVIEW_MERGE_TOKEN, OPENCODE_APPROVE_TOKEN, an OpenCode app token, or github.token through GH_TOKEN"
         )
 
 
@@ -1328,7 +1355,7 @@ def inspect_pr(
             state_note = "" if merge_state == "CLEAN" else f"; GitHub mergeability is {merge_state}"
             return decide(
                 "merge",
-                "current head is approved; direct merge requested with workflow GH_TOKEN "
+                f"current head is approved; direct merge requested with {mutation_token_label()} "
                 f"and --match-head-commit{state_note}",
             )
         if merge_mode != "auto":
@@ -1373,8 +1400,8 @@ def inspect_pr(
         decision = Decision(
             number,
             "update_branch",
-            f"{freshness_reason}; branch update requested with workflow GH_TOKEN "
-            f"(github-actions[bot] in GitHub Actions){suffix}",
+            f"{freshness_reason}; branch update requested with {mutation_token_label()} "
+            f"inside GitHub Actions as {mutation_actor_label()}{suffix}",
             (followup_note,) if followup_note else (),
         )
         return finish(decision)
@@ -1650,16 +1677,18 @@ def update_branch_summary(decisions: list[Decision]) -> list[str]:
     if not updates:
         return []
     pr_list = ", ".join(f"#{decision.pr}" for decision in updates)
+    token_label = mutation_token_label()
+    actor_label = mutation_actor_label()
     lines = [
         "",
         "### Branch update requests",
         "",
-        f"Requested `update-branch` for PR {pr_list} with the workflow `GITHUB_TOKEN`, guarded by the observed `expected_head_sha`.",
-        "This is intentionally done inside GitHub Actions, not from a maintainer's local `gh` credential, so the mechanical update is attributable to the automation actor.",
+        f"Requested `update-branch` for PR {pr_list} with `{token_label}`, guarded by the observed `expected_head_sha`.",
+        f"This is intentionally done inside GitHub Actions, not from a maintainer's local `gh` credential, so the mechanical update is attributable to `{actor_label}`.",
         "Existing native auto-merge requests stay queued; branch freshness should not be repaired by disabling auto-merge first.",
         "The scheduler refuses a non-dry-run `update-branch` outside GitHub Actions; dispatch the workflow instead of running the mutation locally.",
         "This branch-update API path needs `pull-requests: write`; it does not require the scheduler job to widen repository `contents` to write.",
-        "When repository permissions allow the mutation, GitHub records the resulting branch update as `github-actions[bot]`.",
+        "When repository permissions allow the mutation, GitHub records the resulting branch update under the selected workflow credential.",
         "The updated head is not merge evidence by itself. Wait for the new head to receive OpenCode approval, Strix evidence, required checks, and unresolved-thread checks before merge or auto-merge.",
     ]
     followups = [(decision, note) for decision in updates for note in decision.notes if "update-branch" in note]
@@ -1797,6 +1826,12 @@ def summarize_action_error(exc: RuntimeError) -> str:
         return "scheduler action failed without stderr"
     summary = "; ".join(lines[:2])
     lower_summary = summary.lower()
+    if "without `workflows` permission" in lower_summary or "without workflows permission" in lower_summary:
+        summary = (
+            f"{summary}; workflow-file PRs need a scheduler mutation credential with GitHub `workflows` permission. "
+            "Configure `PR_REVIEW_MERGE_TOKEN` or expand the selected GitHub App permission, then rerun the scheduler; "
+            "do not leave this as a review comment for the PR author."
+        )
     if "resource not accessible by integration" in lower_summary:
         if "mergepullrequest" in lower_summary or "enablepullrequestautomerge" in lower_summary or "gh pr merge" in lower_summary:
             summary = (

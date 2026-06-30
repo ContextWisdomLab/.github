@@ -800,6 +800,20 @@ def test_mutations_refuse_local_credentials(monkeypatch):
     assert calls == []
 
 
+def test_mutation_token_labels_follow_selected_scheduler_credential(monkeypatch):
+    monkeypatch.delenv("SCHEDULER_MUTATION_TOKEN_SOURCE", raising=False)
+    assert sched.mutation_token_label() == "workflow GITHUB_TOKEN"
+    assert sched.mutation_actor_label() == "github-actions[bot]"
+
+    monkeypatch.setenv("SCHEDULER_MUTATION_TOKEN_SOURCE", "opencode-app")
+    assert sched.mutation_token_label() == "OpenCode app token"
+    assert sched.mutation_actor_label() == "OpenCode GitHub App"
+
+    monkeypatch.setenv("SCHEDULER_MUTATION_TOKEN_SOURCE", "PR_REVIEW_MERGE_TOKEN")
+    assert sched.mutation_token_label() == "PR_REVIEW_MERGE_TOKEN"
+    assert sched.mutation_actor_label() == "configured workflow credential"
+
+
 def test_resolve_outdated_review_threads_uses_github_actions_actor(monkeypatch):
     calls = []
     pr = make_pr(
@@ -846,12 +860,12 @@ def test_print_summary_writes_github_step_summary(monkeypatch, tmp_path, capsys)
         sched.Decision(
             8,
             "update_branch",
-            "current-head OpenCode review approved; branch update requested with workflow GH_TOKEN (github-actions[bot] in GitHub Actions)",
+            "current-head OpenCode review approved; branch update requested with workflow GITHUB_TOKEN inside GitHub Actions as github-actions[bot]",
         ),
         sched.Decision(
             12,
             "merge",
-            "current head is approved; direct merge requested with workflow GH_TOKEN and --match-head-commit",
+            "current head is approved; direct merge requested with workflow GITHUB_TOKEN and --match-head-commit",
         ),
         sched.Decision(
             9,
@@ -919,9 +933,9 @@ def test_print_summary_writes_github_step_summary(monkeypatch, tmp_path, capsys)
     assert "Would resolve 1 outdated review thread(s)" in summary
     assert (
         "| #8 | update_branch | current-head OpenCode review approved; "
-        "branch update requested with workflow GH_TOKEN (github-actions[bot] in GitHub Actions) |"
+        "branch update requested with workflow GITHUB_TOKEN inside GitHub Actions as github-actions[bot] |"
     ) in summary
-    assert "| #12 | merge | current head is approved; direct merge requested with workflow GH_TOKEN" in summary
+    assert "| #12 | merge | current head is approved; direct merge requested with workflow GITHUB_TOKEN" in summary
     assert "fresh same-head OpenCode review" in summary
     assert "### Conflict repair" in summary
     assert "When GitHub shows `Conflicting`" in summary
@@ -933,7 +947,7 @@ def test_print_summary_writes_github_step_summary(monkeypatch, tmp_path, capsys)
     assert "git merge --no-ff origin/main" in summary
     assert "git push --force-with-lease" in summary
     assert "### Branch update requests" in summary
-    assert "Requested `update-branch` for PR #8 with the workflow `GITHUB_TOKEN`" in summary
+    assert "Requested `update-branch` for PR #8 with `workflow GITHUB_TOKEN`" in summary
     assert "not from a maintainer's local `gh` credential" in summary
     assert "refuses a non-dry-run `update-branch` outside GitHub Actions" in summary
     assert "needs `pull-requests: write`" in summary
@@ -1148,7 +1162,7 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     monkeypatch.setattr(sched, "update_branch", lambda repo, pr, dry_run: called.append((repo, pr["number"], dry_run)))
     decision = inspect(behind)
     assert decision.action == "update_branch"
-    assert "workflow GH_TOKEN" in decision.reason
+    assert "workflow GITHUB_TOKEN" in decision.reason
     assert "github-actions[bot]" in decision.reason
     assert called == [("owner/repo", 1, True)]
     called.clear()
@@ -2151,6 +2165,16 @@ def test_action_error_guidance_distinguishes_update_branch_from_merge():
     )
     assert "explicit repo policy exception" in merge_error
     assert "contents: write" in merge_error
+
+    workflow_permission_error = sched.summarize_action_error(
+        RuntimeError(
+            "Command failed (1): gh pr merge 7 --auto --squash\n"
+            "GraphQL: Pull request refusing to allow a GitHub App to create or update workflow `.github/workflows/opencode-review.yml` without `workflows` permission (enablePullRequestAutoMerge)"
+        )
+    )
+    assert "workflow-file PRs need a scheduler mutation credential" in workflow_permission_error
+    assert "PR_REVIEW_MERGE_TOKEN" in workflow_permission_error
+    assert "do not leave this as a review comment" in workflow_permission_error
 
     unknown_mutation_error = sched.summarize_action_error(
         RuntimeError(
