@@ -29,9 +29,14 @@ on:
         default: "24"
         type: string
       autofix_workflow:
-        description: Target repository autofix workflow file
+        description: Autofix workflow file to dispatch
         required: false
         default: "pr-review-autofix.yml"
+        type: string
+      autofix_repository:
+        description: Repository that owns the autofix workflow
+        required: false
+        default: "ContextualWisdomLab/.github"
         type: string
       base_branch:
         description: Base branch to scan; defaults to the caller repository default branch
@@ -71,9 +76,13 @@ on:
         required: false
         default: "24"
       autofix_workflow:
-        description: Target repository autofix workflow file
+        description: Autofix workflow file to dispatch
         required: false
         default: "pr-review-autofix.yml"
+      autofix_repository:
+        description: Repository that owns the autofix workflow
+        required: false
+        default: "ContextualWisdomLab/.github"
   schedule:
     - cron: "23 */2 * * *"
 
@@ -92,7 +101,7 @@ jobs:
       statuses: read
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-      GH_TOKEN: ${{ github.token }}
+      GH_TOKEN: ${{ secrets.PR_REVIEW_MERGE_TOKEN || secrets.OPENCODE_APPROVE_TOKEN || github.token }}
       TARGET_REPOSITORY: ${{ inputs.target_repository || vars.PR_REVIEW_FIX_TARGET_REPOSITORY || github.repository }}
       DEFAULT_BRANCH: ${{ inputs.base_branch || vars.PR_REVIEW_FIX_BASE_BRANCH || github.event.repository.default_branch }}
       DRY_RUN: ${{ inputs.dry_run == true }}
@@ -100,6 +109,7 @@ jobs:
       MAX_DISPATCHES: ${{ inputs.max_dispatches || '1' }}
       RETRY_HOURS: ${{ inputs.retry_hours || '24' }}
       AUTOFIX_WORKFLOW: ${{ inputs.autofix_workflow || 'pr-review-autofix.yml' }}
+      AUTOFIX_REPOSITORY: ${{ inputs.autofix_repository || 'ContextualWisdomLab/.github' }}
       CANONICAL_REF: ${{ inputs.canonical_ref || 'main' }}
     steps:
       - name: Checkout canonical scheduler
@@ -123,6 +133,7 @@ jobs:
             --max-dispatches "$MAX_DISPATCHES"
             --retry-hours "$RETRY_HOURS"
             --autofix-workflow "$AUTOFIX_WORKFLOW"
+            --autofix-repository "$AUTOFIX_REPOSITORY"
           )
           if [ "$DRY_RUN" = "true" ]; then
             args+=(--dry-run)

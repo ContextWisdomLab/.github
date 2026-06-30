@@ -30,11 +30,13 @@ except ModuleNotFoundError:
     )
 
 
+DEFAULT_AUTOFIX_REPOSITORY = "ContextualWisdomLab/.github"
 FIX_MARKER = "<!-- pr-review-fix-scheduler autofix-dispatch"
 FIX_MARKER_RE = re.compile(
     r"<!-- pr-review-fix-scheduler autofix-dispatch "
     r"head_sha=([0-9a-fA-F]{40}) epoch=([0-9]+) -->"
 )
+REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
 def run_json(args: list[str]) -> Any:
@@ -108,26 +110,40 @@ def create_fix_marker(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
     )
 
 
-def dispatch_autofix(repo: str, pr: dict[str, Any], *, workflow: str, dry_run: bool) -> None:
-    """Dispatch the repository-local autofix worker for the exact PR head."""
+def dispatch_autofix(
+    repo: str,
+    pr: dict[str, Any],
+    *,
+    workflow: str,
+    workflow_repository: str,
+    dry_run: bool,
+) -> None:
+    """Dispatch an autofix worker for the exact PR head."""
+    dispatch_repo = workflow_repository or repo
     args = [
         "gh",
         "workflow",
         "run",
         workflow,
         "--repo",
-        repo,
-        "-f",
-        f"pr_number={pr['number']}",
-        "-f",
-        f"pr_base_ref={pr['baseRefName']}",
-        "-f",
-        f"pr_base_sha={pr['baseRefOid']}",
-        "-f",
-        f"pr_head_ref={pr['headRefName']}",
-        "-f",
-        f"pr_head_sha={pr['headRefOid']}",
+        dispatch_repo,
     ]
+    if dispatch_repo != repo:
+        args.extend(["-f", f"target_repository={repo}"])
+    args.extend(
+        [
+            "-f",
+            f"pr_number={pr['number']}",
+            "-f",
+            f"pr_base_ref={pr['baseRefName']}",
+            "-f",
+            f"pr_base_sha={pr['baseRefOid']}",
+            "-f",
+            f"pr_head_ref={pr['headRefName']}",
+            "-f",
+            f"pr_head_sha={pr['headRefOid']}",
+        ]
+    )
     if dry_run:
         print("DRY-RUN:", " ".join(args))
         return
@@ -160,7 +176,13 @@ def inspect_pr(
     if recent_fix_marker_exists(comments, str(pr["headRefOid"]), args.retry_hours * 3600):
         return "wait", ("recent autofix marker exists for this head",)
 
-    dispatch_autofix(repo, pr, workflow=args.autofix_workflow, dry_run=args.dry_run)
+    dispatch_autofix(
+        repo,
+        pr,
+        workflow=args.autofix_workflow,
+        workflow_repository=args.autofix_repository,
+        dry_run=args.dry_run,
+    )
     create_fix_marker(repo, pr, dry_run=args.dry_run)
     return "dispatch", reasons
 
@@ -257,6 +279,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--max-dispatches", type=int, default=1)
     parser.add_argument("--retry-hours", type=int, default=24)
     parser.add_argument("--autofix-workflow", default="pr-review-autofix.yml")
+    parser.add_argument(
+        "--autofix-repository",
+        default=os.environ.get("AUTOFIX_REPOSITORY", DEFAULT_AUTOFIX_REPOSITORY),
+        help="Repository that owns the autofix workflow, in OWNER/NAME form.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args(argv)
@@ -264,6 +291,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         return args
     if not args.repo:
         parser.error("--repo is required")
+    if not REPO_RE.fullmatch(args.repo):
+        parser.error("--repo must be in OWNER/NAME form")
     if not args.base_branch:
         parser.error("--base-branch is required")
     if args.pr_number < 0:
@@ -274,6 +303,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         parser.error("--max-dispatches must be positive")
     if args.retry_hours < 1:
         parser.error("--retry-hours must be positive")
+    if not REPO_RE.fullmatch(args.autofix_repository):
+        parser.error("--autofix-repository must be in OWNER/NAME form")
     return args
 
 
