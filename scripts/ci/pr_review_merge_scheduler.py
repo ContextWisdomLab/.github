@@ -370,6 +370,11 @@ def decision_guidance(decision: Decision) -> dict[str, Any] | None:
 
 def run(args: Sequence[str], *, stdin: str | None = None) -> str:
     """Run a command and return stdout, raising a scrubbed summary on failure."""
+    return run_with_env(args, stdin=stdin)
+
+
+def run_with_env(args: Sequence[str], *, stdin: str | None = None, env: dict[str, str] | None = None) -> str:
+    """Run a command with an optional environment override and scrub failures."""
     if isinstance(args, str) or not all(isinstance(arg, str) for arg in args):
         raise TypeError("run() requires a sequence of argv strings; shell command strings are not allowed")
     argv = list(args)
@@ -381,6 +386,7 @@ def run(args: Sequence[str], *, stdin: str | None = None) -> str:
             text=True,
             shell=False,
             check=True,
+            env=env,
         )
     except subprocess.CalledProcessError as exc:
         scrubbed_args = scrub_sensitive_data(' '.join(argv))
@@ -389,6 +395,24 @@ def run(args: Sequence[str], *, stdin: str | None = None) -> str:
             f"Command failed ({exc.returncode}): {scrubbed_args}\n{scrubbed_stderr}"
         ) from exc
     return process.stdout
+
+
+def scheduler_read_env() -> dict[str, str] | None:
+    """Return an env override for GitHub read calls when configured."""
+    read_token = os.environ.get("SCHEDULER_READ_TOKEN")
+    if not read_token or read_token == os.environ.get("GH_TOKEN"):
+        return None
+    env = os.environ.copy()
+    env["GH_TOKEN"] = read_token
+    return env
+
+
+def run_github_read(args: Sequence[str], *, stdin: str | None = None) -> str:
+    """Run a GitHub read command with the configured read token when available."""
+    env = scheduler_read_env()
+    if env is None:
+        return run(args, stdin=stdin)
+    return run_with_env(args, stdin=stdin, env=env)
 
 
 def split_repo(repo: str) -> tuple[str, str]:
@@ -436,7 +460,7 @@ def gh_graphql(query: str, **fields: str | int) -> dict[str, Any]:
     max_attempts = 4
     for attempt in range(1, max_attempts + 1):  # pragma: no branch - last failed attempt always raises
         try:
-            return json.loads(run(cmd, stdin=query))
+            return json.loads(run_github_read(cmd, stdin=query))
         except RuntimeError as exc:
             if attempt >= max_attempts or not is_transient_github_api_error(exc):
                 raise
@@ -457,7 +481,7 @@ def github_resource_inaccessible(exc: RuntimeError) -> bool:
 def gh_api_json(path: str) -> Any:
     """Run a GitHub REST API request through gh and decode the JSON response."""
 
-    return json.loads(run(["gh", "api", path]))
+    return json.loads(run_github_read(["gh", "api", path]))
 
 
 def rest_review_node(review: dict[str, Any]) -> dict[str, Any]:
