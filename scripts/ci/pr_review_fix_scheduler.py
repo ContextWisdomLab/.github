@@ -196,6 +196,7 @@ def process_queue(args: argparse.Namespace) -> int:
         max_workers = min(10, len(prs_needing_comments))
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             def fetch_comments(pr_number: int) -> tuple[int, list[dict[str, Any]]]:
+                """Fetch one PR's issue comments for parallel queue inspection."""
                 return pr_number, issue_comments(args.repo, pr_number)
 
             futures = [executor.submit(fetch_comments, int(pr["number"])) for pr in prs_needing_comments]

@@ -47,6 +47,9 @@ fragment SchedulerPullRequestFields on PullRequest {
   reviewThreads(first: 100) {
     nodes { id isResolved isOutdated }
   }
+  files(first: 20) {
+    nodes { path }
+  }
   reviews(last: 50) {
     nodes {
       state
@@ -258,7 +261,7 @@ def decision_guidance(decision: Decision) -> dict[str, Any] | None:
         base_remote = f"origin/{base_ref}"
         quoted_base_ref = shlex.quote(base_ref)
         quoted_base_remote = shlex.quote(base_remote)
-        return {
+        guidance: dict[str, Any] = {
             "type": "merge_conflict_repair",
             "merge_state": state,
             "base_ref": base_ref,
@@ -286,6 +289,10 @@ def decision_guidance(decision: Decision) -> dict[str, Any] | None:
                 "# rebase path only: git push --force-with-lease",
             ],
         }
+        changed_files = parse_conflict_changed_files(decision.reason)
+        if changed_files:
+            guidance["changed_files_to_inspect"] = changed_files
+        return guidance
     action_required = parse_workflow_action_required_reason(decision.reason)
     if action_required:
         return {
@@ -549,6 +556,7 @@ def rest_pr_node(repo: str, pr: dict[str, Any]) -> dict[str, Any]:
     head_repo = head.get("repo") or {}
     reviews = gh_api_json(f"repos/{repo}/pulls/{number}/reviews?per_page=100")
     checks = gh_api_json(f"repos/{repo}/commits/{head.get('sha')}/check-runs?per_page=100")
+    files = gh_api_json(f"repos/{repo}/pulls/{number}/files?per_page=20")
     rest_merge_state = REST_MERGEABLE_STATE_MAP.get(
         str(pr.get("mergeable_state") or "").lower(),
         str(pr.get("mergeable_state") or "").upper(),
@@ -569,6 +577,7 @@ def rest_pr_node(repo: str, pr: dict[str, Any]) -> dict[str, Any]:
         "headRepository": {"nameWithOwner": head_repo.get("full_name") or repo},
         "autoMergeRequest": pr.get("auto_merge"),
         "reviewThreads": {"nodes": []},
+        "files": {"nodes": [{"path": file.get("filename")} for file in files if file.get("filename")]},
         "reviews": {"nodes": [rest_review_node(review) for review in reviews]},
         "statusCheckRollup": {
             "contexts": {
@@ -1393,8 +1402,15 @@ def merge_conflict_guidance(pr: dict[str, Any], merge_state: str) -> str:
     """Return actionable conflict repair guidance for a conflicting PR."""
     base_ref = pr.get("baseRefName") or "base"
     head_ref = pr.get("headRefName") or "head"
+    changed_files = conflict_changed_files_text(pr)
+    changed_files_note = (
+        f"changed files to inspect first: {changed_files}; "
+        if changed_files
+        else ""
+    )
     return (
         f"merge conflict: {merge_state}; base={base_ref}, head={head_ref}; "
+        f"{changed_files_note}"
         f"run `gh pr checkout {pr.get('number', '<pr>')}`, `git fetch origin {base_ref}`, then "
         f"`git merge --no-ff origin/{base_ref}` or `git rebase origin/{base_ref}`; "
         "use `git status --short` to find conflicted files, resolve conflict markers in the PR branch, "
@@ -1402,6 +1418,22 @@ def merge_conflict_guidance(pr: dict[str, Any], merge_state: str) -> str:
         "(use `git push --force-with-lease` only if rebased); "
         "do not retry update-branch until the conflict is repaired"
     )
+
+
+def changed_file_paths(pr: dict[str, Any], *, limit: int = 10) -> list[str]:
+    """Return changed file paths already present in the pull request payload."""
+    nodes = ((pr.get("files") or {}).get("nodes") or [])[:limit]
+    return [path for node in nodes if isinstance(path := node.get("path"), str) and path]
+
+
+def conflict_changed_files_text(pr: dict[str, Any], *, limit: int = 10) -> str:
+    """Return compact changed-file guidance for conflict repair text."""
+    paths = changed_file_paths(pr, limit=limit)
+    if not paths:
+        return ""
+    total = len(((pr.get("files") or {}).get("nodes") or []))
+    suffix = f" | +{total - len(paths)} more" if total > len(paths) else ""
+    return " | ".join(paths) + suffix
 
 
 def auto_merge_wait_reason(merge_state: str) -> str:
@@ -1872,6 +1904,21 @@ def parse_conflict_reason(reason: str) -> tuple[str, str, str] | None:
     return state, base_ref, head_ref
 
 
+def parse_conflict_changed_files(reason: str) -> list[str]:
+    """Extract changed-file conflict hints from scheduler guidance text."""
+    prefix = "changed files to inspect first: "
+    for segment in reason.split(";"):
+        segment = segment.strip()
+        if not segment.startswith(prefix):
+            continue
+        return [
+            file_path
+            for file_path in (part.strip() for part in segment[len(prefix) :].split("|"))
+            if file_path and not file_path.startswith("+")
+        ]
+    return []
+
+
 def conflict_repair_summary(decisions: list[Decision]) -> list[str]:
     """Return a GitHub Actions Summary section with concrete conflict repair steps."""
     conflicted = [(decision, parse_conflict_reason(decision.reason)) for decision in decisions]
@@ -1890,6 +1937,7 @@ def conflict_repair_summary(decisions: list[Decision]) -> list[str]:
         assert parsed is not None
         state, base_ref, head_ref = parsed
         base_remote = f"origin/{base_ref}"
+        changed_files = parse_conflict_changed_files(decision.reason)
         lines.extend(
             [
                 "",
@@ -1910,6 +1958,14 @@ def conflict_repair_summary(decisions: list[Decision]) -> list[str]:
                 "```",
             ]
         )
+        if changed_files:
+            lines.extend(
+                [
+                    "",
+                    "Changed files to inspect first:",
+                    *(f"- `{path.replace('`', '\\`')}`" for path in changed_files),
+                ]
+            )
     return lines
 
 
