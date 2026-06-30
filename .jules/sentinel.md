@@ -8,9 +8,5 @@
 **Prevention:** Removed the fast-path check entirely. We must always enforce JSON normalization via `opencode_review_normalize_output.py` because it correctly parses the JSON payload and safely escapes all characters as `\u003c`, `\u003e` and `\u0026`.
 ## 2026-06-25 - Prevent CI Logs Security Exposure and Explicit Shell Usage
 **Vulnerability:** Information Disclosure / Command Injection
-**Learning:** `subprocess.run` defaults to `shell=False`, but linters like Bandit require explicit `shell=False` to pass security checks. Furthermore, logging `process.stderr` or command arguments in CI tools can leak sensitive data (e.g., GitHub tokens or API keys passed to commands) if a command fails and dumps the context.
-**Prevention:** Always explicitly define `shell=False` when using `subprocess.run()`. Scrub secrets from both arguments and `stderr` before including them in error messages within CI scripts.
-## 2026-06-26 - Expanded GitHub token scrubbing in CI review scheduler
-**Vulnerability:** Token leak in logs/outputs (Medium)
-**Learning:** `scrub_sensitive_data` must cover specialized GitHub token prefixes, including `gho_`, `ghu_`, `ghs_`, and `ghr_`, not only classic PATs such as `ghp_` and `github_pat_`.
-**Prevention:** Cover the `gh[pousr]_` prefix family and `github_pat_` when masking GitHub tokens in custom CI text scrubbers.
+**Learning:** `subprocess.run` defaults to `shell=False`, but linters like Bandit require explicit `shell=False` to pass security checks. Furthermore, failing GitHub CLI commands or curl requests can include full command arguments and stderr in raised errors. These strings can contain GitHub PATs, Bearer/token authorizations, API keys, or specialized GitHub token prefixes such as `gho_`, `ghu_`, `ghs_`, and `ghr_`.
+**Prevention:** Always explicitly define `shell=False` when using `subprocess.run()`. Scrub sensitive tokens from both command arguments and `stderr` before including them in exceptions or logs from CI scripts, including the `gh[pousr]_` prefix family and `github_pat_`.
