@@ -907,6 +907,33 @@ def test_actions_call_gh_with_expected_arguments(monkeypatch):
     ]
 
 
+def test_actions_control_uses_workflow_token_when_mutation_token_is_app(monkeypatch):
+    calls = []
+
+    def fake_run_with_env(args, *, stdin=None, env=None):
+        calls.append((args, stdin, None if env is None else env.get("GH_TOKEN")))
+        if args[:5] == ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs"]:
+            return '{"workflow_runs": []}'
+        return ""
+
+    monkeypatch.setattr(sched, "run_with_env", fake_run_with_env)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GH_TOKEN", "opencode-app-token")
+    monkeypatch.setenv("SCHEDULER_ACTIONS_TOKEN", "workflow-actions-token")
+
+    pr = make_pr()
+    sched.rerun_actions_job("owner/repo", "101", dry_run=False, action="rerun-opencode-review")
+    sched.dispatch_strix_evidence("owner/repo", "Strix Security Scan", pr, dry_run=False)
+    sched.dispatch_opencode_review("owner/repo", "OpenCode Review", pr, dry_run=False)
+
+    assert [call[2] for call in calls] == ["workflow-actions-token"] * len(calls)
+    assert calls[0][0] == ["gh", "api", "-X", "POST", "repos/owner/repo/actions/jobs/101/rerun"]
+    assert calls[1][0][:5] == ["gh", "workflow", "run", "Strix Security Scan", "--repo"]
+    assert calls[2][0][:5] == ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs"]
+    assert calls[3][0][:5] == ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs"]
+    assert calls[4][0][:5] == ["gh", "workflow", "run", "OpenCode Review", "--repo"]
+
+
 def test_dispatch_opencode_review_force_cancels_same_pr_old_head_runs(monkeypatch):
     calls = []
     stale_same_pr = {
@@ -980,10 +1007,11 @@ def test_mutations_refuse_local_credentials(monkeypatch):
 
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.delenv("GH_TOKEN", raising=False)
+    monkeypatch.delenv("SCHEDULER_ACTIONS_TOKEN", raising=False)
     for mutation in (sched.update_branch, sched.enable_auto_merge, sched.merge_pr, sched.disable_auto_merge):
         with pytest.raises(RuntimeError, match="refused without GH_TOKEN"):
             mutation("owner/repo", make_pr(), dry_run=False)
-    with pytest.raises(RuntimeError, match="refused without GH_TOKEN"):
+    with pytest.raises(RuntimeError, match="refused without SCHEDULER_ACTIONS_TOKEN or GH_TOKEN"):
         sched.dispatch_opencode_review("owner/repo", "OpenCode Review", rerun_pr, dry_run=False)
     assert calls == []
 

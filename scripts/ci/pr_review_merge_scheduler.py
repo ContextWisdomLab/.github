@@ -415,6 +415,24 @@ def run_github_read(args: Sequence[str], *, stdin: str | None = None) -> str:
     return run_with_env(args, stdin=stdin, env=env)
 
 
+def scheduler_actions_env() -> dict[str, str] | None:
+    """Return an env override for GitHub Actions control calls when configured."""
+    actions_token = os.environ.get("SCHEDULER_ACTIONS_TOKEN")
+    if not actions_token or actions_token == os.environ.get("GH_TOKEN"):
+        return None
+    env = os.environ.copy()
+    env["GH_TOKEN"] = actions_token
+    return env
+
+
+def run_github_actions(args: Sequence[str], *, stdin: str | None = None) -> str:
+    """Run a GitHub Actions control command with the workflow token when configured."""
+    env = scheduler_actions_env()
+    if env is None:
+        return run(args, stdin=stdin)
+    return run_with_env(args, stdin=stdin, env=env)
+
+
 def split_repo(repo: str) -> tuple[str, str]:
     """Split an owner/name repository string into owner and repository name."""
     try:
@@ -1180,12 +1198,26 @@ def require_github_actions_mutation_actor(action: str) -> None:
         )
 
 
+def require_github_actions_control_actor(action: str) -> None:
+    """Refuse Actions rerun or dispatch calls without a workflow control token."""
+    if os.environ.get("GITHUB_ACTIONS") != "true":
+        raise RuntimeError(
+            f"{action} refused outside GitHub Actions; dispatch PR Review Merge Scheduler "
+            "so the workflow actions credential performs the guarded GitHub Actions control call"
+        )
+    if not os.environ.get("SCHEDULER_ACTIONS_TOKEN") and not os.environ.get("GH_TOKEN"):
+        raise RuntimeError(
+            f"{action} refused without SCHEDULER_ACTIONS_TOKEN or GH_TOKEN; configure the scheduler "
+            "job to pass github.token through SCHEDULER_ACTIONS_TOKEN for workflow rerun and dispatch calls"
+        )
+
+
 def rerun_actions_job(repo: str, job_id: str, *, dry_run: bool, action: str) -> None:
     """Ask GitHub Actions to rerun an existing required-workflow job."""
     if dry_run:
         return
-    require_github_actions_mutation_actor(action)
-    run(["gh", "api", "-X", "POST", f"repos/{repo}/actions/jobs/{job_id}/rerun"])
+    require_github_actions_control_actor(action)
+    run_github_actions(["gh", "api", "-X", "POST", f"repos/{repo}/actions/jobs/{job_id}/rerun"])
 
 
 def active_workflow_runs(repo: str) -> list[dict[str, Any]]:
@@ -1193,7 +1225,7 @@ def active_workflow_runs(repo: str) -> list[dict[str, Any]]:
     runs: list[dict[str, Any]] = []
     for status in ("queued", "in_progress"):
         payload = json.loads(
-            run(
+            run_github_actions(
                 [
                     "gh",
                     "api",
@@ -1238,12 +1270,12 @@ def cancel_stale_opencode_runs(repo: str, workflow: str, pr: dict[str, Any], *, 
     """Force-cancel older OpenCode runs for the same PR before retrying current head."""
     if dry_run:
         return []
-    require_github_actions_mutation_actor("force-cancel-stale-opencode-review")
+    require_github_actions_control_actor("force-cancel-stale-opencode-review")
     run_ids = stale_opencode_run_ids(repo, workflow, pr)
     if not run_ids:
         return []
     for run_id in run_ids:
-        run(["gh", "api", "-X", "POST", f"repos/{repo}/actions/runs/{run_id}/force-cancel"])
+        run_github_actions(["gh", "api", "-X", "POST", f"repos/{repo}/actions/runs/{run_id}/force-cancel"])
     return run_ids
 
 
@@ -1256,7 +1288,7 @@ def dispatch_opencode_review(repo: str, workflow: str, pr: dict[str, Any], *, dr
         return
     if dry_run:
         return
-    run(
+    run_github_actions(
         [
             "gh",
             "workflow",
@@ -1286,7 +1318,7 @@ def dispatch_strix_evidence(repo: str, workflow: str, pr: dict[str, Any], *, dry
         return
     if dry_run:
         return
-    run(
+    run_github_actions(
         [
             "gh",
             "workflow",
