@@ -211,7 +211,7 @@ def inspect_pr(
 
     needs_fix, reasons = needs_autofix(pr)
     if not needs_fix:
-        return "skip", ("no current-head change request or active unresolved review thread",)
+        return "skip", ("no current-head autofixable OpenCode change request",)
 
     if comments is None:
         comments = issue_comments(repo, number)

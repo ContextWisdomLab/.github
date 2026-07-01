@@ -390,7 +390,10 @@ def test_fix_inspect_skip_wait_and_error_paths(monkeypatch):
     )
 
     monkeypatch.setattr(fix, "needs_autofix", lambda pr: (False, ()))
-    assert fix.inspect_pr("owner/repo", make_pr(), args) == ("skip", ("no current-head change request or active unresolved review thread",))
+    assert fix.inspect_pr("owner/repo", make_pr(), args) == (
+        "skip",
+        ("no current-head autofixable OpenCode change request",),
+    )
 
     monkeypatch.setattr(fix, "needs_autofix", lambda pr: (True, ("reason",)))
     monkeypatch.setattr(fix, "issue_comments", lambda repo, number: [{"body": f"{fix.FIX_MARKER} head_sha={'a' * 40} epoch={int(time.time())} -->"}])
