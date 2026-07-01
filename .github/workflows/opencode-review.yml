@@ -2636,7 +2636,8 @@ jobs:
           OPENCODE_BACKOFF_MAX_SECONDS: "30"
           OPENCODE_FIRST_ATTEMPT_AGENT: ci-review
           OPENCODE_AGENT: ci-review-fallback
-          OPENCODE_EXHAUSTED_REKICK_ATTEMPTS: "1"
+          OPENCODE_EXHAUSTED_REKICK_INITIAL_SLEEP_SECONDS: "15"
+          OPENCODE_EXHAUSTED_REKICK_MAX_SLEEP_SECONDS: "300"
         run: |
           set -euo pipefail
           echo "::group::OpenCode Review Approval Gate"
@@ -4776,12 +4777,13 @@ jobs:
           }
 
           rekick_model_pool_on_exhaustion() {
-            local max_rekicks="${OPENCODE_EXHAUSTED_REKICK_ATTEMPTS:-0}"
             local rekick_attempt=1
             local rekick_output outcome model rekick_status
+            local sleep_seconds="${OPENCODE_EXHAUSTED_REKICK_INITIAL_SLEEP_SECONDS:-15}"
+            local max_sleep_seconds="${OPENCODE_EXHAUSTED_REKICK_MAX_SLEEP_SECONDS:-300}"
 
-            while [ "${OPENCODE_MODEL_POOL_OUTCOME:-}" = "exhausted" ] && [ "$rekick_attempt" -le "$max_rekicks" ]; do
-              printf 'OpenCode model pool exhausted; re-kicking model pool (%s/%s).\n' "$rekick_attempt" "$max_rekicks"
+            while [ "${OPENCODE_MODEL_POOL_OUTCOME:-}" = "exhausted" ]; do
+              printf 'OpenCode model pool exhausted; re-kicking model pool (attempt %s).\n' "$rekick_attempt"
               rekick_output="$(mktemp)"
               rekick_status=0
               GITHUB_OUTPUT="$rekick_output" OPENCODE_OUTPUT_FILE="$OPENCODE_MODEL_POOL_OUTPUT_FILE" \
@@ -4805,6 +4807,16 @@ jobs:
                 fi
                 printf 'OpenCode model pool re-kick recovered with model: %s\n' "${model:-unknown}"
                 break
+              fi
+              if [ "$sleep_seconds" -gt 0 ]; then
+                printf 'OpenCode model pool still exhausted after re-kick attempt %s; retrying in %ss.\n' "$rekick_attempt" "$sleep_seconds"
+                sleep "$sleep_seconds"
+              fi
+              if [ "$sleep_seconds" -lt "$max_sleep_seconds" ]; then
+                sleep_seconds=$((sleep_seconds * 2))
+                if [ "$sleep_seconds" -gt "$max_sleep_seconds" ]; then
+                  sleep_seconds="$max_sleep_seconds"
+                fi
               fi
               rekick_attempt=$((rekick_attempt + 1))
             done

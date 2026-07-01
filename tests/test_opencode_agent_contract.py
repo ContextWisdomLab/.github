@@ -223,7 +223,8 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert 'OPENCODE_EXPORT_TIMEOUT_SECONDS: "120"' in workflow
     assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "360"' in workflow
     assert 'OPENCODE_BACKOFF_MAX_SECONDS: "30"' in workflow
-    assert 'OPENCODE_EXHAUSTED_REKICK_ATTEMPTS: "1"' in workflow
+    assert 'OPENCODE_EXHAUSTED_REKICK_INITIAL_SLEEP_SECONDS: "15"' in workflow
+    assert 'OPENCODE_EXHAUSTED_REKICK_MAX_SLEEP_SECONDS: "300"' in workflow
     assert "${{ runner.temp }}/opencode-review-model-pool.md" in workflow
     assert re.search(r'check-runs" \\\n\s+-f per_page=100 \\\n\s+--paginate \\\n\s+--slurp \|\n\s+jq -r "\$jq_filter"', workflow)
     assert not re.search(r"--slurp\s*\\\n\s*--jq", workflow)
