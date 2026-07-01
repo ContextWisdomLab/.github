@@ -186,6 +186,9 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "Run OpenCode PR Review model pool" in workflow
     assert "opencode_review_model_pool" in workflow
     assert "run_opencode_review_model_pool.sh" in workflow
+    assert "rekick_model_pool_on_exhaustion" in workflow
+    assert "format('pr-{0}', github.event.pull_request.number)" in workflow
+    assert "format('pr-{0}-{1}', github.event.pull_request.number, github.event.pull_request.head.sha)" not in workflow
     assert "OPENCODE_MODEL_CANDIDATES" in workflow
     model_pool_runner = Path("scripts/ci/run_opencode_review_model_pool.sh").read_text(encoding="utf-8")
     assert "assert_reasoning_effort_for_candidate" in model_pool_runner
@@ -220,6 +223,9 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert 'OPENCODE_EXPORT_TIMEOUT_SECONDS: "120"' in workflow
     assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "360"' in workflow
     assert 'OPENCODE_BACKOFF_MAX_SECONDS: "30"' in workflow
+    assert 'OPENCODE_EXHAUSTED_REKICK_INITIAL_SLEEP_SECONDS: "15"' in workflow
+    assert 'OPENCODE_EXHAUSTED_REKICK_MAX_SLEEP_SECONDS: "300"' in workflow
+    assert 'OPENCODE_EXHAUSTED_REKICK_MAX_TOTAL_SECONDS: "4200"' in workflow
     assert "${{ runner.temp }}/opencode-review-model-pool.md" in workflow
     assert re.search(r'check-runs" \\\n\s+-f per_page=100 \\\n\s+--paginate \\\n\s+--slurp \|\n\s+jq -r "\$jq_filter"', workflow)
     assert not re.search(r"--slurp\s*\\\n\s*--jq", workflow)
