@@ -15,6 +15,12 @@ GATE_SCRIPT="$REPO_ROOT/scripts/ci/strix_quick_gate.sh"
 
 FAILURES=0
 
+if command -v py >/dev/null 2>&1 && ! python3 -c 'import sys; sys.exit(0)' >/dev/null 2>&1; then
+	python3() {
+		py -3 "$@"
+	}
+fi
+
 record_failure() {
 	echo "FAIL: $1" >&2
 	FAILURES=$((FAILURES + 1))
@@ -508,8 +514,9 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$REPO_ROOT/scripts/ci/run_opencode_review_model_pool.sh" "Read and follow the complete review contract" "opencode review uses a compact launcher while keeping the full review contract on disk"
 	assert_file_contains "$REPO_ROOT/scripts/ci/run_opencode_review_model_pool.sh" "tokens_limit_reached" "opencode review detects provider context-window overflow"
 	assert_file_contains "$REPO_ROOT/scripts/ci/run_opencode_review_model_pool.sh" "skipping remaining attempts for this model" "opencode review skips same-model retries after context-window overflow"
-	assert_file_contains "$workflow_file" 'OPENCODE_RUN_TIMEOUT_SECONDS: "600"' "opencode primary review has a bounded per-model timeout before trying fallback models"
-	assert_file_contains "$workflow_file" 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "3600"' "opencode model pool has a one-hour total retry budget"
+	assert_file_contains "$workflow_file" 'timeout-minutes: 320' "opencode model pool has enough wall-clock budget for large codebase reviews"
+	assert_file_contains "$workflow_file" 'OPENCODE_RUN_TIMEOUT_SECONDS: "18000"' "opencode primary review has a five-hour per-model timeout for large codebase reviews"
+	assert_file_contains "$workflow_file" 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "18000"' "opencode model pool has a five-hour total retry budget"
 	assert_file_contains "$workflow_file" "needs.coverage-evidence.result == 'success'" "opencode model pool only runs after coverage evidence passed"
 	assert_file_contains "$workflow_file" "id: opencode_review_model_pool" "opencode DeepSeek V3 fallback still runs after a primary model timeout or step failure when coverage evidence passed"
 	assert_file_contains "$workflow_file" "always()" "opencode fallback chain uses always() so failed model steps cannot skip every fallback"
@@ -618,7 +625,7 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" "no model produced a valid review control block" "opencode model-failure path documents why approval is withheld"
 	assert_file_contains "$workflow_file" 'OPENCODE_MODEL_ATTEMPTS: "1"' "opencode primary and fallback paths avoid multi-attempt stalls on one model"
 	assert_file_contains "$workflow_file" 'OPENCODE_MODEL_ATTEMPTS: "1"' "opencode catalog fallback tries each model once before moving on"
-	assert_file_contains "$workflow_file" 'OPENCODE_RUN_TIMEOUT_SECONDS: "600"' "opencode catalog fallback has a bounded model review timeout before step timeout"
+	assert_file_contains "$workflow_file" 'OPENCODE_RUN_TIMEOUT_SECONDS: "18000"' "opencode catalog fallback has a bounded model review timeout before step timeout"
 	assert_file_contains "$REPO_ROOT/scripts/ci/run_opencode_review_model_pool.sh" "OpenCode %s attempt %s/%s failed" "opencode catalog fallback records per-model retry failures"
 	assert_file_contains "$REPO_ROOT/scripts/ci/run_opencode_review_model_pool.sh" "exponential backoff" "opencode model retry paths use exponential backoff instead of fixed sleeps"
 	assert_file_contains "$workflow_file" "github-models/openai/o3 github-models/openai/o3-mini github-models/openai/o4-mini" "opencode review includes additional OpenAI reasoning model fallbacks"
@@ -691,6 +698,8 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" 'collect_current_head_commit_check_runs()' "opencode approval falls back to current-head commit check-runs when PR rollup lags"
 	assert_file_contains "$workflow_file" 'commits/${HEAD_SHA}/check-runs' "opencode approval queries current-head commit check-runs before changing review state"
 	assert_file_contains "$workflow_file" '--slurp' "opencode approval aggregates paginated commit check-runs before classifying them"
+	assert_file_contains "$workflow_file" 'jq -r "$jq_filter" "$check_runs_json"' "opencode approval classifies slurped commit check-runs with jq after gh api output is written"
+	assert_file_not_contains "$workflow_file" '--jq "$jq_filter"' "opencode approval avoids gh api --slurp with --jq, which older gh versions reject"
 	assert_file_contains "$workflow_file" 'group_by(.name // "")' "opencode approval keeps only the latest same-name commit check-run"
 	assert_file_contains "$workflow_file" 'map(last)' "opencode approval ignores superseded same-name commit check-runs"
 	assert_file_contains "$workflow_file" 'collect_current_head_commit_check_runs "$commit_check_runs_file" pending' "opencode approval blocks approval on pending commit check-runs omitted from PR rollup"

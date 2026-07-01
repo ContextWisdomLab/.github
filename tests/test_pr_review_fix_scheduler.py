@@ -38,7 +38,7 @@ def test_recent_fix_marker_is_head_scoped():
 
 
 def test_needs_autofix_uses_current_head_evidence():
-    """Autofix only starts from current-head review or thread evidence."""
+    """Autofix only starts from current-head OpenCode review evidence."""
     head = "a" * 40
     pr = make_pr(
         headRefOid=head,
@@ -58,7 +58,7 @@ def test_needs_autofix_uses_current_head_evidence():
 
     assert fix.needs_autofix(pr) == (
         True,
-        ("current-head OpenCode requested changes", "1 active unresolved review thread(s)"),
+        ("current-head OpenCode requested changes",),
     )
 
 
@@ -381,7 +381,7 @@ def test_fix_inspect_skip_wait_and_error_paths(monkeypatch):
     )
 
     monkeypatch.setattr(fix, "needs_autofix", lambda pr: (False, ()))
-    assert fix.inspect_pr("owner/repo", make_pr(), args) == ("skip", ("no current-head change request or active unresolved review thread",))
+    assert fix.inspect_pr("owner/repo", make_pr(), args) == ("skip", ("no autofixable current-head OpenCode change request",))
 
     monkeypatch.setattr(fix, "needs_autofix", lambda pr: (True, ("reason",)))
     monkeypatch.setattr(fix, "issue_comments", lambda repo, number: [{"body": f"{fix.FIX_MARKER} head_sha={'a' * 40} epoch={int(time.time())} -->"}])
