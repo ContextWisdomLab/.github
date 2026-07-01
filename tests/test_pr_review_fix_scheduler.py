@@ -56,6 +56,33 @@ def test_needs_autofix_uses_current_head_evidence():
     )
 
 
+def test_change_request_requires_current_head_opencode_review():
+    """Autofixable change requests require an OpenCode review on the current head."""
+    head = "a" * 40
+    stale_head = "b" * 40
+
+    no_review_pr = make_pr(headRefOid=head, mergeStateStatus="CLEAN")
+    assert fix.latest_current_head_opencode_review(no_review_pr) is None
+    assert not fix.change_request_is_autofixable(no_review_pr)
+
+    stale_review_pr = make_pr(
+        headRefOid=head,
+        mergeStateStatus="CLEAN",
+        reviews={
+            "nodes": [
+                {
+                    "state": "CHANGES_REQUESTED",
+                    "author": {"login": "opencode-agent"},
+                    "commit": {"oid": stale_head},
+                    "body": "Actionable source-backed finding with a suggested diff.",
+                }
+            ]
+        },
+    )
+    assert fix.latest_current_head_opencode_review(stale_review_pr) is None
+    assert not fix.change_request_is_autofixable(stale_review_pr)
+
+
 def test_process_queue_dispatches_same_repo_current_head(monkeypatch, capsys):
     """The queue path dispatches one same-repository autofix."""
     pr = make_pr()
