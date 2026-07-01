@@ -208,6 +208,8 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert '"## Check outcome"' not in workflow
     assert "publish REQUEST_CHANGES when coverage-evidence blocker states" in workflow
     assert 'timeout-minutes: 310' in workflow
+    assert 'APPROVAL_CHECK_WAIT_ATTEMPTS: "81"' in workflow
+    assert 'APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "30"' in workflow
     assert 'OPENCODE_MODEL_ATTEMPTS: "3"' in workflow
     assert 'OPENCODE_RUN_TIMEOUT_SECONDS: "900"' in workflow
     assert 'OPENCODE_EXPORT_TIMEOUT_SECONDS: "120"' in workflow
