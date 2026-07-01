@@ -4,6 +4,7 @@ import argparse
 import json
 import subprocess
 from unittest.mock import patch, MagicMock
+import os
 
 import pr_review_merge_scheduler as scheduler
 
@@ -206,14 +207,18 @@ def test_main():
 
         assert scheduler.main(["--repo", "r", "--base-branch", "b", "--project-flow", "f"]) == 0
 
-        with pytest.raises(SystemExit):
-            scheduler.main(["--base-branch", "b", "--project-flow", "f"])
-        with pytest.raises(SystemExit):
-            scheduler.main(["--repo", "r", "--project-flow", "f"])
-        with pytest.raises(SystemExit):
-            scheduler.main(["--repo", "r", "--base-branch", "b"])
+        # Clear environment variables to test required argument validation
+        env_vars = {"GITHUB_REPOSITORY": "", "DEFAULT_BRANCH": "", "PROJECT_FLOW": ""}
+        with patch.dict(os.environ, env_vars, clear=False):
+            with pytest.raises(SystemExit):
+                scheduler.main(["--base-branch", "b", "--project-flow", "f"])
+            with pytest.raises(SystemExit):
+                scheduler.main(["--repo", "r", "--project-flow", "f"])
+            with pytest.raises(SystemExit):
+                scheduler.main(["--repo", "r", "--base-branch", "b"])
 
-        assert scheduler.main(["--self-test"]) == 0
+    # Test self-test outside of patch block so real inspect_pr runs
+    assert scheduler.main(["--self-test"]) == 0
 
 def test_get_current_head_opencode_review_state():
     """Docstring."""
