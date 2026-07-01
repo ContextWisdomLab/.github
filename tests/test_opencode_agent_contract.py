@@ -212,13 +212,13 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "publish REQUEST_CHANGES when coverage-evidence blocker states" in workflow
     assert 'timeout-minutes: 75' in workflow
     assert re.search(r"Run OpenCode PR Review model pool[\s\S]{0,240}timeout-minutes: 20", workflow)
-    assert 'APPROVAL_CHECK_WAIT_ATTEMPTS: "81"' in workflow
-    assert 'APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "30"' in workflow
+    assert 'APPROVAL_CHECK_WAIT_ATTEMPTS: "49"' in workflow
+    assert 'APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "15"' in workflow
     assert 'OPENCODE_MODEL_CANDIDATES: "github-models/openai/gpt-5-nano"' in workflow
-    assert 'OPENCODE_MODEL_ATTEMPTS: "1"' in workflow
+    assert 'OPENCODE_MODEL_ATTEMPTS: "12"' in workflow
     assert 'OPENCODE_RUN_TIMEOUT_SECONDS: "240"' in workflow
     assert 'OPENCODE_EXPORT_TIMEOUT_SECONDS: "120"' in workflow
-    assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "360"' in workflow
+    assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "1200"' in workflow
     assert 'OPENCODE_BACKOFF_MAX_SECONDS: "30"' in workflow
     assert "${{ runner.temp }}/opencode-review-model-pool.md" in workflow
     assert re.search(r'check-runs" \\\n\s+-f per_page=100 \\\n\s+--paginate \\\n\s+--slurp \|\n\s+jq -r "\$jq_filter"', workflow)
