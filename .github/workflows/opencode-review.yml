@@ -4237,13 +4237,12 @@ jobs:
               -F number="$PR_NUMBER" \
               -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id}}}' \
               --jq '.data.repository.pullRequest.id // empty')"; then
-              rm -f "$rollup_file" "$strix_runs_file" "$commit_check_runs_file" "$filtered_rollup_file"
-              return 1
+              echo "GitHub Checks statusCheckRollup PR id lookup failed; falling back to current-head REST check-runs." >&2
+              pr_node_id=""
             fi
             if [ -z "$pr_node_id" ]; then
-              rm -f "$rollup_file" "$strix_runs_file" "$commit_check_runs_file" "$filtered_rollup_file"
-              return 1
-            fi
+              : >"$rollup_file"
+            else
             # shellcheck disable=SC2016
             if ! gh api graphql \
               -f owner="$owner" \
@@ -4338,8 +4337,9 @@ jobs:
                   )
                 | .[]
               ' >"$rollup_file"; then
-              rm -f "$rollup_file" "$strix_runs_file" "$commit_check_runs_file" "$filtered_rollup_file"
-              return 1
+              echo "GitHub Checks statusCheckRollup lookup failed; falling back to current-head REST check-runs." >&2
+              : >"$rollup_file"
+            fi
             fi
             filter_superseded_strix_failures "$rollup_file" "$filtered_rollup_file"
             mv "$filtered_rollup_file" "$rollup_file"
@@ -4431,8 +4431,8 @@ jobs:
                   )
                 | .[]
               ' >"$rollup_file"; then
-              rm -f "$rollup_file" "$strix_runs_file" "$commit_check_runs_file"
-              return 1
+              echo "GitHub Checks statusCheckRollup lookup failed; falling back to current-head REST check-runs." >&2
+              : >"$rollup_file"
             fi
 
             if ! collect_current_head_strix_workflow_runs "$strix_runs_file" pending; then
