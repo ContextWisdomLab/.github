@@ -364,7 +364,7 @@ jobs:
               git -C "$OPENCODE_SOURCE_WORKDIR" diff --name-status --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA" -- "$docs_dir" |
                 sed 's/^/- /'
               printf '\nCurrent-head tree under this docs directory, capped at 160 paths:\n\n'
-              tree_count="$(git ls-tree -r --name-only HEAD -- "$docs_dir" | wc -l | tr -d '[:space:]')"
+              tree_count="$(git -C "$OPENCODE_SOURCE_WORKDIR" ls-tree -r --name-only "$PR_HEAD_SHA" -- "$docs_dir" | wc -l | tr -d '[:space:]')"
               shown_count=0
               while IFS= read -r tree_path; do
                 printf -- '- %s%s%s\n' "\`" "$tree_path" "\`"
@@ -372,7 +372,7 @@ jobs:
                 if [ "$shown_count" -ge 160 ]; then
                   break
                 fi
-              done < <(git ls-tree -r --name-only HEAD -- "$docs_dir")
+              done < <(git -C "$OPENCODE_SOURCE_WORKDIR" ls-tree -r --name-only "$PR_HEAD_SHA" -- "$docs_dir")
               if [ "$tree_count" -gt "$shown_count" ]; then
                 printf -- '- [tree truncated after %s of %s paths]\n' "$shown_count" "$tree_count"
               fi
@@ -2648,6 +2648,7 @@ jobs:
                   path == "scripts/ci/strix_model_utils.sh" ||
                   path == "scripts/ci/strix_quick_gate.sh" ||
                   path == "scripts/ci/test_strix_quick_gate.sh" ||
+                  path == "scripts/ci/test_opencode_review_normalize_output.py" ||
                   path == "scripts/ci/validate_opencode_failed_check_review.sh"
               }
               {
@@ -2695,6 +2696,9 @@ jobs:
               if [ -f scripts/ci/opencode_review_normalize_output.py ]; then
                 python3 -m py_compile scripts/ci/opencode_review_normalize_output.py
               fi
+              if [ -f scripts/ci/test_opencode_review_normalize_output.py ]; then
+                python3 scripts/ci/test_opencode_review_normalize_output.py
+              fi
             ) >"$validation_log" 2>&1
             validation_status=$?
             set -e
@@ -2718,7 +2722,7 @@ jobs:
               printf '## Summary\n\n'
               printf 'Deterministic review-tooling bootstrap fallback approval was used because every changed file is limited to OpenCode/Strix review infrastructure and the trusted gate ran bootstrap static validation on the PR-head worktree:\n\n'
               printf '%s\n\n' "$changed_files_markdown"
-              printf 'Validation performed: optional actionlint when installed, bash syntax checks for review shell scripts, and Python bytecode compilation for the OpenCode normalizer when present.\n\n'
+              printf 'Validation performed: optional actionlint when installed, bash syntax checks for review shell scripts, Python bytecode compilation for the OpenCode normalizer when present, and the OpenCode normalizer regression test when present.\n\n'
               printf 'Validation output:\n\n```text\n'
               sed -n '1,80p' "$validation_log"
               printf '\n```\n\n'

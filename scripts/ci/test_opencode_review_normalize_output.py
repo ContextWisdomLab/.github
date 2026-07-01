@@ -2,6 +2,7 @@
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 def test_json_escaping():
@@ -19,18 +20,17 @@ def test_json_escaping():
     }
     input_text = json.dumps(dummy_control)
 
-    input_file = Path("test_input.json")
-    input_file.write_text(input_text, encoding="utf-8")
-
-    output_file = Path("test_input.json")
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as tmp:
+        tmp.write(input_text)
+        test_file = Path(tmp.name)
 
     try:
         subprocess.run(
-            [sys.executable, str(normalizer), "abc123def456", "12345", "1", str(output_file)],
+            [sys.executable, str(normalizer), "abc123def456", "12345", "1", str(test_file)],
             check=True
         )
 
-        output_text = output_file.read_text(encoding="utf-8")
+        output_text = test_file.read_text(encoding="utf-8")
 
         # Check if the output contains the properly escaped characters
         assert r"\u003c" in output_text, "Failed to escape <"
@@ -45,8 +45,8 @@ def test_json_escaping():
 
         print("opencode_review_normalize_output escaping tests passed")
     finally:
-        if input_file.exists():
-            input_file.unlink()
+        if test_file.exists():
+            test_file.unlink()
 
 if __name__ == "__main__":
     test_json_escaping()
