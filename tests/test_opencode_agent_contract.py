@@ -171,6 +171,10 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "changed_file_is_low_risk_review_fallback" in workflow
     assert "production source 또는 package manifest 변경이 없습니다" in workflow
     assert "Source, workflow, config, package, migration, generated artifact 변경은 모델 기반 review 없이 승인하지 않습니다" in workflow
+    assert "approve_previously_reviewed_merge_update_after_model_exhaustion" in workflow
+    assert "2-parent merge update" in workflow
+    assert "Prior review: OpenCode approval exists on first parent" in workflow
+    assert "이 fallback은 이미 승인된 PR head를 최신 base에 병합한 merge-update commit에만 적용됩니다" in workflow
     assert 'timeout-minutes: 45' in workflow
     assert 'OPENCODE_RUN_TIMEOUT_SECONDS: "180"' in workflow
     assert 'OPENCODE_EXPORT_TIMEOUT_SECONDS: "60"' in workflow

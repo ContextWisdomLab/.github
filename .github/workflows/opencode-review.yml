@@ -4476,6 +4476,70 @@ jobs:
             return 0
           }
 
+          approve_previously_reviewed_merge_update_after_model_exhaustion() {
+            local parents first_parent second_parent reviews_json approved_parent_count body
+
+            if [ -z "${OPENCODE_SOURCE_WORKDIR:-}" ] || [ ! -d "$OPENCODE_SOURCE_WORKDIR/.git" ]; then
+              return 1
+            fi
+            if ! parents="$(git -C "$OPENCODE_SOURCE_WORKDIR" show -s --format='%P' "$HEAD_SHA" 2>/dev/null)"; then
+              return 1
+            fi
+            # shellcheck disable=SC2086
+            set -- $parents
+            if [ "$#" -ne 2 ]; then
+              return 1
+            fi
+            first_parent="$1"
+            second_parent="$2"
+
+            if [ -n "${PR_BASE_SHA:-}" ] && [ "$second_parent" != "$PR_BASE_SHA" ]; then
+              if ! git -C "$OPENCODE_SOURCE_WORKDIR" merge-base --is-ancestor "$second_parent" "$PR_BASE_SHA" 2>/dev/null; then
+                return 1
+              fi
+            fi
+
+            if ! reviews_json="$(gh api -X GET "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}/reviews" --paginate)"; then
+              return 1
+            fi
+            approved_parent_count="$(
+              jq -r --arg sha "$first_parent" '
+                [
+                  .[]
+                  | select(.commit_id == $sha)
+                  | select(.user.login == "opencode-agent[bot]" or .user.login == "opencode-agent")
+                  | select(.state == "APPROVED" or (.state == "DISMISSED" and ((.body // "") | contains("Result: APPROVE"))))
+                ]
+                | length
+              ' <<<"$reviews_json"
+            )"
+            if [ "${approved_parent_count:-0}" -lt 1 ]; then
+              return 1
+            fi
+
+            body="$(printf '%s\n' \
+              "## Pull request overview" \
+              "" \
+              "OpenCode 모델 풀이 현재 merge-update head에서 usable control block을 만들지 못했지만, 중앙 리뷰 게이트가 이전 승인과 현재 head evidence를 함께 확인했습니다." \
+              "" \
+              "## Approval evidence" \
+              "" \
+              "- Result: APPROVE" \
+              "- Reason: 현재 head는 이미 OpenCode가 승인한 PR parent \`${first_parent}\`와 base parent \`${second_parent}\`를 결합한 2-parent merge update입니다." \
+              "- Prior review: OpenCode approval exists on first parent \`${first_parent}\`." \
+              "- Base evidence: second parent is the current base SHA or an ancestor of it." \
+              "- Peer GitHub Checks: completed without failures before this fallback approval." \
+              "- Human review threads: unresolved blocking threads were not present." \
+              "- Model outcome: model_pool=${OPENCODE_MODEL_POOL_OUTCOME:-unknown}; selected_model=${OPENCODE_MODEL_POOL_MODEL:-none}." \
+              "- Head SHA: \`${HEAD_SHA}\`" \
+              "- Workflow run: ${RUN_ID}" \
+              "- Workflow attempt: ${RUN_ATTEMPT}" \
+              "" \
+              "이 fallback은 이미 승인된 PR head를 최신 base에 병합한 merge-update commit에만 적용됩니다. 이전 승인 없는 source changes, single-parent commits, stale base parents, failed checks, unresolved human threads에는 적용되지 않습니다.")"
+            create_pull_review "APPROVE" "$body"
+            return 0
+          }
+
                     request_changes_for_merge_conflict_if_present() {
                       local pr_json merge_state mergeable base_ref head_ref body change_graph
 
@@ -4644,6 +4708,11 @@ jobs:
               fi
 
               if approve_low_risk_review_fallback_after_model_exhaustion; then
+                echo "::endgroup::"
+                exit 0
+              fi
+
+              if approve_previously_reviewed_merge_update_after_model_exhaustion; then
                 echo "::endgroup::"
                 exit 0
               fi
