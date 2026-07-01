@@ -160,6 +160,7 @@ def run_command(command: Sequence[str], cwd: Path, env: dict[str, str], timeout:
         stderr=subprocess.PIPE,
         timeout=timeout,
         check=False,
+        shell=False,
     )
 
 

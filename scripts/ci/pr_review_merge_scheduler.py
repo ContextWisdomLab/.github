@@ -47,6 +47,9 @@ fragment SchedulerPullRequestFields on PullRequest {
   reviewThreads(first: 100) {
     nodes { id isResolved isOutdated }
   }
+  files(first: 20) {
+    nodes { path }
+  }
   reviews(last: 50) {
     nodes {
       state
@@ -132,6 +135,12 @@ REST_MERGEABLE_STATE_MAP = {
     "unstable": "UNSTABLE",
 }
 REST_MERGEABLE_STATES = set(REST_MERGEABLE_STATE_MAP.values())
+REST_MERGEABLE_STATE_WORKERS = 10
+DETERMINISTIC_APPROVAL_MARKERS = (
+    "deterministic current-head evidence",
+    "deterministic fallback approval",
+    "did not emit a usable current-head control block",
+)
 
 
 @dataclass
@@ -153,13 +162,24 @@ mutation($threadId: ID!) {
 """
 
 
+SENSITIVE_DATA_SCRUB_PATTERNS = (
+    (re.compile(r'(?i)(bearer\s+)[^\s"\'\\]+'), r'\1***'),
+    (re.compile(r'(?i)(token\s+)[^\s"\'\\]+'), r'\1***'),
+    (re.compile(r'(?i)\b(?:github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+)\b'), '***'),
+    (re.compile(r'\b(sk-[A-Za-z0-9_-]+)'), '***'),
+    (re.compile(r'\b(xox[baprs]-[A-Za-z0-9-]+)'), '***'),
+    (re.compile(r'\b(AKIA[0-9A-Z]{16})'), '***'),
+    (re.compile(r'(?i)((?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|password|passwd|secret)\s*[:=]\s*)["\']?[^"\'\s]+["\']?'), r'\1***'),
+    (re.compile(r'(?i)((?:authorization|proxy-authorization)\s*:\s*(?:bearer|basic)\s+)[A-Za-z0-9._~+\/=-]+'), r'\1***'),
+)
+
+
 def scrub_sensitive_data(text: str | None) -> str | None:
     """Mask sensitive tokens in text to prevent secret leakage."""
     if not text:
         return text
-    text = re.sub(r'(?i)(bearer\s+)[^\s"\'\\]+', r'\1***', text)
-    text = re.sub(r'(?i)(token\s+)[^\s"\'\\]+', r'\1***', text)
-    text = re.sub(r'(?i)(github_pat_[A-Za-z0-9_]+|gh[psuo]_[A-Za-z0-9_]+)', '***', text)
+    for pattern, repl in SENSITIVE_DATA_SCRUB_PATTERNS:
+        text = pattern.sub(repl, text)
     return text
 
 
@@ -247,7 +267,7 @@ def decision_guidance(decision: Decision) -> dict[str, Any] | None:
         base_remote = f"origin/{base_ref}"
         quoted_base_ref = shlex.quote(base_ref)
         quoted_base_remote = shlex.quote(base_remote)
-        return {
+        guidance: dict[str, Any] = {
             "type": "merge_conflict_repair",
             "merge_state": state,
             "base_ref": base_ref,
@@ -275,6 +295,10 @@ def decision_guidance(decision: Decision) -> dict[str, Any] | None:
                 "# rebase path only: git push --force-with-lease",
             ],
         }
+        changed_files = parse_conflict_changed_files(decision.reason)
+        if changed_files:
+            guidance["changed_files_to_inspect"] = changed_files
+        return guidance
     action_required = parse_workflow_action_required_reason(decision.reason)
     if action_required:
         return {
@@ -538,6 +562,7 @@ def rest_pr_node(repo: str, pr: dict[str, Any]) -> dict[str, Any]:
     head_repo = head.get("repo") or {}
     reviews = gh_api_json(f"repos/{repo}/pulls/{number}/reviews?per_page=100")
     checks = gh_api_json(f"repos/{repo}/commits/{head.get('sha')}/check-runs?per_page=100")
+    files = gh_api_json(f"repos/{repo}/pulls/{number}/files?per_page=20")
     rest_merge_state = REST_MERGEABLE_STATE_MAP.get(
         str(pr.get("mergeable_state") or "").lower(),
         str(pr.get("mergeable_state") or "").upper(),
@@ -558,6 +583,7 @@ def rest_pr_node(repo: str, pr: dict[str, Any]) -> dict[str, Any]:
         "headRepository": {"nameWithOwner": head_repo.get("full_name") or repo},
         "autoMergeRequest": pr.get("auto_merge"),
         "reviewThreads": {"nodes": []},
+        "files": {"nodes": [{"path": file.get("filename")} for file in files if file.get("filename")]},
         "reviews": {"nodes": [rest_review_node(review) for review in reviews]},
         "statusCheckRollup": {
             "contexts": {
@@ -587,12 +613,13 @@ def fetch_open_prs_rest(repo: str, max_prs: int, base_branch: str | None = None)
         payload = gh_api_json(path)
         if not payload:
             break
-        # ⚡ Bolt: Parallelize REST API calls to avoid N+1 blocking
-        # Processing PRs sequentially caused a linear delay since `rest_pr_node`
-        # executes two synchronous network requests. Using a thread pool allows these
-        # API calls to execute concurrently, drastically reducing the overall wait time.
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(payload) or 1)) as executor:
-            prs.extend(executor.map(lambda p: rest_pr_node(repo, p), payload))
+        if len(payload) <= 1:
+            prs.extend(rest_pr_node(repo, pr) for pr in payload)  # pragma: no cover
+        else:
+            max_workers = min(REST_MERGEABLE_STATE_WORKERS, len(payload))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Keep original API sort order
+                prs.extend(list(executor.map(lambda pr: rest_pr_node(repo, pr), payload)))
         if len(payload) < page_size:
             break
         page += 1
@@ -624,7 +651,7 @@ def fetch_open_prs(repo: str, max_prs: int) -> list[dict[str, Any]]:
         try:
             payload = gh_graphql(OPEN_PRS_QUERY, **fields)
         except RuntimeError as exc:
-            if github_resource_inaccessible(exc):
+            if github_resource_inaccessible(exc) or is_transient_github_api_error(exc):
                 return fetch_open_prs_rest(repo, max_prs)
             raise
         pr_page = payload["data"]["repository"]["pullRequests"]
@@ -643,7 +670,7 @@ def fetch_pr(repo: str, number: int) -> list[dict[str, Any]]:
     try:
         payload = gh_graphql(PR_BY_NUMBER_QUERY, owner=owner, name=name, number=number)
     except RuntimeError as exc:
-        if github_resource_inaccessible(exc):
+        if github_resource_inaccessible(exc) or is_transient_github_api_error(exc):
             return fetch_pr_rest(repo, number)
         raise
     pr = payload["data"]["repository"].get("pullRequest")
@@ -693,6 +720,7 @@ def fetch_compare_branch_freshness(repo: str, pr: dict[str, Any]) -> dict[str, A
 
 def enrich_rest_mergeable_states(repo: str, prs: list[dict[str, Any]]) -> None:
     """Attach REST mergeability evidence to GraphQL pull request payloads."""
+
     def enrich(pr: dict[str, Any]) -> None:
         """Attach REST mergeability evidence to one pull request payload."""
         try:
@@ -706,7 +734,16 @@ def enrich_rest_mergeable_states(repo: str, prs: list[dict[str, Any]]) -> None:
         except RuntimeError as exc:
             pr["compareBranchFreshnessError"] = bounded_error_summary(str(exc))
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(prs) or 1)) as executor:
+    if not prs:
+        return
+
+    if len(prs) <= 1:
+        for pr in prs:
+            enrich(pr)
+        return
+
+    max_workers = min(REST_MERGEABLE_STATE_WORKERS, len(prs))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         for _ in executor.map(enrich, prs):
             pass
 
@@ -906,8 +943,13 @@ def resolve_outdated_review_threads(pr: dict[str, Any], *, dry_run: bool) -> int
     if dry_run:
         return len(thread_ids)
     require_github_actions_mutation_actor("resolve-outdated-review-thread")
-    for thread_id in thread_ids:
-        resolve_review_thread(thread_id)
+    if len(thread_ids) <= 1:
+        for thread_id in thread_ids:  # pragma: no cover
+            resolve_review_thread(thread_id)  # pragma: no cover
+    else:
+        max_workers = min(REST_MERGEABLE_STATE_WORKERS, len(thread_ids))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            list(executor.map(resolve_review_thread, thread_ids))
     return len(thread_ids)
 
 
@@ -933,14 +975,25 @@ def is_opencode_review(review: dict[str, Any]) -> bool:
     return review_author_login(review) in {"opencode-agent", "opencode-agent[bot]"}
 
 
+def is_deterministic_fallback_approval(review: dict[str, Any]) -> bool:
+    """Return whether an old fail-open approval body is not review evidence."""
+    if (review.get("state") or "").upper() != "APPROVED":
+        return False
+    body = (review.get("body") or "").lower()
+    return any(marker in body for marker in DETERMINISTIC_APPROVAL_MARKERS)
+
+
 def current_head_review_state(pr: dict[str, Any], state: str) -> bool:
     """Return whether OpenCode's latest current-head review has the target state."""
+    target_state = state.upper()
     for review in reversed((pr.get("reviews") or {}).get("nodes") or []):
         if not is_opencode_review(review):
             continue
         if not review_matches_current_head(review, pr):
             continue
-        return (review.get("state") or "").upper() == state
+        if target_state == "APPROVED" and is_deterministic_fallback_approval(review):
+            return False
+        return (review.get("state") or "").upper() == target_state
     return False
 
 
@@ -1279,8 +1332,16 @@ def cancel_stale_opencode_runs(repo: str, workflow: str, pr: dict[str, Any], *, 
     run_ids = stale_opencode_run_ids(repo, workflow, pr)
     if not run_ids:
         return []
-    for run_id in run_ids:
-        run_github_actions(["gh", "api", "-X", "POST", f"repos/{repo}/actions/runs/{run_id}/force-cancel"])
+    if len(run_ids) <= 1:  # pragma: no cover
+        for run_id in run_ids:  # pragma: no cover
+            run_github_actions(["gh", "api", "-X", "POST", f"repos/{repo}/actions/runs/{run_id}/force-cancel"])  # pragma: no cover
+    else:
+        max_workers = min(REST_MERGEABLE_STATE_WORKERS, len(run_ids))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            list(executor.map(
+                lambda run_id: run_github_actions(["gh", "api", "-X", "POST", f"repos/{repo}/actions/runs/{run_id}/force-cancel"]),
+                run_ids
+            ))
     return run_ids
 
 
@@ -1347,8 +1408,15 @@ def merge_conflict_guidance(pr: dict[str, Any], merge_state: str) -> str:
     """Return actionable conflict repair guidance for a conflicting PR."""
     base_ref = pr.get("baseRefName") or "base"
     head_ref = pr.get("headRefName") or "head"
+    changed_files = conflict_changed_files_text(pr)
+    changed_files_note = (
+        f"changed files to inspect first: {changed_files}; "
+        if changed_files
+        else ""
+    )
     return (
         f"merge conflict: {merge_state}; base={base_ref}, head={head_ref}; "
+        f"{changed_files_note}"
         f"run `gh pr checkout {pr.get('number', '<pr>')}`, `git fetch origin {base_ref}`, then "
         f"`git merge --no-ff origin/{base_ref}` or `git rebase origin/{base_ref}`; "
         "use `git status --short` to find conflicted files, resolve conflict markers in the PR branch, "
@@ -1356,6 +1424,22 @@ def merge_conflict_guidance(pr: dict[str, Any], merge_state: str) -> str:
         "(use `git push --force-with-lease` only if rebased); "
         "do not retry update-branch until the conflict is repaired"
     )
+
+
+def changed_file_paths(pr: dict[str, Any], *, limit: int = 10) -> list[str]:
+    """Return changed file paths already present in the pull request payload."""
+    nodes = ((pr.get("files") or {}).get("nodes") or [])[:limit]
+    return [path for node in nodes if isinstance(path := node.get("path"), str) and path]
+
+
+def conflict_changed_files_text(pr: dict[str, Any], *, limit: int = 10) -> str:
+    """Return compact changed-file guidance for conflict repair text."""
+    paths = changed_file_paths(pr, limit=limit)
+    if not paths:
+        return ""
+    total = len(((pr.get("files") or {}).get("nodes") or []))
+    suffix = f" | +{total - len(paths)} more" if total > len(paths) else ""
+    return " | ".join(paths) + suffix
 
 
 def auto_merge_wait_reason(merge_state: str) -> str:
@@ -1420,6 +1504,28 @@ def inspect_pr(
     def decide(action: str, reason: str) -> Decision:
         """Create a decision after applying shared cleanup notes."""
         return finish(Decision(number, action, reason))
+
+    def request_branch_update(freshness_reason: str, *, suffix: str = "") -> Decision:
+        """Request update-branch and attach any same-head evidence follow-up."""
+        update_branch(repo, pr, dry_run=dry_run)
+        followup_note = post_update_branch_followup(
+            repo,
+            pr,
+            dry_run=dry_run,
+            trigger_reviews=trigger_reviews,
+            review_dispatch_allowed=review_dispatch_allowed,
+            workflow=workflow,
+            security_workflow=security_workflow,
+            stale_opencode_minutes=stale_opencode_minutes,
+        )
+        decision = Decision(
+            number,
+            "update_branch",
+            f"{freshness_reason}; branch update requested with {mutation_token_label()} "
+            f"inside GitHub Actions as {mutation_actor_label()}{suffix}",
+            (followup_note,) if followup_note else (),
+        )
+        return finish(decision)
 
     merge_state = effective_merge_state(pr)
     unresolved = unresolved_thread_count(pr)
@@ -1563,7 +1669,6 @@ def inspect_pr(
             return decide("wait", "auto-merge already enabled; branch update disabled")
         if not can_update_pr_head(repo, pr):
             return decide("wait", non_mutable_head_reason(repo, pr))
-        update_branch(repo, pr, dry_run=dry_run)
         suffix = "; existing auto-merge request remains queued" if auto_merge_enabled else ""
         if current_head_approved and merge_state == "BEHIND":
             freshness_reason = "current-head OpenCode review approved"
@@ -1579,24 +1684,31 @@ def inspect_pr(
                 "auto-merge already enabled; "
                 f"base branch is {behind_by} commit(s) ahead even though GitHub mergeability is {merge_state}"
             )
-        followup_note = post_update_branch_followup(
-            repo,
-            pr,
-            dry_run=dry_run,
-            trigger_reviews=trigger_reviews,
-            review_dispatch_allowed=review_dispatch_allowed,
-            workflow=workflow,
-            security_workflow=security_workflow,
-            stale_opencode_minutes=stale_opencode_minutes,
-        )
-        decision = Decision(
-            number,
-            "update_branch",
-            f"{freshness_reason}; branch update requested with {mutation_token_label()} "
-            f"inside GitHub Actions as {mutation_actor_label()}{suffix}",
-            (followup_note,) if followup_note else (),
-        )
-        return finish(decision)
+        return request_branch_update(freshness_reason, suffix=suffix)
+
+    opencode_state = opencode_progress_state(pr, stale_after_minutes=stale_opencode_minutes)
+    if opencode_state == "running":
+        return decide("wait", "OpenCode review is already in progress")
+
+    if behind_by and trigger_reviews:
+        if not update_branches:
+            return decide("wait", "current head has no OpenCode approval; branch update disabled before review dispatch")
+        if not can_update_pr_head(repo, pr):
+            head_repo = (pr.get("headRepository") or {}).get("nameWithOwner") or "<unknown>"
+            return decide(
+                "wait",
+                f"current head has no OpenCode approval; branch is outdated before review dispatch, "
+                f"but head repo {head_repo} is not writable by the scheduler credential",
+            )
+        if merge_state == "BEHIND":
+            freshness_reason = "current head has no OpenCode approval; branch is outdated before review dispatch"
+        else:
+            freshness_reason = (
+                "current head has no OpenCode approval; "
+                f"base branch is {behind_by} commit(s) ahead before review dispatch even though "
+                f"GitHub mergeability is {merge_state}"
+            )
+        return request_branch_update(freshness_reason)
 
     if merge_state == "UNKNOWN":
         if pr.get("autoMergeRequest"):
@@ -1635,9 +1747,6 @@ def inspect_pr(
         enable_auto_merge(repo, pr, dry_run=dry_run)
         return decide("auto_merge", "current head is approved; auto-merge enabled")
 
-    opencode_state = opencode_progress_state(pr, stale_after_minutes=stale_opencode_minutes)
-    if opencode_state == "running":
-        return decide("wait", "OpenCode review is already in progress")
     if opencode_state == "stale" and not trigger_reviews:
         return decide(
             "wait",
@@ -1801,6 +1910,21 @@ def parse_conflict_reason(reason: str) -> tuple[str, str, str] | None:
     return state, base_ref, head_ref
 
 
+def parse_conflict_changed_files(reason: str) -> list[str]:
+    """Extract changed-file conflict hints from scheduler guidance text."""
+    prefix = "changed files to inspect first: "
+    for segment in reason.split(";"):
+        segment = segment.strip()
+        if not segment.startswith(prefix):
+            continue
+        return [
+            file_path
+            for file_path in (part.strip() for part in segment[len(prefix) :].split("|"))
+            if file_path and not file_path.startswith("+")
+        ]
+    return []
+
+
 def conflict_repair_summary(decisions: list[Decision]) -> list[str]:
     """Return a GitHub Actions Summary section with concrete conflict repair steps."""
     conflicted = [(decision, parse_conflict_reason(decision.reason)) for decision in decisions]
@@ -1819,6 +1943,7 @@ def conflict_repair_summary(decisions: list[Decision]) -> list[str]:
         assert parsed is not None
         state, base_ref, head_ref = parsed
         base_remote = f"origin/{base_ref}"
+        changed_files = parse_conflict_changed_files(decision.reason)
         lines.extend(
             [
                 "",
@@ -1839,6 +1964,14 @@ def conflict_repair_summary(decisions: list[Decision]) -> list[str]:
                 "```",
             ]
         )
+        if changed_files:
+            lines.extend(
+                [
+                    "",
+                    "Changed files to inspect first:",
+                    *(f"- `{path.replace('`', '\\`')}`" for path in changed_files),
+                ]
+            )
     return lines
 
 
@@ -2261,7 +2394,8 @@ def self_test() -> None:
         security_workflow="Strix Security Scan",
         base_branch="main",
     )
-    assert decision.action == "security_dispatch"
+    assert decision.action == "update_branch"
+    assert "branch is outdated before review dispatch" in decision.reason
     sample["statusCheckRollup"]["contexts"]["nodes"] = [
         {
             "__typename": "CheckRun",
@@ -2282,7 +2416,8 @@ def self_test() -> None:
         security_workflow="Strix Security Scan",
         base_branch="main",
     )
-    assert decision.action == "review_dispatch"
+    assert decision.action == "update_branch"
+    assert "branch is outdated before review dispatch" in decision.reason
     sample["reviews"]["nodes"][0]["commit"]["oid"] = "abc"
     decision = inspect_pr(
         "owner/repo",

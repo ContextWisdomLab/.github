@@ -19,6 +19,7 @@ def make_pr(**overrides):
         "headRefName": "feature",
         "headRefOid": "a" * 40,
         "headRepository": {"nameWithOwner": "owner/repo"},
+        "mergeStateStatus": "CLEAN",
         "reviews": {"nodes": []},
         "reviewThreads": {"nodes": []},
     }
@@ -44,7 +45,12 @@ def test_needs_autofix_uses_current_head_evidence():
         reviews={
             "nodes": [
                 {"state": "APPROVED", "author": {"login": "opencode-agent"}, "commit": {"oid": head}},
-                {"state": "CHANGES_REQUESTED", "author": {"login": "opencode-agent"}, "commit": {"oid": head}},
+                {
+                    "state": "CHANGES_REQUESTED",
+                    "author": {"login": "opencode-agent"},
+                    "commit": {"oid": head},
+                    "body": "Actionable source-backed finding with suggested diff.",
+                },
             ]
         },
         reviewThreads={"nodes": [{"id": "thread", "isResolved": False, "isOutdated": False}]},
@@ -56,6 +62,65 @@ def test_needs_autofix_uses_current_head_evidence():
     )
 
 
+@pytest.mark.parametrize(
+    ("merge_state", "body"),
+    [
+        ("DIRTY", "Actionable source-backed finding with suggested diff."),
+        ("CONFLICTING", "Actionable source-backed finding with suggested diff."),
+        ("CLEAN", "OpenCode could not establish approval sufficiency because the model pool exhausted."),
+        ("CLEAN", "OpenCode found unresolved reviewer or review-agent thread evidence before approval."),
+        ("CLEAN", "Failed-check evidence reports coverage-evidence failure."),
+        ("CLEAN", "Failed check evidence shows coverage-evidence failed on the current head."),
+    ],
+)
+def test_needs_autofix_suppresses_process_only_reviews(merge_state, body):
+    """Process-only or non-clean OpenCode requests do not dispatch autofix."""
+    head = "a" * 40
+    pr = make_pr(
+        headRefOid=head,
+        mergeStateStatus=merge_state,
+        reviews={
+            "nodes": [
+                {
+                    "state": "CHANGES_REQUESTED",
+                    "author": {"login": "opencode-agent"},
+                    "commit": {"oid": head},
+                    "body": body,
+                },
+            ]
+        },
+    )
+
+    assert fix.needs_autofix(pr) == (False, ())
+
+
+def test_change_request_requires_current_head_opencode_review():
+    """Autofixable change requests require an OpenCode review on the current head."""
+    head = "a" * 40
+    stale_head = "b" * 40
+
+    no_review_pr = make_pr(headRefOid=head, mergeStateStatus="CLEAN")
+    assert fix.latest_current_head_opencode_review(no_review_pr) is None
+    assert not fix.change_request_is_autofixable(no_review_pr)
+
+    stale_review_pr = make_pr(
+        headRefOid=head,
+        mergeStateStatus="CLEAN",
+        reviews={
+            "nodes": [
+                {
+                    "state": "CHANGES_REQUESTED",
+                    "author": {"login": "opencode-agent"},
+                    "commit": {"oid": stale_head},
+                    "body": "Actionable source-backed finding with a suggested diff.",
+                }
+            ]
+        },
+    )
+    assert fix.latest_current_head_opencode_review(stale_review_pr) is None
+    assert not fix.change_request_is_autofixable(stale_review_pr)
+
+
 def test_process_queue_dispatches_same_repo_current_head(monkeypatch, capsys):
     """The queue path dispatches one same-repository autofix."""
     pr = make_pr()
@@ -64,13 +129,24 @@ def test_process_queue_dispatches_same_repo_current_head(monkeypatch, capsys):
     monkeypatch.setattr(fix, "fetch_open_prs", lambda repo, max_prs: [pr])
     monkeypatch.setattr(fix, "needs_autofix", lambda pr: (True, ("current-head OpenCode requested changes",)))
     monkeypatch.setattr(fix, "issue_comments", lambda repo, number: [])
-    monkeypatch.setattr(fix, "dispatch_autofix", lambda repo, pr, workflow, dry_run: calls.append(("dispatch", repo, pr["number"], workflow, dry_run)))
+    monkeypatch.setattr(
+        fix,
+        "dispatch_autofix",
+        lambda repo, pr, workflow, workflow_repository, dry_run: calls.append((
+            "dispatch",
+            repo,
+            pr["number"],
+            workflow,
+            workflow_repository,
+            dry_run,
+        )),
+    )
     monkeypatch.setattr(fix, "create_fix_marker", lambda repo, pr, dry_run: calls.append(("marker", repo, pr["number"], dry_run)))
 
     assert fix.main(["--repo", "owner/repo", "--base-branch", "main", "--dry-run"]) == 0
 
     assert calls == [
-        ("dispatch", "owner/repo", 7, "pr-review-autofix.yml", True),
+        ("dispatch", "owner/repo", 7, "pr-review-autofix.yml", "ContextualWisdomLab/.github", True),
         ("marker", "owner/repo", 7, True),
     ]
     payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
@@ -94,7 +170,7 @@ def test_context_run_json_and_pr_fetch(monkeypatch):
     """Context gh wrappers decode JSON and surface command errors."""
     calls = []
 
-    def fake_run(argv, check, stdout, stderr, text):
+    def fake_run(argv, check, stdout, stderr, text, shell=False):
         calls.append(argv)
         return subprocess.CompletedProcess(argv, 0, stdout='{"ok": true}', stderr="")
 
@@ -103,7 +179,7 @@ def test_context_run_json_and_pr_fetch(monkeypatch):
     assert context.pr_view("owner/repo", 3) == {"ok": True}
     assert calls[1][:4] == ["gh", "pr", "view", "3"]
 
-    def failed_run(argv, check, stdout, stderr, text):
+    def failed_run(argv, check, stdout, stderr, text, shell=False):
         return subprocess.CompletedProcess(argv, 1, stdout="", stderr="bad gh")
 
     monkeypatch.setattr(context.subprocess, "run", failed_run)
@@ -162,17 +238,42 @@ def test_context_reviews_threads_and_writer(monkeypatch, tmp_path):
     monkeypatch.setattr(context, "run_json", fake_run_json)
     assert [r["state"] for r in context.current_reviews("owner/repo", 7, head)] == ["APPROVED", "CHANGES_REQUESTED"]
     assert [t["id"] for t in context.review_threads("owner/repo", 7)] == ["active"]
+    assert context.thread_paths(context.review_threads("owner/repo", 7)) == ["x.py"]
 
     output = tmp_path / "context.md"
     context.write_context("owner/repo", 7, head, output)
     body = output.read_text()
     assert "APPROVED by opencode-agent" in body
+    assert "## Autofix Allowed Paths" in body
+    assert "- `x.py`" in body
     assert "Thread active" in body
     assert "- tests: COMPLETED SUCCESS" in body
+    assert body.index("## Autofix Allowed Paths") < body.index("## Current Reviews")
 
     monkeypatch.setattr(context, "pr_view", lambda repo, number: {**pr, "headRefOid": "c" * 40})
     with pytest.raises(RuntimeError, match="live head"):
         context.write_context("owner/repo", 7, head, output)
+
+
+def test_autofix_thread_paths_filters_unsafe_and_duplicate_paths():
+    """Autofix edits are bounded to unique safe repository-relative review paths."""
+    threads = [
+        {
+            "comments": {
+                "nodes": [
+                    {"path": "tests/test_example.py"},
+                    {"path": "tests/test_example.py"},
+                    {"path": "/etc/passwd"},
+                    {"path": "docs/../secret.md"},
+                    {"path": ""},
+                    {},
+                ]
+            }
+        },
+        {"comments": {"nodes": [{"path": "scripts/fix.py"}]}},
+    ]
+
+    assert context.thread_paths(threads) == ["tests/test_example.py", "scripts/fix.py"]
 
 
 def test_context_writer_empty_reviews_threads_and_validation(monkeypatch, tmp_path):
@@ -247,13 +348,27 @@ def test_fix_run_json_comment_marker_and_dispatch(monkeypatch, capsys):
 
     pr = make_pr()
     fix.create_fix_marker("owner/repo", pr, dry_run=True)
-    fix.dispatch_autofix("owner/repo", pr, workflow="fix.yml", dry_run=True)
+    fix.dispatch_autofix(
+        "owner/repo",
+        pr,
+        workflow="fix.yml",
+        workflow_repository="ContextualWisdomLab/.github",
+        dry_run=True,
+    )
     assert "DRY-RUN: would create autofix marker" in capsys.readouterr().out
 
     fix.create_fix_marker("owner/repo", pr, dry_run=False)
-    fix.dispatch_autofix("owner/repo", pr, workflow="fix.yml", dry_run=False)
+    fix.dispatch_autofix(
+        "owner/repo",
+        pr,
+        workflow="fix.yml",
+        workflow_repository="ContextualWisdomLab/.github",
+        dry_run=False,
+    )
     assert calls[-2][:5] == ["gh", "api", "-X", "POST", "repos/owner/repo/issues/7/comments"]
-    assert calls[-1][:5] == ["gh", "workflow", "run", "fix.yml", "--repo"]
+    assert calls[-1][:6] == ["gh", "workflow", "run", "fix.yml", "--repo", "ContextualWisdomLab/.github"]
+    assert "-f" in calls[-1]
+    assert "target_repository=owner/repo" in calls[-1]
 
 
 def test_fix_inspect_skip_wait_and_error_paths(monkeypatch):
@@ -275,14 +390,14 @@ def test_fix_inspect_skip_wait_and_error_paths(monkeypatch):
     pr1 = make_pr(number=1)
     pr2 = make_pr(number=2)
     monkeypatch.setattr(fix, "fetch_open_prs", lambda repo, max_prs: [pr1, pr2])
-    monkeypatch.setattr(fix, "inspect_pr", lambda repo, pr, args: ("dispatch", ("reason",)))
+    monkeypatch.setattr(fix, "inspect_pr", lambda repo, pr, args, **kwargs: ("dispatch", ("reason",)))
     payload_lines = []
     monkeypatch.setattr("builtins.print", lambda *parts, **kwargs: payload_lines.append(" ".join(map(str, parts))))
     assert fix.process_queue(args) == 0
     assert "autofix dispatch limit reached" in payload_lines[-1]
 
     monkeypatch.setattr(fix, "fetch_pr", lambda repo, number: [make_pr(number=number)])
-    monkeypatch.setattr(fix, "inspect_pr", lambda repo, pr, args: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(fix, "inspect_pr", lambda repo, pr, args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
     args = fix.parse_args(["--repo", "owner/repo", "--base-branch", "main", "--pr-number", "3"])
     payload_lines.clear()
     assert fix.process_queue(args) == 0
@@ -300,11 +415,13 @@ def test_fix_parse_args_and_self_test(monkeypatch):
 
     for bad_args in (
         ["--base-branch", "main"],
+        ["--repo", "bad repo", "--base-branch", "main"],
         ["--repo", "owner/repo"],
         ["--repo", "owner/repo", "--base-branch", "main", "--pr-number", "-1"],
         ["--repo", "owner/repo", "--base-branch", "main", "--max-prs", "0"],
         ["--repo", "owner/repo", "--base-branch", "main", "--max-dispatches", "0"],
         ["--repo", "owner/repo", "--base-branch", "main", "--retry-hours", "0"],
+        ["--repo", "owner/repo", "--base-branch", "main", "--autofix-repository", "bad"],
     ):
         monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
         monkeypatch.delenv("DEFAULT_BRANCH", raising=False)
