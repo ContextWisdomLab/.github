@@ -25,7 +25,6 @@ def run_json(args: list[str]) -> Any:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-        shell=False,
     )
     if completed.returncode != 0:
         raise RuntimeError(completed.stderr.strip())
@@ -134,22 +133,6 @@ def check_summary(status_rollup: list[dict[str, Any]] | None) -> list[str]:
     return lines
 
 
-def thread_paths(threads: list[dict[str, Any]]) -> list[str]:
-    """Return unique repository paths named by unresolved review threads."""
-    paths: list[str] = []
-    seen: set[str] = set()
-    for thread in threads:
-        for comment in (thread.get("comments") or {}).get("nodes") or []:
-            path = str(comment.get("path") or "").strip()
-            if not path or path.startswith("/") or ".." in path.split("/"):
-                continue
-            if path in seen:
-                continue
-            seen.add(path)
-            paths.append(path)
-    return paths
-
-
 def write_context(repo: str, number: int, head_sha: str, output: Path) -> None:
     """Write bounded PR review/autofix context."""
     pr = pr_view(repo, number)
@@ -158,7 +141,6 @@ def write_context(repo: str, number: int, head_sha: str, output: Path) -> None:
 
     reviews = current_reviews(repo, number, head_sha)
     threads = review_threads(repo, number)
-    paths = thread_paths(threads)
 
     lines = [
         "# PR Review Autofix Context",
@@ -171,21 +153,9 @@ def write_context(repo: str, number: int, head_sha: str, output: Path) -> None:
         f"- Head: {pr.get('headRefName')} @ {head_sha}",
         f"- Merge state: {pr.get('mergeStateStatus')}",
         "",
-        "## Autofix Allowed Paths",
+        "## Current Reviews",
         "",
     ]
-    if paths:
-        lines.extend(f"- `{path}`" for path in paths)
-        lines.append("")
-    else:
-        lines.extend(
-            [
-                "(no file-scoped unresolved review threads; automated edits must remain empty)",
-                "",
-            ]
-        )
-
-    lines.extend(["## Current Reviews", ""])
 
     if reviews:
         for review in reviews:

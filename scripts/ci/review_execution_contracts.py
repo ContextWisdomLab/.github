@@ -82,9 +82,6 @@ def discover_package_json(path: Path, root: Path) -> dict[str, Any]:
     """Discover Node package scripts and engines."""
     data = json.loads(read_text(path))
     scripts = data.get("scripts") or {}
-    dependencies = data.get("dependencies") or {}
-    dev_dependencies = data.get("devDependencies") or {}
-    all_packages = {**dependencies, **dev_dependencies}
     runner = package_runner(path)
     prefix = prefix_for(path, root)
     commands: dict[str, list[str]] = {}
@@ -107,64 +104,7 @@ def discover_package_json(path: Path, root: Path) -> dict[str, Any]:
         add_unique(commands, "security", f"{prefix}pnpm audit --audit-level=high")
     elif runner == "yarn":
         add_unique(commands, "security", f"{prefix}yarn npm audit --severity high")
-    web_packages = {
-        "@angular/core",
-        "@playwright/test",
-        "@remix-run/react",
-        "@sveltejs/kit",
-        "astro",
-        "cypress",
-        "next",
-        "playwright",
-        "react",
-        "svelte",
-        "vite",
-        "vue",
-    }
-    script_text = "\n".join(f"{name} {command}" for name, command in scripts.items()).lower()
-    web_app = bool(web_packages.intersection(all_packages)) or any(
-        token in script_text
-        for token in (
-            "astro",
-            "cypress",
-            "next ",
-            "playwright",
-            "react-scripts",
-            "remix",
-            "storybook",
-            "svelte",
-            "vite",
-        )
-    )
-    playwright_available = "playwright" in all_packages or "@playwright/test" in all_packages or "playwright" in script_text
-    web_review = None
-    if web_app:
-        e2e_commands = commands.get("e2e", [])
-        web_review = {
-            "path": relative(path, root),
-            "runner": runner,
-            "playwright_available": playwright_available,
-            "e2e_commands": e2e_commands,
-            "required_evidence": [
-                "backend/frontend services and repository E2E command when both surfaces exist",
-                "Playwright visual screenshot or toHaveScreenshot evidence for changed UI at desktop and one mobile viewport when practical",
-                "DOM locator assertions using data-testid, role, or label selectors instead of brittle CSS/XPath selectors",
-                "ARIA snapshot or accessibility-tree evidence for changed interactive surfaces when practical",
-                "console error/warn and failed network request collection during the target flow",
-            ],
-            "missing_contracts": [],
-        }
-        if not e2e_commands:
-            web_review["missing_contracts"].append("no package script exposing Playwright/Cypress E2E was detected")
-        if not playwright_available:
-            web_review["missing_contracts"].append("no Playwright package or script was detected for visual and DOM review")
-    return {
-        "path": relative(path, root),
-        "runner": runner,
-        "engines": data.get("engines") or {},
-        "commands": commands,
-        "web_app_review": web_review,
-    }
+    return {"path": relative(path, root), "runner": runner, "engines": data.get("engines") or {}, "commands": commands}
 
 
 def discover_pyproject(path: Path, root: Path) -> dict[str, Any]:
@@ -274,7 +214,6 @@ def discover_contracts(repo_root: Path) -> dict[str, Any]:
         "security_commands": [],
         "test_commands": [],
         "unpackaged_source_surfaces": discover_unpackaged_surfaces(root),
-        "web_app_review_requirements": [],
         "workflow_versions": discover_workflow_versions(root),
     }
     for path in sorted(root.rglob("package.json")):
@@ -282,8 +221,6 @@ def discover_contracts(repo_root: Path) -> dict[str, Any]:
             contract = discover_package_json(path, root)
             contracts["node"].append(contract)
             add_command_indexes(contracts, contract["commands"])
-            if contract["web_app_review"]:
-                contracts["web_app_review_requirements"].append(contract["web_app_review"])
     for path in sorted(root.rglob("pyproject.toml")):
         if not any(part in {".venv", "venv"} for part in path.parts):
             contract = discover_pyproject(path, root)
@@ -348,7 +285,6 @@ def render_markdown(contracts: dict[str, Any]) -> str:
         "e2e_commands",
         "lint_commands",
         "security_commands",
-        "web_app_review_requirements",
     ):
         lines.extend([f"## {key}", "```json", json.dumps(contracts[key], ensure_ascii=False, indent=2, sort_keys=True), "```", ""])
     for key in ("python", "node", "rust", "go", "java", "r", "docker"):
