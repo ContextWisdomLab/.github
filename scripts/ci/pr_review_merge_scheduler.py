@@ -209,6 +209,15 @@ def contract_decision(decision: Decision) -> str:
     return "WAIT"
 
 
+def queue_order_wait(pr: dict[str, Any], earlier: Decision) -> Decision:
+    """Return a wait decision that preserves ascending PR queue order."""
+    return Decision(
+        int(pr.get("number", 0)),
+        "wait",
+        f"waiting for earlier PR #{earlier.pr} to finish {earlier.action}: {earlier.reason}",
+    )
+
+
 def decision_payload(
     decisions: list[Decision],
     *,
@@ -2588,7 +2597,11 @@ def main(argv: list[str]) -> int:
     prs = fetch_pr(args.repo, args.pr_number) if args.pr_number else fetch_open_prs(args.repo, args.max_prs)
     decisions = []
     review_dispatches_used = 0
+    queue_barrier: Decision | None = None
     for pr in prs:
+        if not args.pr_number and queue_barrier is not None:
+            decisions.append(queue_order_wait(pr, queue_barrier))
+            continue
         review_dispatch_allowed = (
             args.review_dispatch_limit < 0 or review_dispatches_used < args.review_dispatch_limit
         )
@@ -2616,6 +2629,8 @@ def main(argv: list[str]) -> int:
         decisions.append(decision)
         if decision.action in {"review_dispatch", "security_dispatch"}:
             review_dispatches_used += 1
+        if not args.pr_number and decision.action != "skip" and queue_barrier is None:
+            queue_barrier = decision
     print_summary(
         decisions,
         dry_run=args.dry_run,

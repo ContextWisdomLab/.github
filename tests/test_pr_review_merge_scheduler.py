@@ -2372,7 +2372,7 @@ def test_direct_or_auto_falls_back_to_auto_merge_when_branch_policy_blocks_direc
         inspect(approved, merge_mode="direct")
 
 
-def test_main_limits_review_dispatches_without_blocking_branch_updates(monkeypatch, capsys):
+def test_main_preserves_queue_order_after_first_action(monkeypatch, capsys):
     prs = [
         make_pr(
             number=1,
@@ -2425,13 +2425,11 @@ def test_main_limits_review_dispatches_without_blocking_branch_updates(monkeypat
     output = capsys.readouterr().out
     payload = json.loads(output.strip().splitlines()[-1])
     assert dispatched == [1]
-    assert updated == [3]
-    assert payload["counts"] == {"review_dispatch": 1, "update_branch": 1, "wait": 1}
-    assert (
-        payload["decisions"][1]["reason"]
-        == "current head has completed Strix evidence; review dispatch limit reached"
-    )
-    assert payload["decisions"][2]["contract_decision"] == "UPDATE_BRANCH"
+    assert updated == []
+    assert payload["counts"] == {"review_dispatch": 1, "wait": 2}
+    assert "waiting for earlier PR #1 to finish review_dispatch" in payload["decisions"][1]["reason"]
+    assert "waiting for earlier PR #1 to finish review_dispatch" in payload["decisions"][2]["reason"]
+    assert payload["decisions"][2]["contract_decision"] == "WAIT"
 
 
 def test_main_rejects_invalid_review_dispatch_limit():
@@ -2539,7 +2537,7 @@ def test_print_summary_self_test_parse_args_and_main(monkeypatch, capsys):
         sched.main(["--repo", "owner/repo", "--base-branch", "main", "--project-flow", "github", "--pr-number", "-1"])
 
 
-def test_main_keeps_scanning_after_action_error(monkeypatch, capsys):
+def test_main_preserves_queue_order_after_action_error(monkeypatch, capsys):
     assert sched.summarize_action_error(RuntimeError("")) == "scheduler action failed without stderr"
 
     prs = [make_pr(number=1), make_pr(number=2)]
@@ -2558,11 +2556,11 @@ def test_main_keeps_scanning_after_action_error(monkeypatch, capsys):
     monkeypatch.setattr(sched, "inspect_pr", fake_inspect)
 
     assert sched.main(["--repo", "owner/repo", "--base-branch", "main", "--project-flow", "github"]) == 0
-    assert seen == [1, 2]
+    assert seen == [1]
     output = capsys.readouterr().out
     assert "PR #1: action_error: Command failed (1): gh pr merge 1; GraphQL: Resource not accessible by integration" in output
     assert "scheduler GitHub token could not perform merge or auto-merge" in output
-    assert "PR #2: wait: next PR still inspected" in output
+    assert "PR #2: wait: waiting for earlier PR #1 to finish action_error" in output
     payload = json.loads(output.strip().splitlines()[-1])
     assert payload["counts"] == {"action_error": 1, "wait": 1}
     assert payload["decisions"][0]["contract_decision"] == "WAIT"
@@ -2597,7 +2595,7 @@ def test_scrub_sensitive_data_and_run_error():
         sched.run([sys.executable, "-c", "import sys; sys.exit(1)", "ghp_1234567890abcdef1234"], stdin=None)
 
 
-def test_main_keeps_scanning_after_update_branch_403_and_422(monkeypatch, capsys):
+def test_main_preserves_queue_order_after_update_branch_error(monkeypatch, capsys):
     prs = [make_pr(number=1), make_pr(number=2), make_pr(number=3)]
     seen = []
 
@@ -2619,16 +2617,15 @@ def test_main_keeps_scanning_after_update_branch_403_and_422(monkeypatch, capsys
     monkeypatch.setattr(sched, "inspect_pr", fake_inspect)
 
     assert sched.main(["--repo", "owner/repo", "--base-branch", "main", "--project-flow", "github"]) == 0
-    assert seen == [1, 2, 3]
+    assert seen == [1]
     output = capsys.readouterr().out
     assert "PR #1: action_error:" in output
     assert "pull-requests: write" in output
     assert "do not widen `contents` just for update-branch" in output
-    assert "PR #2: action_error:" in output
-    assert "PR head likely changed after inspection" in output
-    assert "PR #3: wait: next PR still inspected" in output
+    assert "PR #2: wait: waiting for earlier PR #1 to finish action_error" in output
+    assert "PR #3: wait: waiting for earlier PR #1 to finish action_error" in output
     payload = json.loads(output.strip().splitlines()[-1])
-    assert payload["counts"] == {"action_error": 2, "wait": 1}
+    assert payload["counts"] == {"action_error": 1, "wait": 2}
     assert [decision["contract_decision"] for decision in payload["decisions"]] == ["WAIT", "WAIT", "WAIT"]
 
 
