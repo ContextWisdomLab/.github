@@ -690,7 +690,7 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" 'collect_current_head_strix_workflow_runs()' "opencode approval separately accounts for jobless current-head Strix workflow runs"
 	assert_file_contains "$workflow_file" 'collect_current_head_commit_check_runs()' "opencode approval falls back to current-head commit check-runs when PR rollup lags"
 	assert_file_contains "$workflow_file" 'commits/${HEAD_SHA}/check-runs' "opencode approval queries current-head commit check-runs before changing review state"
-	assert_file_contains "$workflow_file" '--slurp' "opencode approval aggregates paginated commit check-runs before classifying them"
+	assert_file_contains "$workflow_file" 'jq -r -s "$jq_filter"' "opencode approval aggregates paginated commit check-runs before classifying them"
 	assert_file_contains "$workflow_file" 'group_by(.name // "")' "opencode approval keeps only the latest same-name commit check-run"
 	assert_file_contains "$workflow_file" 'map(last)' "opencode approval ignores superseded same-name commit check-runs"
 	assert_file_contains "$workflow_file" 'collect_current_head_commit_check_runs "$commit_check_runs_file" pending' "opencode approval blocks approval on pending commit check-runs omitted from PR rollup"
