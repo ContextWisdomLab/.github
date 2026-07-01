@@ -1285,7 +1285,7 @@ jobs:
                     (.comments[-1] |
                       "- Latest reviewer comment: @\(.author) at \(.createdAt)",
                       "- Comment URL: \(.url)",
-                      "- Comment excerpt: \((.body | gsub("\r"; "") | gsub("`"; "'") | gsub("<"; "&lt;") | gsub(">"; "&gt;") | split("\n") | map(select(length > 0)) | .[0:8] | join(" / ") | .[0:600]))"
+                      "- Comment excerpt: \((.body | gsub("\r"; "") | gsub("`"; "\u0027") | gsub("<"; "&lt;") | gsub(">"; "&gt;") | split("\n") | map(select(length > 0)) | .[0:8] | join(" / ") | .[0:600]))"
                     ),
                     ""
                   )
@@ -3016,7 +3016,7 @@ jobs:
                     (.comments[-1] |
                       "- Latest reviewer comment: @\(.author) at \(.createdAt)",
                       "- Comment URL: \(.url)",
-                      "- Comment excerpt: \((.body | gsub("\r"; "") | gsub("`"; "'") | gsub("<"; "&lt;") | gsub(">"; "&gt;") | split("\n") | map(select(length > 0)) | .[0:8] | join(" / ") | .[0:600]))"
+                      "- Comment excerpt: \((.body | gsub("\r"; "") | gsub("`"; "\u0027") | gsub("<"; "&lt;") | gsub(">"; "&gt;") | split("\n") | map(select(length > 0)) | .[0:8] | join(" / ") | .[0:600]))"
                     ),
                     ""
                   )

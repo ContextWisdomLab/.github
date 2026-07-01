@@ -266,3 +266,11 @@ def test_opencode_review_body_printf_blocks_close_on_separate_line():
 
     for suffix in risky_suffixes:
         assert suffix not in workflow
+
+
+def test_opencode_review_jq_blocks_do_not_embed_shell_single_quotes():
+    """Guard jq snippets wrapped in shell single quotes against bash parse failures."""
+    workflow = Path(".github/workflows/opencode-review.yml").read_text(encoding="utf-8")
+
+    assert 'gsub("`"; "\'")' not in workflow
+    assert 'gsub("`"; "\\u0027")' in workflow
