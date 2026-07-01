@@ -1,6 +1,11 @@
 import json
+import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 
 def test_code_reviewer_subagent_contract_is_configured():
@@ -97,6 +102,7 @@ def test_code_reviewer_prompt_preserves_review_only_policy():
     """Guard the reviewer-only behavior and output rubric in the prompt."""
     prompt = Path("code-reviewer-prompt.md").read_text(encoding="utf-8")
     ci_prompt = Path("ci-review-prompt.md").read_text(encoding="utf-8")
+    ci_prompt_normalized = re.sub(r"\s+", " ", ci_prompt)
 
     assert "senior staff-level code reviewer" in prompt
     assert "Do not edit files" in prompt
@@ -129,10 +135,15 @@ def test_code_reviewer_prompt_preserves_review_only_policy():
     assert "opencode-review-control-v1" in ci_prompt
     assert "async effect cleanup and stale-response guards" in ci_prompt
     assert "CSS layout contracts" in ci_prompt
-    assert "formerly blank sections receive real data" in ci_prompt
+    assert "modal, dialog, drawer, popover, and toast overlays" in ci_prompt_normalized
+    assert "viewport anchoring, inset coverage, scroll behavior, and mobile clipping" in ci_prompt_normalized
+    assert "full-screen blocking layer" in ci_prompt_normalized
+    assert "formerly blank sections receive real data" in ci_prompt_normalized
     assert "deliberate empty states" in ci_prompt
-    assert "demo/visual-QA mode is isolated" in ci_prompt
+    assert "demo/visual-QA mode is isolated" in ci_prompt_normalized
     assert "production API behavior" in ci_prompt
+    assert "prefers-reduced-motion: reduce" in prompt
+    assert "prefers-reduced-motion: reduce" in ci_prompt_normalized
 
 
 def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
@@ -158,6 +169,8 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "Accessibility/i18n:" in workflow
     assert "Supply-chain/license:" in workflow
     assert "Packaging:" in workflow
+    assert 'gsub("`"; "\'")' not in workflow
+    assert 'gsub("`"; "&apos;")' in workflow
     assert '"code-reviewer"' in workflow
     assert workflow.count('"reasoningEffort": "high"') >= 10
     assert '"task": "allow"' in workflow
@@ -183,10 +196,13 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "is_context_overflow_failure" in model_pool_runner
     assert "tokens_limit_reached" in model_pool_runner
     assert "skipping remaining attempts for this model" in model_pool_runner
-    assert "approve_low_risk_review_fallback_after_model_exhaustion" in workflow
-    assert "changed_file_is_low_risk_review_fallback" in workflow
-    assert "production source 또는 package manifest 변경이 없습니다" in workflow
-    assert "Source, workflow, config, package, migration, generated artifact 변경은 모델 기반 review 없이 승인하지 않습니다" in workflow
+    assert "approve_low_risk_review_fallback_after_model_exhaustion" not in workflow
+    assert "changed_file_is_low_risk_review_fallback" not in workflow
+    assert "production source 또는 package manifest 변경이 없습니다" not in workflow
+    assert "request_changes_for_coverage_evidence_failure" in workflow
+    assert '"## Review outcome"' in workflow
+    assert '"## Check outcome"' not in workflow
+    assert "publish REQUEST_CHANGES when coverage-evidence blocker states" in workflow
     assert 'timeout-minutes: 75' in workflow
     assert 'OPENCODE_MODEL_ATTEMPTS: "1"' in workflow
     assert 'OPENCODE_RUN_TIMEOUT_SECONDS: "600"' in workflow
@@ -213,8 +229,66 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "Never approve material workflow, script, source, config, package, or test changes" in prompt_template
     assert "async effect cleanup and stale-response guards" in prompt_template
     assert "DOM structure against CSS layout contracts" in prompt_template
+    assert "viewport anchoring, inset coverage, scroll behavior, and mobile clipping" in prompt_template
     assert "formerly blank sections receive real data or deliberate empty states" in prompt_template
     assert "demo/visual-QA mode is isolated from production API behavior" in prompt_template
+    assert "prefers-reduced-motion: reduce" in prompt_template
+    assert "forced smooth scrolling" in prompt_template
+
+
+def test_opencode_approval_gate_shell_is_parseable():
+    """Guard the large inline approval shell against YAML-valid syntax breaks."""
+    if os.name == "nt":
+        pytest.skip("bash syntax check runs in Linux CI")
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash is unavailable")
+
+    workflow_lines = Path(".github/workflows/opencode-review.yml").read_text(encoding="utf-8").splitlines()
+    name_index = workflow_lines.index("      - name: Approve PR if OpenCode review passed")
+    run_index = next(
+        index
+        for index in range(name_index + 1, len(workflow_lines))
+        if workflow_lines[index] == "        run: |"
+    )
+    script_lines = []
+    for line in workflow_lines[run_index + 1 :]:
+        if line and not line.startswith("          "):
+            break
+        script_lines.append(line[10:] if line.startswith("          ") else "")
+    script = "\n".join(script_lines) + "\n"
+
+    result = subprocess.run(
+        [bash, "-n"],
+        input=script,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_opencode_review_body_printf_blocks_close_on_separate_line():
+    """Guard approval-gate review body builders against runner bash parse failures."""
+    workflow = Path(".github/workflows/opencode-review.yml").read_text(encoding="utf-8")
+    risky_suffixes = (
+        'source finding.")"',
+        'has no blockers.")"',
+        '승인하지 않습니다.")"',
+        'Workflow attempt: ${RUN_ATTEMPT}")"',
+    )
+
+    for suffix in risky_suffixes:
+        assert suffix not in workflow
+
+
+def test_opencode_review_jq_blocks_do_not_embed_shell_single_quotes():
+    """Guard jq snippets wrapped in shell single quotes against bash parse failures."""
+    workflow = Path(".github/workflows/opencode-review.yml").read_text(encoding="utf-8")
+
+    assert 'gsub("`"; "\'")' not in workflow
+    assert 'gsub("`"; "&apos;")' in workflow
 
 
 def test_merge_scheduler_uses_escalating_mutation_credentials():
@@ -252,3 +326,42 @@ def test_opencode_runs_merge_scheduler_after_review_without_repo_local_dispatch(
     assert "--enable-auto-merge" in workflow
     assert "--no-update-branches" in workflow
     assert "Merge scheduler follow-up skipped after approval because no mutation credential was available" in workflow
+
+
+def test_opencode_pending_peer_checks_hold_approval_without_failing_required_workflow():
+    """Pending peer checks are a review hold, not an OpenCode source failure."""
+    workflow = Path(".github/workflows/opencode-review.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "hold_approval_without_review()" in workflow
+    assert "OpenCode review state unchanged; approval pending" in workflow
+    assert (
+        'hold_approval_without_review "WAITING_FOR_CHECKS" "$(cat "$failed_check_review_body_file")"'
+        in workflow
+    )
+    assert "build_waiting_for_checks_body" not in workflow
+
+
+def test_opencode_review_body_printf_blocks_close_on_separate_line():
+    """Guard approval-gate review body builders against runner bash parse failures."""
+    workflow = Path(".github/workflows/opencode-review.yml").read_text(encoding="utf-8")
+    risky_suffixes = (
+        "source finding.\")\"",
+        "has no blockers.\")\"",
+        "승인하지 않습니다.\")\"",
+        'Workflow attempt: ${RUN_ATTEMPT}")"',
+    )
+
+    for suffix in risky_suffixes:
+        assert suffix not in workflow
+
+
+def test_opencode_review_thread_jq_filters_preserve_bash_single_quotes():
+    """Guard jq filters embedded in single-quoted shell strings."""
+    workflow = Path(".github/workflows/opencode-review.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'gsub("`"; "\'")' not in workflow
+    assert workflow.count('gsub("`"; "&apos;")') == 2

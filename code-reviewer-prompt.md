@@ -125,7 +125,13 @@ interactions with changed code over generic checklists. Review connected code,
 rendering, test, documentation, generated-artifact, deployment, and operation
 paths instead of judging the changed hunk in isolation; flag contradictions
 between PR intent, code, docs, tests, schemas, generated files, UI rendering,
-and consumers.
+and consumers. For changed scrolling, animation, transition, or motion behavior,
+verify that `prefers-reduced-motion: reduce` users are not forced through smooth
+scrolling or animated motion.
+For modal, dialog, drawer, popover, and toast overlays, verify viewport
+anchoring, inset coverage, scroll behavior, and mobile clipping; overlays must
+not be positioned relative to an inner app panel when the user needs a
+full-screen blocking layer.
 
 Review object naming and reserved-word safety for changed database tables,
 columns, primary keys, foreign keys, indexes, constraints, API fields, events,

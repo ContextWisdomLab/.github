@@ -658,10 +658,14 @@ jobs:
             done >"$changed_dockerfiles" < <(changed_files_for_coverage | grep -E '(^|/)Dockerfile(\..*)?$' || true)
             while IFS= read -r dockerfile; do
               [ -n "$dockerfile" ] || continue
+              docker_context="$(dirname "$dockerfile")"
+              if [ "$docker_context" = "." ]; then
+                docker_context="."
+              fi
               tag_suffix="$(printf '%s' "$dockerfile" | tr '[:upper:]' '[:lower:]' | tr '/.' '--' | tr -cd '[:alnum:]-' | cut -c1-80)"
               image_tag="opencode-review-${PR_HEAD_SHA:-head}-${tag_suffix}"
               run_and_capture "Docker build (${dockerfile})" \
-                docker build --pull=false -f "$dockerfile" -t "$image_tag" .
+                docker build --pull=false -f "$dockerfile" -t "$image_tag" "$docker_context"
             done <"$changed_dockerfiles"
             if has_changed_tracked_files 'docker-compose.yml' 'docker-compose.yaml' 'compose.yml' 'compose.yaml'; then
               for compose_file in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
@@ -819,6 +823,7 @@ jobs:
     needs: [coverage-evidence]
     if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target')
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     permissions:
       actions: write
       checks: read
@@ -1066,12 +1071,18 @@ jobs:
                   | .[]
                   | if .__typename == "CheckRun" then
                       select((.name // "") != "opencode-review")
+                      | select((.name // "") != "OpenCode Review")
+                      | select((.name // "") != "Required OpenCode Review")
+                      | select((.name // "") != "OpenCode PR Review")
                       | select((.checkSuite.workflowRun.workflow.name // "") != "OpenCode Review")
                       | select((.checkSuite.workflowRun.workflow.name // "") != "Required OpenCode Review")
                       | select((.checkSuite.workflowRun.workflow.name // "") != "OpenCode PR Review")
                       | select((.status // "") != "COMPLETED")
                     elif .__typename == "StatusContext" then
                       select((.context // "") != "opencode-review")
+                      | select((.context // "") != "OpenCode Review")
+                      | select((.context // "") != "Required OpenCode Review")
+                      | select((.context // "") != "OpenCode PR Review")
                       | select((.state // "" | ascii_upcase) as $s | ["PENDING","EXPECTED"] | index($s))
                     else
                       empty
@@ -1168,7 +1179,7 @@ jobs:
               "- mergeable: `" + ((.mergeable // "unknown") | tostring) + "`",
               if ($state == "DIRTY" or $state == "CONFLICTING") then
                 "- Review direction: PR has merge conflicts. OpenCode must explain how to merge or rebase the latest base branch into the PR branch, resolve conflict markers, rerun focused checks, and push the same branch, including a compact command block with gh pr checkout, git fetch, merge or rebase, git status --short, and the normal or --force-with-lease push path."
-              elif $state == "BLOCKED" then
+              elif ($state == "BLOCKED") then
                 "- Review direction: `BLOCKED` is a branch policy, review, or check state, not merge conflict evidence. Do not request conflict repair unless mergeStateStatus is `DIRTY` or `CONFLICTING`."
               else
                 "- Review direction: do not treat mergeStateStatus `" + $state + "` as a merge conflict unless it is `DIRTY` or `CONFLICTING`."
@@ -1429,14 +1440,30 @@ jobs:
             printf '\n\n[Prompt evidence truncated after %s of %s bytes. Full failed-check evidence is copied to failed-check-evidence.md in the OpenCode review workspace when present.]\n' "$max_bytes" "$byte_count"
           }
 
+          safe_git_diff() {
+            local description="$1"
+            shift
+
+            if ! git -C "$OPENCODE_SOURCE_WORKDIR" diff "$@"; then
+              printf 'Unable to collect %s from `%s` to `%s`; continue review from available changed-file evidence and direct file inspection.\n' "$description" "$PR_MERGE_BASE" "$PR_HEAD_SHA"
+            fi
+          }
+
           {
             printf '# OpenCode bounded PR review evidence\n\n'
             printf -- '- PR: #%s\n' "$PR_NUMBER"
             printf -- "- Base SHA: \`%s\`\n" "$PR_BASE_SHA"
             printf -- "- Head SHA: \`%s\`\n\n" "$PR_HEAD_SHA"
-            PR_MERGE_BASE="$(git -C "$OPENCODE_SOURCE_WORKDIR" merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")"
+            if ! PR_MERGE_BASE="$(git -C "$OPENCODE_SOURCE_WORKDIR" merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")"; then
+              printf 'Merge-base discovery failed for `%s` and `%s`; falling back to base SHA for bounded diff evidence.\n\n' "$PR_BASE_SHA" "$PR_HEAD_SHA"
+              PR_MERGE_BASE="$PR_BASE_SHA"
+            fi
             printf -- "- Merge base SHA: \`%s\`\n\n" "$PR_MERGE_BASE"
-            git -C "$OPENCODE_SOURCE_WORKDIR" diff --name-only --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA" >"$OPENCODE_CHANGED_FILES_FILE"
+            if ! git -C "$OPENCODE_SOURCE_WORKDIR" diff --name-only --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA" |
+              awk 'NF > 0 && $0 !~ /^\// && $0 !~ /(^|\/)\.\.($|\/)/ { print }' >"$OPENCODE_CHANGED_FILES_FILE"; then
+              printf 'Changed-file discovery failed; downstream review must inspect the PR head directly.\n\n'
+              : >"$OPENCODE_CHANGED_FILES_FILE"
+            fi
 
             printf '## CodeGraph evidence\n\n'
             printf 'The workflow initialized CodeGraph before this evidence file was built.\n'
@@ -1481,22 +1508,21 @@ jobs:
             printf 'Do not request a rollback solely because a model memory says the version is unreleased or unsupported. Treat version availability as a blocker only when a current-head GitHub Check failed, a validated registry lookup failed, or a cited local source line is internally inconsistent with the documented runtime contract.\n\n'
 
             printf '## Changed files\n\n'
-            git -C "$OPENCODE_SOURCE_WORKDIR" diff --name-status "$PR_MERGE_BASE" "$PR_HEAD_SHA"
+            safe_git_diff "changed file status" --name-status "$PR_MERGE_BASE" "$PR_HEAD_SHA"
             printf '\n## Changed file history evidence\n\n'
-            emit_changed_file_history_evidence
+            emit_changed_file_history_evidence || printf 'Changed file history evidence could not be collected.\n'
             printf '\n## Changed docs repository tree evidence\n\n'
-            emit_changed_docs_tree_evidence
+            emit_changed_docs_tree_evidence || printf 'Changed docs repository tree evidence could not be collected.\n'
             printf '\n## Diff stat\n\n'
-            git -C "$OPENCODE_SOURCE_WORKDIR" diff --stat --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA"
+            safe_git_diff "diff stat" --stat --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA"
             printf '\n## Focused changed hunks\n\n'
             printf '```diff\n'
-            mapfile -t focused_hunk_paths < <(
-              git -C "$OPENCODE_SOURCE_WORKDIR" diff --name-only --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA" |
-                awk 'NF > 0 && $0 !~ /^\// && $0 !~ /(^|\/)\.\.($|\/)/ { print }'
-            )
+            mapfile -t focused_hunk_paths <"$OPENCODE_CHANGED_FILES_FILE"
             if [ "${#focused_hunk_paths[@]}" -gt 0 ]; then
               focused_hunks_file="$(mktemp)"
-              git -C "$OPENCODE_SOURCE_WORKDIR" diff --unified=12 --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA" -- "${focused_hunk_paths[@]}" >"$focused_hunks_file"
+              if ! git -C "$OPENCODE_SOURCE_WORKDIR" diff --unified=12 --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA" -- "${focused_hunk_paths[@]}" >"$focused_hunks_file"; then
+                printf 'Focused hunk extraction failed; inspect the PR head and available changed-file evidence directly.\n' >"$focused_hunks_file"
+              fi
               emit_file_prefix "$focused_hunks_file" 12000
               rm -f "$focused_hunks_file"
             else
@@ -2352,6 +2378,12 @@ jobs:
             fi
           }
 
+          gh_error_is_rate_limited() {
+            local error_file="$1"
+            [ -s "$error_file" ] || return 1
+            grep -Eiq '(API rate limit exceeded|rate limit exceeded|secondary rate limit)' "$error_file"
+          }
+
                     emit_change_flow_mermaid_graph() {
                       local merge_state="${1:-UNKNOWN}"
                       local changed_files_file surfaces_file idx next_node
@@ -2597,8 +2629,8 @@ jobs:
           OPENCODE_MODEL_POOL_OUTPUT_FILE: ${{ runner.temp }}/opencode-review-model-pool.md
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
-          APPROVAL_CHECK_WAIT_ATTEMPTS: "81"
-          APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "30"
+          APPROVAL_CHECK_WAIT_ATTEMPTS: "10"
+          APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "15"
           CHECK_LOOKUP_RETRY_ATTEMPTS: "5"
           CHECK_LOOKUP_RETRY_SLEEP_SECONDS: "5"
         run: |
@@ -2612,7 +2644,12 @@ jobs:
           if [ -n "${OPENCODE_APP_TOKEN:-}" ] && [ "${GH_TOKEN:-}" = "${OPENCODE_APP_TOKEN:-}" ]; then
             check_lookup_token_source="opencode-app"
           fi
-          review_write_token="${OPENCODE_APP_TOKEN:-$GH_TOKEN}"
+          configured_review_write_token="${GH_TOKEN:-}"
+          review_write_token="${OPENCODE_APP_TOKEN:-$configured_review_write_token}"
+          review_write_fallback_token=""
+          if [ -n "${configured_review_write_token:-}" ] && [ "${configured_review_write_token:-}" != "${review_write_token:-}" ]; then
+            review_write_fallback_token="$configured_review_write_token"
+          fi
           review_write_token_source="configured"
           if [ -n "${OPENCODE_APP_TOKEN:-}" ]; then
             review_write_token_source="opencode-app"
@@ -2849,7 +2886,32 @@ jobs:
               --arg commit_id "$HEAD_SHA" \
               '{event: $event, body: $body, commit_id: $commit_id}' >"$review_payload_file"
             if ! env GH_TOKEN="$review_write_token" gh api -X POST "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}/reviews" --input "$review_payload_file" >/dev/null 2>"$gh_error_file"; then
-              warn_gh_publication_failure "pull review" "$gh_error_file"
+              warn_gh_publication_failure "pull review with primary review token" "$gh_error_file"
+              if [ -n "${review_write_fallback_token:-}" ]; then
+                : >"$gh_error_file"
+                if env GH_TOKEN="$review_write_fallback_token" gh api -X POST "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}/reviews" --input "$review_payload_file" >/dev/null 2>"$gh_error_file"; then
+                  rm -f "$gh_error_file" "$review_payload_file"
+                  update_review_overview "$event" "$body"
+                  return 0
+                fi
+                warn_gh_publication_failure "pull review with fallback review token" "$gh_error_file"
+              fi
+              if [ "$event" = "APPROVE" ] && gh_error_is_rate_limited "$gh_error_file"; then
+                rm -f "$gh_error_file" "$review_payload_file"
+                update_review_overview "$event" "$body" || true
+                if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+                  {
+                    printf '## OpenCode approve review publication skipped\n\n'
+                    printf -- '- Head SHA: `%s`\n' "$HEAD_SHA"
+                    printf -- '- Workflow run: %s\n' "$RUN_ID"
+                    printf -- '- Workflow attempt: %s\n\n' "$RUN_ATTEMPT"
+                    printf 'OpenCode completed the approval gate, but GitHub rejected the pull-review write due to API rate limiting. The required workflow remains successful because failed checks, mergeability, and unresolved review threads were already gated before approval.\n\n'
+                    printf '%s\n' "$body"
+                  } >>"$GITHUB_STEP_SUMMARY"
+                fi
+                printf '::warning::OpenCode could not publish the APPROVE pull review for head %s because the GitHub API rate limit was exceeded; keeping the successful approval gate result because pre-approval source, check, mergeability, and review-thread gates passed.\n' "$HEAD_SHA"
+                return 0
+              fi
               rm -f "$gh_error_file" "$review_payload_file"
               update_review_overview "$event" "$body" || true
               printf '::error::OpenCode could not publish the pull review for head %s, so the review state was not changed.\n' "$HEAD_SHA"
@@ -2932,6 +2994,25 @@ jobs:
             printf '::error::%s: OpenCode did not change the pull request review state. %s\n' "$result" "$(printf '%s' "$body" | head -n 1)"
             echo "::endgroup::"
             exit 1
+          }
+
+          hold_approval_without_review() {
+            local result="$1"
+            local body="$2"
+
+            if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+              {
+                printf '## OpenCode review state unchanged; approval pending\n\n'
+                printf -- "- Result: \`%s\`\n" "$result"
+                printf -- "- Head SHA: \`%s\`\n" "$HEAD_SHA"
+                printf -- '- Workflow run: %s\n' "$RUN_ID"
+                printf -- '- Workflow attempt: %s\n\n' "$RUN_ATTEMPT"
+                printf '%s\n' "$body"
+              } >>"$GITHUB_STEP_SUMMARY"
+            fi
+            printf '::notice::%s: OpenCode review state unchanged; approval pending. %s\n' "$result" "$(printf '%s' "$body" | head -n 1)"
+            echo "::endgroup::"
+            exit 0
           }
 
           collect_unresolved_reviewer_threads() {
@@ -3090,15 +3171,15 @@ jobs:
                 "" \
                 "OpenCode cannot approve yet because required coverage evidence did not pass." \
                 "" \
-                "## Check outcome" \
+                "## Review outcome" \
                 "" \
                 "### 1. HIGH .github/workflows/opencode-review.yml:1 - Coverage evidence did not prove required test/docstring evidence" \
-                "- Problem: The OpenCode approval path reached an APPROVE control result while the separate coverage-evidence job result was \`${COVERAGE_EVIDENCE_RESULT:-unknown}\`." \
+                "- Problem: The required coverage-evidence job result was \`${COVERAGE_EVIDENCE_RESULT:-unknown}\`, so OpenCode cannot establish approval sufficiency for this head." \
                 "- Root cause: Automated approval is only valid when the same-head coverage-evidence job proves supported repository test suites passed and configured docstring gates passed or were advisory, or reports not applicable because no supported source files or package manifests exist. Missing, failed, skipped, unavailable, or unsupported-tooling test evidence is a blocker." \
                 "- Fix: Install or configure the repository test/docstring evidence tooling when source files or package manifests exist, rerun the current-head coverage-evidence job, and approve only after it reports \`success\` with required evidence or explicit no-source not-applicable evidence." \
-                "- Regression test: Keep the approval branch checking \`needs.coverage-evidence.result == success\` before posting APPROVE, but leave the PR review unchanged for coverage-evidence blocker states such as cancelled, skipped, failed, unsupported-tooling, or below-100 evidence." \
+                "- Regression test: Keep the approval branch checking \`needs.coverage-evidence.result == success\` before posting APPROVE, and publish REQUEST_CHANGES when coverage-evidence blocker states such as cancelled, skipped, failed, unsupported-tooling, or below-100 evidence are present." \
                 "" \
-                "- Result: CHECK_FAILED" \
+                "- Result: REQUEST_CHANGES" \
                 "- Reason: coverage-evidence result was \`${COVERAGE_EVIDENCE_RESULT:-unknown}\`, so required test/docstring evidence was not proven for current head \`${HEAD_SHA}\`." \
                 "- Head SHA: \`${HEAD_SHA}\`" \
                 "- Workflow run: ${RUN_ID}" \
@@ -3110,15 +3191,14 @@ jobs:
             } >"$body_file"
           }
 
-          fail_for_coverage_evidence_without_review() {
+          request_changes_for_coverage_evidence_failure() {
             local body_file
             body_file="$(mktemp)"
             build_coverage_evidence_check_failure_body "$body_file"
-            emit_review_body_to_action_log "CHECK_FAILED" "$(cat "$body_file")"
-            update_review_overview "CHECK_FAILED" "$(cat "$body_file")"
+            create_pull_review "REQUEST_CHANGES" "$(cat "$body_file")"
             rm -f "$body_file"
             echo "::endgroup::"
-            exit 1
+            exit 0
           }
 
           create_pull_review_with_payload() {
@@ -3167,7 +3247,8 @@ jobs:
               "- Reason: ${reason}" \
               "- Head SHA: \`${HEAD_SHA}\`" \
               "- Workflow run: ${RUN_ID}" \
-              "- Workflow attempt: ${RUN_ATTEMPT}")"
+              "- Workflow attempt: ${RUN_ATTEMPT}"
+            )"
             create_pull_review "REQUEST_CHANGES" "$body"
           }
 
@@ -3522,7 +3603,8 @@ jobs:
               "- Workflow run: ${RUN_ID}" \
               "- Workflow attempt: ${RUN_ATTEMPT}" \
               "" \
-              "No PR review was posted because an evidence-mapping failure is a review-tool state, not a source finding.")"
+              "No PR review was posted because an evidence-mapping failure is a review-tool state, not a source finding."
+            )"
             stop_approval_without_review "FAILED_CHECK_DIAGNOSIS_UNAVAILABLE" "$body"
           }
 
@@ -3728,7 +3810,7 @@ jobs:
               printf -- '- Problem: Current-head GitHub Checks did not all complete before the bounded approval wait ended.\n'
               printf -- '- Root cause: OpenCode cannot safely approve until security and build checks have finished for the same head SHA.\n'
               printf -- '- Fix: Re-run OpenCode after the pending checks finish, or wait for this approval step to observe completed peer checks.\n'
-              printf -- '- Regression test: Keep the approval gate waiting for peer checks and stopping without approval instead of approving stale evidence.\n\n'
+              printf -- '- Regression test: Keep the approval gate waiting for peer checks and holding approval without failing the required workflow.\n\n'
               printf -- '- Result: WAITING_FOR_CHECKS\n'
               printf -- "- Reason: current-head GitHub Checks did not all complete before the bounded approval wait ended for \`%s\`.\n" "$HEAD_SHA"
               printf -- "- Head SHA: \`%s\`\n" "$HEAD_SHA"
@@ -4186,6 +4268,7 @@ jobs:
                       select((.name // "") != "opencode-review")
                       | select((.workflow // "") != "OpenCode Review")
                       | select((.workflow // "") != "Required OpenCode Review")
+                      | select((.workflow // "") != "OpenCode PR Review")
                       | select((.conclusion // "" | ascii_upcase) as $c | ["FAILURE","TIMED_OUT","ACTION_REQUIRED","CANCELLED","STARTUP_FAILURE"] | index($c))
                       | select(((.conclusion // "" | ascii_downcase) == "cancelled" and (.name // "") == "metadata-only gate evaluation" and (.workflow // "") == "PR Governance") | not)
                       | select(((.conclusion // "" | ascii_downcase) == "cancelled" and ((.isRequired // false) | not) and (.workflow // "") == "CodeQL") | not)
@@ -4193,6 +4276,9 @@ jobs:
                       | "- " + (.label // "check") + ": " + (.conclusion // "unknown") + (if (.detailsUrl // "") != "" then " (" + .detailsUrl + ")" else "" end)
                     elif .kind == "status" then
                       select(((.label // "") | ascii_downcase | contains("opencode-review")) | not)
+                      | select((.label // "") != "OpenCode Review")
+                      | select((.label // "") != "Required OpenCode Review")
+                      | select((.label // "") != "OpenCode PR Review")
                       | select((.state // "" | ascii_upcase) as $s | ["FAILURE","ERROR"] | index($s))
                       | "- " + (.label // "status") + ": " + (.state // "unknown") + (if (.targetUrl // "") != "" then " (" + .targetUrl + ")" else "" end)
                     else
@@ -4272,10 +4358,14 @@ jobs:
                       select((.name // "") != "opencode-review")
                       | select((.checkSuite.workflowRun.workflow.name // "") != "OpenCode Review")
                       | select((.checkSuite.workflowRun.workflow.name // "") != "Required OpenCode Review")
+                      | select((.checkSuite.workflowRun.workflow.name // "") != "OpenCode PR Review")
                       | select((.status // "") != "COMPLETED")
                       | "- " + ((.checkSuite.workflowRun.workflow.name // "") + "/" + (.name // "check") | gsub("^/"; "")) + ": " + (.status // "unknown") + (if (.detailsUrl // "") != "" then " (" + .detailsUrl + ")" else "" end)
                     elif .__typename == "StatusContext" then
                       select((.context // "") != "opencode-review")
+                      | select((.context // "") != "OpenCode Review")
+                      | select((.context // "") != "Required OpenCode Review")
+                      | select((.context // "") != "OpenCode PR Review")
                       | select((.state // "" | ascii_upcase) as $s | ["PENDING","EXPECTED"] | index($s))
                       | "- " + (.context // "status") + ": " + (.state // "unknown") + (if (.targetUrl // "") != "" then " (" + .targetUrl + ")" else "" end)
                     else
@@ -4345,8 +4435,8 @@ jobs:
 
           wait_for_peer_github_checks() {
             local output_file="$1"
-            local attempts="${APPROVAL_CHECK_WAIT_ATTEMPTS:-121}"
-            local sleep_seconds="${APPROVAL_CHECK_WAIT_SLEEP_SECONDS:-30}"
+            local attempts="${APPROVAL_CHECK_WAIT_ATTEMPTS:-10}"
+            local sleep_seconds="${APPROVAL_CHECK_WAIT_SLEEP_SECONDS:-15}"
             local attempt=1
 
             while [ "$attempt" -le "$attempts" ]; do
@@ -4393,11 +4483,12 @@ jobs:
                 "- Workflow run: ${RUN_ID}" \
                 "- Workflow attempt: ${RUN_ATTEMPT}" \
                 "" \
-                "No PR review was posted because check lookup failure is a review-tool state, not a source finding.")"
+                "No PR review was posted because check lookup failure is a review-tool state, not a source finding."
+              )"
               stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
               fi
             elif [ "$wait_status" -eq 2 ]; then
-              build_waiting_for_checks_body "$pending_file" "$reviewer_thread_body_file"
+              build_pending_check_body "$pending_file" "$reviewer_thread_body_file"
               stop_approval_without_review "WAITING_FOR_CHECKS" "$(cat "$reviewer_thread_body_file")"
             fi
 
@@ -4416,7 +4507,8 @@ jobs:
                 "- Workflow run: ${RUN_ID}" \
                 "- Workflow attempt: ${RUN_ATTEMPT}" \
                 "" \
-                "No PR review was posted because check lookup failure is a review-tool state, not a source finding.")"
+                "No PR review was posted because check lookup failure is a review-tool state, not a source finding."
+              )"
               stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
               fi
             fi
@@ -4533,7 +4625,8 @@ jobs:
               "- Workflow run: ${RUN_ID}" \
               "- Workflow attempt: ${RUN_ATTEMPT}" \
               "" \
-              "No PR approval was posted because model-output failure is not evidence that the PR has no blockers.")"
+              "No PR approval was posted because model-output failure is not evidence that the PR has no blockers."
+            )"
             if [ -n "$first_path" ] && [ -n "$first_line" ]; then
               payload_file="$(mktemp)"
               inline_failure_body_file="$(mktemp)"
@@ -4561,68 +4654,6 @@ jobs:
               create_pull_review "REQUEST_CHANGES" "$body"
               rm -f "$first_line_file"
             fi
-            return 0
-          }
-
-          changed_file_is_low_risk_review_fallback() {
-            case "$1" in
-              .jules/*|.github/CODEOWNERS|CODEOWNERS|README.md|CHANGELOG.md|docs/*|*.md|*.mdx|\
-              tests/*|test/*|*/tests/*|*/test/*|*/__tests__/*|\
-              *.test.js|*.test.jsx|*.test.ts|*.test.tsx|*.spec.js|*.spec.jsx|*.spec.ts|*.spec.tsx|\
-              *_test.py|test_*.py|*.snap)
-                return 0
-                ;;
-              *)
-                return 1
-                ;;
-            esac
-          }
-
-          approve_low_risk_review_fallback_after_model_exhaustion() {
-            local changed_file file_count body
-
-            if [ "${COVERAGE_EVIDENCE_RESULT:-skipped}" != "success" ]; then
-              return 1
-            fi
-            if [ -z "${OPENCODE_CHANGED_FILES_FILE:-}" ] || [ ! -s "$OPENCODE_CHANGED_FILES_FILE" ]; then
-              return 1
-            fi
-
-            file_count=0
-            while IFS= read -r changed_file; do
-              changed_file="${changed_file#- }"
-              changed_file="${changed_file#*	}"
-              changed_file="${changed_file#"${changed_file%%[![:space:]]*}"}"
-              changed_file="${changed_file%"${changed_file##*[![:space:]]}"}"
-              [ -n "$changed_file" ] || continue
-              file_count=$((file_count + 1))
-              if ! changed_file_is_low_risk_review_fallback "$changed_file"; then
-                return 1
-              fi
-            done <"$OPENCODE_CHANGED_FILES_FILE"
-            if [ "$file_count" -eq 0 ]; then
-              return 1
-            fi
-
-            body="$(printf '%s\n' \
-              "## Pull request overview" \
-              "" \
-              "OpenCode 모델 풀이 현재 head에서 usable control block을 만들지 못했지만, 중앙 리뷰 게이트가 제한된 source evidence를 확인했습니다." \
-              "" \
-              "## Approval evidence" \
-              "" \
-              "- Result: APPROVE" \
-              "- Reason: 변경 파일이 테스트/문서/리뷰 메타데이터 범위로 제한되어 있고, production source 또는 package manifest 변경이 없습니다." \
-              "- Coverage evidence: ${COVERAGE_EVIDENCE_RESULT}; ${COVERAGE_EVIDENCE_SUMMARY//$'\n'/ }" \
-              "- Peer GitHub Checks: completed without failures before this fallback approval." \
-              "- Human review threads: unresolved blocking threads were not present." \
-              "- Model outcome: model_pool=${OPENCODE_MODEL_POOL_OUTCOME:-unknown}; selected_model=${OPENCODE_MODEL_POOL_MODEL:-none}." \
-              "- Head SHA: \`${HEAD_SHA}\`" \
-              "- Workflow run: ${RUN_ID}" \
-              "- Workflow attempt: ${RUN_ATTEMPT}" \
-              "" \
-              "이 fallback은 테스트/문서/리뷰 메타데이터만 변경된 low-risk PR에만 적용됩니다. Source, workflow, config, package, migration, generated artifact 변경은 모델 기반 review 없이 승인하지 않습니다.")"
-            create_pull_review "APPROVE" "$body"
             return 0
           }
 
@@ -4676,7 +4707,8 @@ jobs:
               "- Reason: mergeStateStatus is \`${merge_state}\`; mergeable is \`${mergeable}\`." \
               "- Head SHA: \`${HEAD_SHA}\`" \
               "- Workflow run: ${RUN_ID}" \
-              "- Workflow attempt: ${RUN_ATTEMPT}")"
+              "- Workflow attempt: ${RUN_ATTEMPT}"
+            )"
             create_pull_review "REQUEST_CHANGES" "$body"
             return 0
           }
@@ -4700,7 +4732,7 @@ jobs:
           fi
 
           if [ "${COVERAGE_EVIDENCE_RESULT:-skipped}" != "success" ]; then
-            fail_for_coverage_evidence_without_review
+            request_changes_for_coverage_evidence_failure
           fi
 
           opencode_review_outcome="${OPENCODE_MODEL_POOL_OUTCOME:-unknown}"
@@ -4769,7 +4801,8 @@ jobs:
                     "- Required next evidence: readable current-head statusCheckRollup plus a valid OpenCode control block." \
                     "- Head SHA: \`${HEAD_SHA}\`" \
                     "- Workflow run: ${RUN_ID}" \
-                    "- Workflow attempt: ${RUN_ATTEMPT}")"
+                    "- Workflow attempt: ${RUN_ATTEMPT}"
+                  )"
                   stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
                 fi
               fi
@@ -4789,11 +4822,6 @@ jobs:
               if [ -s "$unresolved_reviewer_threads_file" ]; then
                 build_unresolved_reviewer_threads_body "$unresolved_reviewer_threads_file" "$reviewer_thread_review_body_file"
                 create_pull_review "REQUEST_CHANGES" "$(cat "$reviewer_thread_review_body_file")"
-                echo "::endgroup::"
-                exit 0
-              fi
-
-              if approve_low_risk_review_fallback_after_model_exhaustion; then
                 echo "::endgroup::"
                 exit 0
               fi
@@ -4881,7 +4909,7 @@ jobs:
           case "$gate_result" in
             APPROVE)
               if [ "${COVERAGE_EVIDENCE_RESULT:-skipped}" != "success" ]; then
-                fail_for_coverage_evidence_without_review
+                request_changes_for_coverage_evidence_failure
               fi
               if request_changes_for_merge_conflict_if_present; then
                 echo "::endgroup::"
@@ -4915,14 +4943,15 @@ jobs:
                   "- Reason: GitHub Checks statusCheckRollup could not be read for current head \`${HEAD_SHA}\`." \
                   "- Head SHA: \`${HEAD_SHA}\`" \
                   "- Workflow run: ${RUN_ID}" \
-                  "- Workflow attempt: ${RUN_ATTEMPT}")"
+                  "- Workflow attempt: ${RUN_ATTEMPT}"
+                )"
                 stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
                 fi
               fi
               if [ "$pending_wait_status" -ne 0 ]; then
                 failed_check_review_body_file="$(mktemp)"
                 build_pending_check_body "$pending_checks_file" "$failed_check_review_body_file"
-                stop_approval_without_review "WAITING_FOR_CHECKS" "$(cat "$failed_check_review_body_file")"
+                hold_approval_without_review "WAITING_FOR_CHECKS" "$(cat "$failed_check_review_body_file")"
               fi
               failed_checks_file="$(mktemp)"
               if ! collect_github_checks_with_retry collect_failed_github_checks "$failed_checks_file"; then
@@ -4947,7 +4976,8 @@ jobs:
                   "- Reason: GitHub Checks statusCheckRollup could not be read for current head \`${HEAD_SHA}\`." \
                   "- Head SHA: \`${HEAD_SHA}\`" \
                   "- Workflow run: ${RUN_ID}" \
-                  "- Workflow attempt: ${RUN_ATTEMPT}")"
+                  "- Workflow attempt: ${RUN_ATTEMPT}"
+                )"
                 stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
                 fi
               fi
@@ -5018,7 +5048,8 @@ jobs:
                 "- Reason: ${reason}" \
                 "- Head SHA: \`${HEAD_SHA}\`" \
                 "- Workflow run: ${RUN_ID}" \
-                "- Workflow attempt: ${RUN_ATTEMPT}")"
+                "- Workflow attempt: ${RUN_ATTEMPT}"
+              )"
               create_pull_review "APPROVE" "$body"
               ;;
             REQUEST_CHANGES)
@@ -5037,7 +5068,8 @@ jobs:
                   "- Workflow run: ${RUN_ID}" \
                   "- Workflow attempt: ${RUN_ATTEMPT}" \
                   "" \
-                  "No PR review was posted because check lookup failure is a review-tool state, not a source finding.")"
+                  "No PR review was posted because check lookup failure is a review-tool state, not a source finding."
+                )"
                 stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
               fi
 
@@ -5083,7 +5115,8 @@ jobs:
                   "- Workflow run: ${RUN_ID}" \
                   "- Workflow attempt: ${RUN_ATTEMPT}" \
                   "" \
-                  "No PR review was posted because check lookup failure is a review-tool state, not a source finding.")"
+                  "No PR review was posted because check lookup failure is a review-tool state, not a source finding."
+                )"
                 stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
               fi
 

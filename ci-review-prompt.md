@@ -71,10 +71,15 @@ Inspect async effect cleanup and stale-response guards when project, route, auth
 tenant, or selection state changes can outlive fetches or timers. Inspect DOM
 structure against CSS layout contracts: table/list/card grids must have column
 counts, modifier classes, and responsive behavior matching rendered cells and
-headers. When a PR fills or creates workspace, dashboard, list, editor, or
-empty-state screens, verify that formerly blank sections receive real data or
-deliberate empty states, and that any demo/visual-QA mode is isolated from
-production API behavior.
+headers. For modal, dialog, drawer, popover, and toast overlays, verify viewport
+anchoring, inset coverage, scroll behavior, and mobile clipping; overlays must
+not be positioned relative to an inner app panel when the user needs a
+full-screen blocking layer. When a PR fills or creates workspace, dashboard,
+list, editor, or empty-state screens, verify that formerly blank sections
+receive real data or deliberate empty states, and that any demo/visual-QA mode
+is isolated from production API behavior. For changed scrolling, animation,
+transition, or motion behavior, verify that users with `prefers-reduced-motion:
+reduce` are not forced through smooth scrolling or animated motion.
 
 Read the `Review execution contracts` section in bounded evidence before
 choosing commands. Use repo-native manifests and scripts first: `pyproject`,
