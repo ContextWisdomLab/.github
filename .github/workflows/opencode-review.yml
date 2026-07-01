@@ -658,10 +658,14 @@ jobs:
             done >"$changed_dockerfiles" < <(changed_files_for_coverage | grep -E '(^|/)Dockerfile(\..*)?$' || true)
             while IFS= read -r dockerfile; do
               [ -n "$dockerfile" ] || continue
+              docker_context="$(dirname "$dockerfile")"
+              if [ "$docker_context" = "." ]; then
+                docker_context="."
+              fi
               tag_suffix="$(printf '%s' "$dockerfile" | tr '[:upper:]' '[:lower:]' | tr '/.' '--' | tr -cd '[:alnum:]-' | cut -c1-80)"
               image_tag="opencode-review-${PR_HEAD_SHA:-head}-${tag_suffix}"
               run_and_capture "Docker build (${dockerfile})" \
-                docker build --pull=false -f "$dockerfile" -t "$image_tag" .
+                docker build --pull=false -f "$dockerfile" -t "$image_tag" "$docker_context"
             done <"$changed_dockerfiles"
             if has_changed_tracked_files 'docker-compose.yml' 'docker-compose.yaml' 'compose.yml' 'compose.yaml'; then
               for compose_file in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
