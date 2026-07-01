@@ -274,7 +274,7 @@ def test_opencode_review_jq_blocks_do_not_embed_shell_single_quotes():
     workflow = Path(".github/workflows/opencode-review.yml").read_text(encoding="utf-8")
 
     assert 'gsub("`"; "\'")' not in workflow
-    assert 'gsub("`"; "")' in workflow
+    assert 'gsub("`"; "&apos;")' in workflow
 
 
 def test_merge_scheduler_uses_escalating_mutation_credentials():
