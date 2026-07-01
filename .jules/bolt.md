@@ -13,6 +13,9 @@
 ## 2024-11-21 - JSON Decoding Performance - Fast Path Early Return
 **Learning:** When parsing output strings that may contain either pure JSON or prose mixed with JSON, appending successfully parsed full-string JSON objects to a list and continuing to scan character-by-character causes redundant work. The scanner finds the same object again, decodes it again using `raw_decode`, and yields duplicate objects, increasing parsing time to O(N) when it could be O(1) for pure JSON inputs.
 **Action:** When a full string parse via `json.loads(text)` succeeds, return immediately (early return) rather than appending and continuing to scan. This acts as a fast path for pure JSON payloads, bypassing the fallback incremental scanning entirely.
+## 2024-11-21 - Subprocess Memoization Optimization
+**Learning:** Shelling out to external commands like `git diff` inside a loop (or per-finding mapping) can severely bottleneck performance due to redundant child process overhead when evaluating multiple items tied to the same target resource (e.g. multiple findings in the same file).
+**Action:** When validating batch inputs (such as security findings) against shell commands grouped by path or target, use `@functools.cache` to memoize the subprocess execution function (`subprocess.run`), avoiding redundant executions on identical inputs.
 ## 2026-06-27 - Pre-compile Regex Patterns for Deep Label Scanning
 **Learning:** Found a codebase-specific anti-pattern in `scripts/ci/opencode_review_normalize_output.py` where deep label-scanning loops over long review texts were redundantly recompiling regexes for verification labels inside the `label_matches` inner function. This caused measurable overhead in the CI review script.
 **Action:** When performing deep text inspection using repetitive substring or pattern matching across a known set of keys or labels, pre-compile the regex objects at the module level.
