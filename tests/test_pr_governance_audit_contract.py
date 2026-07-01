@@ -16,8 +16,8 @@ def test_html4tree_public_fork_queue_requires_central_review_gate():
     assert "do not bypass the review gate" in audit
 
 
-def test_afipc_queue_requires_central_required_workflow_evidence():
-    """Guard the aFIPC central required-workflow coverage gap."""
+def test_afipc_queue_has_central_required_workflow_evidence():
+    """Guard the closed aFIPC central required-workflow fixture."""
     audit = Path("PR_GOVERNANCE_AUDIT.md").read_text(encoding="utf-8")
     rollout = Path("docs/org-required-workflow-rollout.md").read_text(
         encoding="utf-8"
@@ -26,6 +26,6 @@ def test_afipc_queue_requires_central_required_workflow_evidence():
     assert "aFIPC" in audit
     assert "aFIPC" in rollout
     assert "PR #78" in audit
-    assert "PR `#78` lacks inherited OpenCode, Strix, and scheduler" in rollout
-    assert "zero approving reviews" in audit
-    assert "must not be merged until organization required-workflow evidence exists" in audit
+    assert "PR `#78` is no longer a target-coverage gap" in rollout
+    assert "closed target-coverage fixture" in audit
+    assert "b1ddafced86302f461e95259699f1efde5ec87c9" in audit

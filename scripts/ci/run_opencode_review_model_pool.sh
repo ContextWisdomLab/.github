@@ -41,6 +41,7 @@ write_prompt() {
 	local prompt_file="$2"
 	local intro
 	local contract_file
+	local evidence_excerpt_file
 
 	if [ -n "${OPENCODE_REVIEW_INTRO:-}" ]; then
 		intro="$OPENCODE_REVIEW_INTRO"
@@ -48,6 +49,7 @@ write_prompt() {
 		intro="Review PR #\${PR_NUMBER} in \${OPENCODE_SOURCE_WORKDIR} with \${model_candidate}."
 	fi
 	contract_file="$OPENCODE_REVIEW_WORKDIR/opencode-review-contract-${model_candidate//\//-}.md"
+	evidence_excerpt_file="$OPENCODE_REVIEW_WORKDIR/bounded-review-evidence-excerpt.md"
 	cp "$GITHUB_WORKSPACE/scripts/ci/opencode_review_prompt_template.md" "$contract_file"
 	OPENCODE_REVIEW_INTRO="$intro" \
 		PROMPT_MODEL_CANDIDATE="$model_candidate" \
@@ -55,16 +57,21 @@ write_prompt() {
 
 	{
 		printf '%s\n\n' "$intro"
-		printf 'Read and follow the complete review contract in `%s` before producing the final review.\n' "$contract_file"
-		printf 'Read bounded review evidence from `%s` and source files from `%s`.\n' "$OPENCODE_EVIDENCE_FILE" "$OPENCODE_SOURCE_WORKDIR"
+		printf 'Follow the complete review contract in `%s`; use this launcher as a packet-first entry point, not as a reduced policy.\n' "$contract_file"
+		printf 'Read bounded review evidence from `%s` and source files from `%s` when tool access works.\n' "$OPENCODE_EVIDENCE_FILE" "$OPENCODE_SOURCE_WORKDIR"
 		printf 'Use the trusted review workspace `%s` for scripts, prompts, policy files, CodeGraph config, and validation helpers.\n\n' "$OPENCODE_REVIEW_WORKDIR"
-		printf 'Do not treat this compact launcher as a reduced review policy. It exists only to avoid provider context-window overflow; the contract file remains authoritative.\n'
-		printf 'Mandatory first actions: read the review contract, read bounded-review-evidence.md/evidence paths, inspect changed files and focused related code, use the configured structural/search tools required by the contract, then run safe verification where applicable.\n'
+		printf 'First review the current-head evidence excerpt in this prompt. Then inspect full evidence, changed files, focused related code, and configured structural/search tools when available.\n'
+		printf 'If tool calls or file reads are unavailable, do not emit progress notes or raw tool-call text. Finish from the inlined evidence packet only when it contains enough changed-file, hunk, coverage, check, and thread evidence; otherwise return REQUEST_CHANGES with a concrete missing-evidence finding tied to the absent evidence, not a generic model-exhaustion message.\n'
 		printf 'Always return a final control block instead of a progress summary. Return only the final review body.\n\n'
 		printf 'Required control block shape:\n'
 		printf '```json\n'
 		printf '{"head_sha":"%s","run_id":"%s","run_attempt":"%s","result":"APPROVE or REQUEST_CHANGES","reason":"short reason","summary":"short review summary with concrete evidence and all required labels","findings":[]}\n' "$HEAD_SHA" "$RUN_ID" "$RUN_ATTEMPT"
 		printf '```\n'
+		if [ -s "$evidence_excerpt_file" ]; then
+			printf '\nCurrent-head evidence packet:\n\n'
+			cat "$evidence_excerpt_file"
+			printf '\n'
+		fi
 	} >"$prompt_file"
 }
 

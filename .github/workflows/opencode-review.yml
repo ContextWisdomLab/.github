@@ -69,12 +69,16 @@ jobs:
           WORKFLOW_REF: ${{ github.workflow_ref }}
         run: |
           set -euo pipefail
-          trusted_ref="${INPUT_CANONICAL_REF:-main}"
-          case "$WORKFLOW_REF" in
-            ContextualWisdomLab/.github/.github/workflows/opencode-review.yml@*)
-              trusted_ref="${WORKFLOW_REF##*@}"
-              ;;
-          esac
+          if [ -n "$INPUT_CANONICAL_REF" ]; then
+            trusted_ref="$INPUT_CANONICAL_REF"
+          else
+            trusted_ref="main"
+            case "$WORKFLOW_REF" in
+              ContextualWisdomLab/.github/.github/workflows/opencode-review.yml@*)
+                trusted_ref="${WORKFLOW_REF##*@}"
+                ;;
+            esac
+          fi
           printf 'ref=%s\n' "$trusted_ref" >>"$GITHUB_OUTPUT"
 
       - name: Checkout trusted OpenCode coverage contract
@@ -823,7 +827,7 @@ jobs:
     needs: [coverage-evidence]
     if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target')
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 360
     permissions:
       actions: write
       checks: read
@@ -844,12 +848,16 @@ jobs:
           WORKFLOW_REF: ${{ github.workflow_ref }}
         run: |
           set -euo pipefail
-          trusted_ref="${INPUT_CANONICAL_REF:-main}"
-          case "$WORKFLOW_REF" in
-            ContextualWisdomLab/.github/.github/workflows/opencode-review.yml@*)
-              trusted_ref="${WORKFLOW_REF##*@}"
-              ;;
-          esac
+          if [ -n "$INPUT_CANONICAL_REF" ]; then
+            trusted_ref="$INPUT_CANONICAL_REF"
+          else
+            trusted_ref="main"
+            case "$WORKFLOW_REF" in
+              ContextualWisdomLab/.github/.github/workflows/opencode-review.yml@*)
+                trusted_ref="${WORKFLOW_REF##*@}"
+                ;;
+            esac
+          fi
           printf 'ref=%s\n' "$trusted_ref" >>"$GITHUB_OUTPUT"
 
       - name: Checkout trusted OpenCode review workflow
@@ -975,8 +983,8 @@ jobs:
 
       - name: Install OpenCode CLI
         env:
-          OPENCODE_VERSION: "1.16.0"
-          OPENCODE_SHA256: a741c43e737b2033f5e7ee151b162341e441034d6a64b172272a3f3a3729e87d
+          OPENCODE_VERSION: "1.17.13"
+          OPENCODE_SHA256: 157afa289d1a8d9372de0ce19ac726119b937a1f6b201808d46f06e4e59bb348
         run: |
           set -euo pipefail
           archive="${RUNNER_TEMP}/opencode-linux-x64.tar.gz"
@@ -2239,7 +2247,7 @@ jobs:
         id: opencode_review_model_pool
         if: needs.coverage-evidence.result == 'success'
         continue-on-error: true
-        timeout-minutes: 20
+        timeout-minutes: 310
         env:
           STRIX_GITHUB_MODELS_TOKEN: ${{ secrets.STRIX_GITHUB_MODELS_TOKEN || github.token }}
           GITHUB_TOKEN: ${{ secrets.STRIX_GITHUB_MODELS_TOKEN || github.token }}
@@ -2247,13 +2255,13 @@ jobs:
           SHARE: "false"
           NPM_CONFIG_IGNORE_SCRIPTS: "true"
           NO_COLOR: "1"
-          OPENCODE_MODEL_CANDIDATES: "github-models/openai/gpt-5-nano"
+          OPENCODE_MODEL_CANDIDATES: "github-models/openai/o4-mini github-models/openai/o3-mini github-models/openai/gpt-5-mini github-models/openai/gpt-5-nano github-models/openai/gpt-5 github-models/deepseek/deepseek-r1-0528 github-models/deepseek/deepseek-r1 github-models/deepseek/deepseek-v3-0324 github-models/openai/gpt-5-chat github-models/openai/o3 github-models/mistral-ai/mistral-medium-2505 github-models/meta/llama-4-maverick-17b-128e-instruct-fp8 github-models/meta/llama-4-scout-17b-16e-instruct"
           OPENCODE_MODEL_ATTEMPTS: "1"
-          OPENCODE_RUN_TIMEOUT_SECONDS: "240"
+          OPENCODE_RUN_TIMEOUT_SECONDS: "600"
           OPENCODE_EXPORT_TIMEOUT_SECONDS: "120"
-          OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "360"
+          OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "18000"
           OPENCODE_BACKOFF_INITIAL_SECONDS: "30"
-          OPENCODE_BACKOFF_MAX_SECONDS: "30"
+          OPENCODE_BACKOFF_MAX_SECONDS: "300"
           OPENCODE_FIRST_ATTEMPT_AGENT: ci-review
           OPENCODE_AGENT: ci-review-fallback
           OPENCODE_EVIDENCE_FILE: ${{ runner.temp }}/opencode-review-evidence.md
