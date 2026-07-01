@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+
 STRUCTURAL_FAILURE_PHRASES = (
     "structural exploration was not possible",
     "structural exploration not possible",
@@ -204,29 +205,24 @@ def control_review_text(value: dict[str, Any]) -> str:
     for finding in value.get("findings", []) or []:
         if not isinstance(finding, dict):
             continue
-        chunks.extend(
-            str(finding.get(field, ""))
-            for field in (
-                "path",
-                "line",
-                "severity",
-                "title",
-                "problem",
-                "root_cause",
-                "fix_direction",
-                "regression_test_direction",
-                "suggested_diff",
-            )
-        )
+        chunks.extend(str(finding.get(field, "")) for field in (
+            "path",
+            "line",
+            "severity",
+            "title",
+            "problem",
+            "root_cause",
+            "fix_direction",
+            "regression_test_direction",
+            "suggested_diff",
+        ))
     return "\n".join(chunks)
 
 
 def contains_non_actionable_failed_check_review(value: dict[str, Any]) -> bool:
     """Return whether a review punts failed-check diagnosis back to the reader."""
     combined = control_review_text(value).casefold()
-    return any(
-        phrase in combined for phrase in NON_ACTIONABLE_FAILED_CHECK_REVIEW_PHRASES
-    )
+    return any(phrase in combined for phrase in NON_ACTIONABLE_FAILED_CHECK_REVIEW_PHRASES)
 
 
 def mentions_changed_file_evidence(reason: str, summary: str) -> bool:
@@ -242,9 +238,7 @@ def current_changed_files() -> set[str]:
     try:
         return {
             line.strip()
-            for line in Path(changed_files_path)
-            .read_text(encoding="utf-8")
-            .splitlines()
+            for line in Path(changed_files_path).read_text(encoding="utf-8").splitlines()
             if line.strip()
         }
     except OSError:
@@ -285,23 +279,13 @@ def contradicts_changed_file_kinds(reason: str, summary: str) -> bool:
         return False
 
     combined = f"{reason}\n{summary}".casefold()
-    has_source_like_change = any(
-        changed_file_is_source_like(path) for path in changed_files
-    )
-    has_test_like_change = any(
-        changed_file_is_test_like(path) for path in changed_files
-    )
-    if has_source_like_change and any(
-        phrase in combined for phrase in SOURCE_KIND_FALSE_PHRASES
-    ):
+    has_source_like_change = any(changed_file_is_source_like(path) for path in changed_files)
+    has_test_like_change = any(changed_file_is_test_like(path) for path in changed_files)
+    if has_source_like_change and any(phrase in combined for phrase in SOURCE_KIND_FALSE_PHRASES):
         return True
-    if has_source_like_change and any(
-        phrase in combined for phrase in EXECUTABLE_KIND_FALSE_PHRASES
-    ):
+    if has_source_like_change and any(phrase in combined for phrase in EXECUTABLE_KIND_FALSE_PHRASES):
         return True
-    if has_test_like_change and any(
-        phrase in combined for phrase in TEST_KIND_FALSE_PHRASES
-    ):
+    if has_test_like_change and any(phrase in combined for phrase in TEST_KIND_FALSE_PHRASES):
         return True
     return False
 
@@ -318,23 +302,16 @@ def mentions_actual_changed_file(reason: str, summary: str) -> bool:
 def mentions_verification_posture(reason: str, summary: str) -> bool:
     """Return whether an approval records the concrete review surfaces checked."""
     combined = f"{reason}\n{summary}".casefold()
-    return (
-        all(label in combined for label in APPROVAL_VERIFICATION_LABELS)
-        and "codegraph" in combined
-    )
+    return all(label in combined for label in APPROVAL_VERIFICATION_LABELS) and "codegraph" in combined
 
 
 def label_section(text: str, label: str) -> str:
     """Return text after a verification label until the next known label."""
-
     def label_matches(candidate: str) -> list[re.Match[str]]:
         """Return exact verification-label matches without suffix collisions."""
         matches = []
         for match in re.finditer(re.escape(candidate), text):
-            if (
-                candidate == "coverage:"
-                and text[max(0, match.start() - 10) : match.start()] == "docstring "
-            ):
+            if candidate == "coverage:" and text[max(0, match.start() - 10) : match.start()] == "docstring ":
                 continue
             matches.append(match)
         return matches
@@ -472,9 +449,7 @@ def build_approval_repair_summary(summary: str, evidence_text: str) -> str | Non
             "because no supported source files or package manifests were found."
         )
     else:
-        coverage_line = (
-            "Coverage: coverage execution evidence proves 100% test coverage."
-        )
+        coverage_line = "Coverage: coverage execution evidence proves 100% test coverage."
         docstring_line = "Docstring coverage: coverage execution evidence proves 100% docstring coverage."
 
     repair = f"""\
@@ -503,11 +478,9 @@ Security/privacy: workflow-token, review-gate, and repository-automation securit
 
 def repair_approval_summary(reason: str, summary: str) -> str:
     """Repair an APPROVE summary only from objective bounded evidence."""
-    if (
-        mentions_changed_file_evidence(reason, summary)
-        and mentions_verification_posture(reason, summary)
-        and mentions_full_coverage(reason, summary)
-    ):
+    if mentions_changed_file_evidence(reason, summary) and mentions_verification_posture(
+        reason, summary
+    ) and mentions_full_coverage(reason, summary):
         return summary
 
     evidence_file = approval_repair_evidence_file()
@@ -733,12 +706,7 @@ def main(argv: list[str]) -> int:
         if control is None:
             continue
 
-        normalized_json = (
-            json.dumps(control, separators=(",", ":"), ensure_ascii=False)
-            .replace("<", r"\u003c")
-            .replace(">", r"\u003e")
-            .replace("&", r"\u0026")
-        )
+        normalized_json = json.dumps(control, separators=(",", ":"), ensure_ascii=False).replace("<", r"\u003c").replace(">", r"\u003e").replace("&", r"\u0026")
         output_file.write_text(
             "\n".join(
                 [
