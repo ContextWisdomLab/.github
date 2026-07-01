@@ -38,7 +38,7 @@ def test_recent_fix_marker_is_head_scoped():
 
 
 def test_needs_autofix_uses_current_head_evidence():
-    """Autofix only starts from current-head review or thread evidence."""
+    """Autofix starts from current-head OpenCode change requests."""
     head = "a" * 40
     pr = make_pr(
         headRefOid=head,
@@ -60,6 +60,15 @@ def test_needs_autofix_uses_current_head_evidence():
         True,
         ("current-head OpenCode requested changes", "1 active unresolved review thread(s)"),
     )
+
+
+def test_needs_autofix_ignores_thread_only_feedback():
+    """Thread-only feedback must not start an autonomous autofix run."""
+    pr = make_pr(
+        reviewThreads={"nodes": [{"id": "thread", "isResolved": False, "isOutdated": False}]},
+    )
+
+    assert fix.needs_autofix(pr) == (False, ())
 
 
 @pytest.mark.parametrize(
