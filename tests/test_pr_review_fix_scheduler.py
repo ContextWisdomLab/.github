@@ -68,7 +68,7 @@ def test_needs_autofix_uses_current_head_evidence():
         ("DIRTY", "Actionable source-backed finding with suggested diff."),
         ("CONFLICTING", "Actionable source-backed finding with suggested diff."),
         ("CLEAN", "OpenCode could not establish approval sufficiency because the model pool exhausted."),
-        ("CLEAN", "OpenCode found unresolved human review thread evidence before approval."),
+        ("CLEAN", "OpenCode found unresolved reviewer or review-agent thread evidence before approval."),
         ("CLEAN", "Failed-check evidence reports coverage-evidence failure."),
         ("CLEAN", "Failed check evidence shows coverage-evidence failed on the current head."),
     ],
