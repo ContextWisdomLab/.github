@@ -193,16 +193,30 @@ emit_strix_vulnerability_evidence() {
 
 owner="${GH_REPOSITORY%%/*}"
 repo="${GH_REPOSITORY#*/}"
+pr_node_id="$(
+	gh api graphql \
+		-f owner="$owner" \
+		-f name="$repo" \
+		-F number="$PR_NUMBER" \
+		-f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id}}}' \
+		--jq '.data.repository.pullRequest.id // empty'
+)"
+if [ -z "$pr_node_id" ]; then
+	echo "failed to resolve pull request node id for ${GH_REPOSITORY}#${PR_NUMBER}" >&2
+	exit 1
+fi
 failed_contexts="$(mktemp)"
 workflow_run_contexts="$(mktemp)"
 active_failed_contexts="$(mktemp)"
 manual_success_contexts="$(mktemp)"
+manual_success_check_runs="$(mktemp)"
 superseded_failed_contexts="$(mktemp)"
 tmp_files=(
 	"$failed_contexts"
 	"$workflow_run_contexts"
 	"$active_failed_contexts"
 	"$manual_success_contexts"
+	"$manual_success_check_runs"
 	"$superseded_failed_contexts"
 )
 cleanup() {
@@ -243,6 +257,20 @@ manual_success_for_label() {
 		return 0
 	done <"$manual_success_contexts"
 
+	while IFS=$'\t' read -r success_context success_url success_description; do
+		if [ "$(printf '%s' "$success_context" | tr '[:upper:]' '[:lower:]')" != "$key" ]; then
+			continue
+		fi
+		success_run_id="$(printf '%s' "$success_url" | sed -n 's#.*/actions/runs/\([0-9][0-9]*\).*#\1#p')"
+		if [ -n "$failed_run_id" ] &&
+			[ -n "$success_run_id" ] &&
+			[ "$failed_run_id" -ge "$success_run_id" ]; then
+			continue
+		fi
+		printf '%s\t%s\t%s\n' "$success_context" "$success_url" "$success_description"
+		return 0
+	done <"$manual_success_check_runs"
+
 	return 1
 }
 
@@ -251,8 +279,9 @@ gh api graphql \
 	-f owner="$owner" \
 	-f name="$repo" \
 	-F number="$PR_NUMBER" \
+	-f prId="$pr_node_id" \
 	-f query='
-		query($owner:String!,$name:String!,$number:Int!) {
+		query($owner:String!,$name:String!,$number:Int!,$prId:ID!) {
 			repository(owner:$owner,name:$name) {
 				pullRequest(number:$number) {
 					statusCheckRollup {
@@ -265,6 +294,7 @@ gh api graphql \
 									status
 									conclusion
 									detailsUrl
+									isRequired(pullRequestId: $prId)
 									checkSuite {
 										workflowRun {
 											databaseId
@@ -292,6 +322,13 @@ gh api graphql \
 			if .__typename == "CheckRun" then
 				select((.status // "") == "COMPLETED")
 				| select((.conclusion // "" | ascii_upcase) as $c | ["FAILURE","TIMED_OUT","ACTION_REQUIRED","CANCELLED","STARTUP_FAILURE"] | index($c))
+				| select(((.conclusion // "" | ascii_downcase) == "cancelled" and (.name // "") == "metadata-only gate evaluation" and (.checkSuite.workflowRun.workflow.name // "") == "PR Governance") | not)
+				| select(((.conclusion // "" | ascii_downcase) == "cancelled" and ((.isRequired // false) | not) and (.checkSuite.workflowRun.workflow.name // "") == "CodeQL") | not)
+				| select(((.conclusion // "" | ascii_downcase) == "cancelled" and (.name // "") == "scan-pr-queue" and ((.checkSuite.workflowRun.workflow.name // "") == "PR Review Merge Scheduler" or (.checkSuite.workflowRun.workflow.name // "") == "Required PR Review Merge Scheduler")) | not)
+				| select((.name // "") != "opencode-review")
+				| select((.checkSuite.workflowRun.workflow.name // "") != "OpenCode Review")
+				| select((.checkSuite.workflowRun.workflow.name // "") != "Required OpenCode Review")
+				| select((.checkSuite.workflowRun.workflow.name // "") != "OpenCode PR Review")
 				| [
 					"check_run",
 					(((.checkSuite.workflowRun.workflow.name // "") + "/" + (.name // "check")) | gsub("^/"; "")),
@@ -317,6 +354,59 @@ gh api graphql \
 		| .[]
 		| @tsv
 		' >"$failed_contexts"
+
+gh api graphql \
+	-f owner="$owner" \
+	-f name="$repo" \
+	-F number="$PR_NUMBER" \
+	-f prId="$pr_node_id" \
+	-f query='
+		query($owner:String!,$name:String!,$number:Int!,$prId:ID!) {
+			repository(owner:$owner,name:$name) {
+				pullRequest(number:$number) {
+					statusCheckRollup {
+						contexts(first: 100) {
+							nodes {
+								__typename
+								... on CheckRun {
+									name
+									status
+									conclusion
+									detailsUrl
+									isRequired(pullRequestId: $prId)
+									checkSuite {
+										workflowRun {
+											databaseId
+											workflow {
+												name
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	' \
+	--jq '
+		(.data.repository.pullRequest.statusCheckRollup.contexts.nodes // [])
+		| map(
+			select(.__typename == "CheckRun")
+			| select((.status // "") == "COMPLETED")
+			| select((.conclusion // "" | ascii_upcase) == "SUCCESS")
+			| select((.name // "" | ascii_downcase) == "strix")
+			| select((.checkSuite.workflowRun.workflow.name // "") == "Strix Security Scan" or (.checkSuite.workflowRun.workflow.name // "") == "Strix")
+			| [
+				"strix",
+				(.detailsUrl // ""),
+				"Current-head successful Strix check run superseded stale failed Strix evidence."
+			]
+		)
+		| .[]
+		| @tsv
+	' >"$manual_success_check_runs"
 
 	env HEAD_SHA="$HEAD_SHA" gh run list \
 		--repo "$GH_REPOSITORY" \
