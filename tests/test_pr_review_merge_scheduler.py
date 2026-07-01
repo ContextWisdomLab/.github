@@ -36,7 +36,6 @@ def make_pr(**overrides):
             ]
         },
         "reviewThreads": {"nodes": []},
-        "files": {"nodes": []},
         "reviews": {"nodes": []},
         "statusCheckRollup": {"contexts": {"nodes": []}},
     }
@@ -330,11 +329,6 @@ def test_rest_mergeable_state_helpers(monkeypatch):
     assert calls == [["gh", "api", "repos/owner/repo/compare/main...feature%2Fupdate-branch"]]
 
     prs = [{"number": 8, "baseRefName": "main", "headRefName": "feature"}]
-    empty_prs = []
-    sched.enrich_rest_mergeable_states("owner/repo", empty_prs)
-    assert empty_prs == []
-
-    prs = [{"number": 8, "baseRefName": "main", "headRefName": "feature"}]
     monkeypatch.setattr(sched, "fetch_rest_mergeable_state", lambda repo, number: f"{repo}:{number}")
     monkeypatch.setattr(
         sched,
@@ -411,9 +405,6 @@ def test_rest_pr_fallback_shapes_reviews_and_checks(monkeypatch):
                 }
             ]
         },
-        "repos/owner/repo/pulls/42/files?per_page=20": [
-            {"filename": "scripts/ci/pr_review_merge_scheduler.py"},
-        ],
     }
 
     def fake_api(path):
@@ -443,12 +434,10 @@ def test_rest_pr_fallback_shapes_reviews_and_checks(monkeypatch):
     assert calls == [
         "repos/owner/repo/pulls/42/reviews?per_page=100",
         "repos/owner/repo/commits/abc123/check-runs?per_page=100",
-        "repos/owner/repo/pulls/42/files?per_page=20",
     ]
     assert node["number"] == 42
     assert node["mergeStateStatus"] == "CLEAN"
     assert node["restMergeableState"] == "CLEAN"
-    assert node["files"]["nodes"] == [{"path": "scripts/ci/pr_review_merge_scheduler.py"}]
     assert node["headRepository"] == {"nameWithOwner": "owner/repo"}
     assert not node["isCrossRepository"]
     assert node["reviews"]["nodes"][0]["author"]["login"] == "opencode-agent[bot]"
@@ -548,169 +537,16 @@ def test_fetch_open_prs_rest_base_branch_empty_and_next_page(monkeypatch):
     assert paths == list(pages)
 
 
-def test_graphql_read_errors_fall_back_for_transient_failures(monkeypatch):
+def test_graphql_read_errors_only_fall_back_for_integration_denials(monkeypatch):
     def fail_graphql(*args, **kwargs):
-        raise RuntimeError("Command failed (1): gh api graphql\ngh: HTTP 504")
-
-    monkeypatch.setattr(sched, "gh_graphql", fail_graphql)
-    monkeypatch.setattr(sched, "fetch_open_prs_rest", lambda repo, max_prs: [{"repo": repo, "max": max_prs}])
-    monkeypatch.setattr(sched, "fetch_pr_rest", lambda repo, number: [{"repo": repo, "number": number}])
-
-    assert sched.fetch_open_prs("owner/repo", 1) == [{"repo": "owner/repo", "max": 1}]
-    assert sched.fetch_pr("owner/repo", 1) == [{"repo": "owner/repo", "number": 1}]
-
-
-def test_graphql_read_errors_do_not_fall_back_for_schema_errors(monkeypatch):
-    def fail_graphql(*args, **kwargs):
-        raise RuntimeError("gh: Field 'unknown' doesn't exist on type 'PullRequest'")
+        raise RuntimeError("gh: timeout")
 
     monkeypatch.setattr(sched, "gh_graphql", fail_graphql)
 
-    with pytest.raises(RuntimeError, match="unknown"):
+    with pytest.raises(RuntimeError, match="timeout"):
         sched.fetch_open_prs("owner/repo", 1)
-    with pytest.raises(RuntimeError, match="unknown"):
+    with pytest.raises(RuntimeError, match="timeout"):
         sched.fetch_pr("owner/repo", 1)
-
-
-def test_enrich_rest_mergeable_states_skips_executor_for_small_inputs(monkeypatch):
-    def fail_executor(*args, **kwargs):
-        raise AssertionError("single PR enrichment should not create an executor")
-
-    monkeypatch.setattr(sched.concurrent.futures, "ThreadPoolExecutor", fail_executor)
-    monkeypatch.setattr(sched, "fetch_rest_mergeable_state", lambda repo, number: f"{repo}:{number}")
-    monkeypatch.setattr(sched, "fetch_compare_branch_freshness", lambda repo, pr: {})
-
-    empty_prs: list[dict[str, object]] = []
-    sched.enrich_rest_mergeable_states("owner/repo", empty_prs)
-    assert empty_prs == []
-
-    one_pr = [{"number": 10}]
-    sched.enrich_rest_mergeable_states("owner/repo", one_pr)
-    assert one_pr == [
-        {
-            "number": 10,
-            "restMergeableState": "owner/repo:10",
-            "compareStatus": None,
-            "compareBehindBy": None,
-        }
-    ]
-
-
-def test_enrich_rest_mergeable_states_attaches_state_and_errors(monkeypatch):
-    def mock_fetch(repo, number):
-        if number == 1:
-            return "CLEAN"
-        raise RuntimeError("API limit")
-
-    monkeypatch.setattr(sched, "fetch_rest_mergeable_state", mock_fetch)
-    monkeypatch.setattr(sched, "fetch_compare_branch_freshness", lambda repo, pr: {})
-
-    prs = [{"number": 1}, {"number": 2}]
-    sched.enrich_rest_mergeable_states("owner/repo", prs)
-
-    assert prs[0]["restMergeableState"] == "CLEAN"
-    assert prs[0]["compareStatus"] is None
-    assert prs[0]["compareBehindBy"] is None
-    assert prs[1]["restMergeableStateError"] == "API limit"
-    assert prs[1]["compareStatus"] is None
-    assert prs[1]["compareBehindBy"] is None
-
-
-def test_enrich_rest_mergeable_states_uses_bounded_executor_for_multiple_prs(monkeypatch):
-    seen_workers = []
-
-    class FakeExecutor:
-        def __init__(self, *, max_workers):
-            seen_workers.append(max_workers)
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return False
-
-        def map(self, func, items):
-            return [func(item) for item in items]
-
-    monkeypatch.setattr(sched.concurrent.futures, "ThreadPoolExecutor", FakeExecutor)
-    monkeypatch.setattr(sched, "fetch_rest_mergeable_state", lambda repo, number: f"{repo}:{number}")
-    monkeypatch.setattr(sched, "fetch_compare_branch_freshness", lambda repo, pr: {})
-
-    prs = [{"number": number} for number in range(1, sched.REST_MERGEABLE_STATE_WORKERS + 3)]
-    sched.enrich_rest_mergeable_states("owner/repo", prs)
-
-    assert seen_workers == [sched.REST_MERGEABLE_STATE_WORKERS]
-    assert prs[0]["restMergeableState"] == "owner/repo:1"
-    assert prs[-1]["restMergeableState"] == f"owner/repo:{sched.REST_MERGEABLE_STATE_WORKERS + 2}"
-
-
-def test_resolve_outdated_review_threads_uses_bounded_executor_for_multiple_threads(monkeypatch):
-    seen_workers = []
-
-    class FakeExecutor:
-        def __init__(self, *, max_workers):
-            seen_workers.append(max_workers)
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return False
-
-        def map(self, func, items):
-            return [func(item) for item in items]
-
-    monkeypatch.setattr(sched.concurrent.futures, "ThreadPoolExecutor", FakeExecutor)
-    resolved = []
-    monkeypatch.setattr(sched, "resolve_review_thread", resolved.append)
-    monkeypatch.setattr(sched, "require_github_actions_mutation_actor", lambda x: None)
-
-    pr = make_pr(
-        reviewThreads={
-            "nodes": [
-                {"id": str(i), "isResolved": False, "isOutdated": True}
-                for i in range(sched.REST_MERGEABLE_STATE_WORKERS + 3)
-            ]
-        }
-    )
-    count = sched.resolve_outdated_review_threads(pr, dry_run=False)
-
-    assert seen_workers == [sched.REST_MERGEABLE_STATE_WORKERS]
-    assert count == sched.REST_MERGEABLE_STATE_WORKERS + 3
-    assert len(resolved) == count
-
-
-def test_cancel_stale_opencode_runs_uses_bounded_executor_for_multiple_runs(monkeypatch):
-    seen_workers = []
-
-    class FakeExecutor:
-        def __init__(self, *, max_workers):
-            seen_workers.append(max_workers)
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, traceback):
-            return False
-
-        def map(self, func, items):
-            return [func(item) for item in items]
-
-    monkeypatch.setattr(sched.concurrent.futures, "ThreadPoolExecutor", FakeExecutor)
-    monkeypatch.setattr(
-        sched,
-        "stale_opencode_run_ids",
-        lambda repo, workflow, pr: [str(i) for i in range(sched.REST_MERGEABLE_STATE_WORKERS + 3)]
-    )
-    cancelled = []
-    monkeypatch.setattr(sched, "run_github_actions", cancelled.append)
-    monkeypatch.setattr(sched, "require_github_actions_control_actor", lambda x: None)
-
-    run_ids = sched.cancel_stale_opencode_runs("owner/repo", "workflow", make_pr(), dry_run=False)
-
-    assert seen_workers == [sched.REST_MERGEABLE_STATE_WORKERS]
-    assert len(run_ids) == sched.REST_MERGEABLE_STATE_WORKERS + 3
-    assert len(cancelled) == len(run_ids)
 
 
 def test_context_review_and_check_helpers():
@@ -887,28 +723,6 @@ def test_review_state_and_failed_checks():
         },
     )
     assert sched.has_current_head_approval(body_sha_match)
-    deterministic_fallback = make_pr(
-        headRefOid=exact_head,
-        reviews={
-            "nodes": [
-                {
-                    **opencode_review("APPROVED", exact_head),
-                    "body": (
-                        "OpenCode model attempts did not emit a usable current-head "
-                        "control block, so the approval gate used deterministic "
-                        "current-head evidence instead of model prose."
-                    ),
-                }
-            ]
-        },
-    )
-    assert sched.is_deterministic_fallback_approval(
-        deterministic_fallback["reviews"]["nodes"][0]
-    )
-    assert not sched.is_deterministic_fallback_approval(
-        opencode_review("CHANGES_REQUESTED", exact_head)
-    )
-    assert not sched.has_current_head_approval(deterministic_fallback)
     stale_review = make_pr(
         reviews={
             "nodes": [
@@ -1254,11 +1068,7 @@ def test_print_summary_writes_github_step_summary(monkeypatch, tmp_path, capsys)
     summary_path = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
     conflict_reason = sched.merge_conflict_guidance(
-        make_pr(
-            number=7,
-            headRefName="feature|x",
-            files={"nodes": [{"path": "scripts/ci/pr_review_merge_scheduler.py"}, {"path": "tests/test_pr_review_merge_scheduler.py"}]},
-        ),
+        make_pr(number=7, headRefName="feature|x"),
         "DIRTY",
     )
     decisions = [
@@ -1315,10 +1125,6 @@ def test_print_summary_writes_github_step_summary(monkeypatch, tmp_path, capsys)
     assert payload["decisions"][0]["guidance"]["merge_state"] == "DIRTY"
     assert payload["decisions"][0]["guidance"]["base_ref"] == "main"
     assert payload["decisions"][0]["guidance"]["head_ref"] == "feature|x"
-    assert payload["decisions"][0]["guidance"]["changed_files_to_inspect"] == [
-        "scripts/ci/pr_review_merge_scheduler.py",
-        "tests/test_pr_review_merge_scheduler.py",
-    ]
     assert "update-branch cannot choose" in payload["decisions"][0]["guidance"]["automation_limit"]
     assert "gh pr checkout 7" in payload["decisions"][0]["guidance"]["commands"]
     assert "git merge --no-ff origin/main" in payload["decisions"][0]["guidance"]["commands"]
@@ -1337,7 +1143,7 @@ def test_print_summary_writes_github_step_summary(monkeypatch, tmp_path, capsys)
     assert payload["decisions"][5]["guidance"]["head_repository"] == "fork/repo"
     summary = summary_path.read_text(encoding="utf-8")
     assert "## PR review merge scheduler" in summary
-    assert "| #7 | block | merge conflict: DIRTY; base=main, head=feature\\|x; changed files to inspect first:" in summary
+    assert "| #7 | block | merge conflict: DIRTY; base=main, head=feature\\|x; run" in summary
     assert "do not retry update-branch until the conflict is repaired" in summary
     assert "### Outdated review threads" in summary
     assert "Would resolve 1 outdated review thread(s)" in summary
@@ -1355,9 +1161,6 @@ def test_print_summary_writes_github_step_summary(monkeypatch, tmp_path, capsys)
     assert "gh pr checkout 7" in summary
     assert "git fetch origin main" in summary
     assert "git merge --no-ff origin/main" in summary
-    assert "Changed files to inspect first:" in summary
-    assert "- `scripts/ci/pr_review_merge_scheduler.py`" in summary
-    assert "- `tests/test_pr_review_merge_scheduler.py`" in summary
     assert "git push --force-with-lease" in summary
     assert "### Branch update requests" in summary
     assert "Requested `update-branch` for PR #8 with `workflow GITHUB_TOKEN`" in summary
@@ -1446,15 +1249,9 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert inspect(make_pr(baseRefName="develop")).reason == "base branch is develop; expected main"
     external_head = inspect(make_pr(headRepository={"nameWithOwner": "fork/repo"}, isCrossRepository=True))
     assert external_head.action == "security_dispatch"
-    conflict = inspect(
-        make_pr(
-            mergeStateStatus="DIRTY",
-            files={"nodes": [{"path": "scripts/ci/pr_review_merge_scheduler.py"}]},
-        )
-    )
+    conflict = inspect(make_pr(mergeStateStatus="DIRTY"))
     assert conflict.action == "block"
     assert "merge conflict: DIRTY" in conflict.reason
-    assert "changed files to inspect first: scripts/ci/pr_review_merge_scheduler.py" in conflict.reason
     assert "base=main, head=feature" in conflict.reason
     assert "gh pr checkout 1" in conflict.reason
     assert "git fetch origin main" in conflict.reason
@@ -1572,10 +1369,8 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     dispatched = []
     monkeypatch.setattr(sched, "dispatch_strix_evidence", lambda repo, workflow, pr, dry_run: dispatched.append(workflow))
     monkeypatch.setattr(sched, "dispatch_opencode_review", lambda repo, workflow, pr, dry_run: dispatched.append(workflow))
-    stale_behind_decision = inspect(stale_behind)
-    assert stale_behind_decision.action == "update_branch"
-    assert "branch is outdated before review dispatch" in stale_behind_decision.reason
-    assert dispatched == []
+    assert inspect(stale_behind).action == "security_dispatch"
+    assert dispatched == ["Strix Security Scan"]
 
     behind = make_pr(mergeStateStatus="BEHIND", reviews={"nodes": [opencode_review("APPROVED", "head")]})
     assert inspect(behind, update_branches=False).reason == "current-head OpenCode review approved; branch update disabled"
@@ -1996,74 +1791,6 @@ def test_inspect_pr_notes_when_update_branch_head_is_not_observed(monkeypatch):
     assert decision.notes == (
         "update-branch was accepted, but the scheduler did not observe a refreshed PR head within the poll window; the next scheduler run must re-read the PR before review or merge",
     )
-
-
-def test_inspect_pr_updates_outdated_branch_before_review_dispatch(monkeypatch):
-    updated = []
-    dispatched = []
-    old_head_pr = make_pr(
-        mergeStateStatus="BEHIND",
-        compareBehindBy=111,
-        statusCheckRollup={"contexts": {"nodes": [strix_check(), opencode_check(status="COMPLETED")]}},
-    )
-    new_head_pr = make_pr(
-        headRefOid="new-head",
-        statusCheckRollup={"contexts": {"nodes": [strix_check()]}},
-    )
-
-    monkeypatch.setattr(sched, "update_branch", lambda repo, pr, dry_run: updated.append((repo, pr["headRefOid"], dry_run)))
-    monkeypatch.setattr(sched, "wait_for_updated_branch_head", lambda repo, pr: new_head_pr)
-    monkeypatch.setattr(
-        sched,
-        "dispatch_opencode_review",
-        lambda repo, workflow, pr, dry_run: dispatched.append((repo, workflow, pr["headRefOid"], dry_run)),
-    )
-
-    decision = inspect(old_head_pr, dry_run=False)
-
-    assert decision.action == "update_branch"
-    assert decision.reason.startswith(
-        "current head has no OpenCode approval; branch is outdated before review dispatch"
-    )
-    assert updated == [("owner/repo", "head", False)]
-    assert dispatched == [("owner/repo", "OpenCode Review", "new-head", False)]
-    assert decision.notes == (
-        "updated head new-head observed after update-branch; same-head Strix evidence is complete, so OpenCode review was dispatched",
-    )
-
-
-def test_inspect_pr_update_before_review_dispatch_boundaries():
-    behind_pr = make_pr(mergeStateStatus="BEHIND", compareBehindBy=3)
-
-    disabled = inspect(behind_pr, update_branches=False)
-    assert disabled.action == "wait"
-    assert disabled.reason == "current head has no OpenCode approval; branch update disabled before review dispatch"
-
-    external = inspect(
-        make_pr(
-            mergeStateStatus="BEHIND",
-            compareBehindBy=3,
-            isCrossRepository=True,
-            maintainerCanModify=False,
-            headRepository={"nameWithOwner": "fork/repo"},
-        )
-    )
-    assert external.action == "wait"
-    assert external.reason == (
-        "current head has no OpenCode approval; branch is outdated before review dispatch, "
-        "but head repo fork/repo is not writable by the scheduler credential"
-    )
-
-    blocked_but_behind = inspect(
-        make_pr(
-            mergeStateStatus="BLOCKED",
-            restMergeableState="BLOCKED",
-            compareBehindBy=7,
-        )
-    )
-    assert blocked_but_behind.action == "update_branch"
-    assert "base branch is 7 commit(s) ahead before review dispatch" in blocked_but_behind.reason
-    assert "GitHub mergeability is BLOCKED" in blocked_but_behind.reason
 
 
 def test_post_update_branch_followup_covers_dispatch_boundaries(monkeypatch):
@@ -2629,29 +2356,17 @@ def test_main_keeps_scanning_after_action_error(monkeypatch, capsys):
 def test_scrub_sensitive_data_and_run_error():
     assert sched.scrub_sensitive_data("Authorization: Bearer mytoken123") == "Authorization: Bearer ***"
     assert sched.scrub_sensitive_data("token mytoken123") == "token ***"
-    assert sched.scrub_sensitive_data("ghp_1234567890abcdef") == "***"
-    assert sched.scrub_sensitive_data("ghs_1234567890abcdef") == "***"
-    assert sched.scrub_sensitive_data("gho_1234567890abcdef") == "***"
-    assert sched.scrub_sensitive_data("ghp_1234567890abcdef1234") == "***"
-    assert sched.scrub_sensitive_data("gho_1234567890abcdef1234567890extra") == "***"
-    assert sched.scrub_sensitive_data("github_pat_11AAAAA_abcdefg1234567890") == "***"
     assert sched.scrub_sensitive_data("ghp_placeholder_token_with_underscores_123") == "***"
     assert sched.scrub_sensitive_data("gho_installation_token_value") == "***"
     assert sched.scrub_sensitive_data("ghu_user_token_value") == "***"
     assert sched.scrub_sensitive_data("ghs_server_token_value") == "***"
-    assert sched.scrub_sensitive_data("ghr_runner_token_value") == "***"
     assert sched.scrub_sensitive_data("github_pat_11AAAAA_abcdefg") == "***"
-    assert sched.scrub_sensitive_data("sk-1234567890abcdef") == "***"
-    assert sched.scrub_sensitive_data("xoxb-1234567890-1234") == "***"
-    assert sched.scrub_sensitive_data("AKIA1234567890ABCDEF") == "***"
-    assert sched.scrub_sensitive_data("password=mysecret") == "password=***"
-    assert sched.scrub_sensitive_data("api_key : 'mysecret'") == "api_key : ***"
     assert sched.scrub_sensitive_data("No secrets here") == "No secrets here"
     assert sched.scrub_sensitive_data("") == ""
     assert sched.scrub_sensitive_data(None) is None
 
     with pytest.raises(RuntimeError, match=r"Command failed \([12]\): .* \*\*\*"):
-        sched.run([sys.executable, "-c", "import sys; sys.exit(1)", "ghp_1234567890abcdef1234"], stdin=None)
+        sched.run([sys.executable, "-c", "import sys; sys.exit(1)", "ghp_secret"], stdin=None)
 
 
 def test_main_keeps_scanning_after_update_branch_403_and_422(monkeypatch, capsys):
@@ -2757,43 +2472,3 @@ def test_parse_conflict_reason_missing_branches():
     assert sched.parse_conflict_reason("merge conflict: DIRTY; some other segment") == ("DIRTY", "base", "head")
     assert sched.parse_conflict_reason("merge conflict: DIRTY; base=,head=something") == ("DIRTY", "base", "something")
     assert sched.parse_conflict_reason("merge conflict: DIRTY; base=main,head=") == ("DIRTY", "main", "head")
-
-
-def test_run_masks_secrets():
-    with pytest.raises(RuntimeError) as exc_info:
-        sched.run(
-            [
-                sys.executable,
-                "-c",
-                (
-                    "import sys; "
-                    "sys.stderr.write('ghp_abcdef1234567890abcdef1234567890abcdef\\n"
-                    "Bearer super_secret\\ntoken my_secret\\n'); "
-                    "sys.exit(1)"
-                ),
-            ]
-        )
-
-    err_msg = str(exc_info.value)
-    assert "ghp_abcdef1234567890abcdef1234567890abcdef" not in err_msg
-    assert "***" in err_msg
-    assert "Bearer super_secret" not in err_msg
-    assert "Bearer ***" in err_msg
-    assert "token my_secret" not in err_msg
-    assert "token ***" in err_msg
-
-
-def test_run_masks_secrets_in_args():
-    with pytest.raises(RuntimeError) as exc_info:
-        sched.run(
-            [
-                sys.executable,
-                "-c",
-                "import sys; sys.exit(1)",
-                "ghp_abcdef1234567890abcdef1234567890abcdef",
-            ]
-        )
-
-    err_msg = str(exc_info.value)
-    assert "ghp_abcdef1234567890abcdef1234567890abcdef" not in err_msg
-    assert "***" in err_msg

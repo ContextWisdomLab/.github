@@ -72,18 +72,11 @@ Execution evidence must be sandboxed. Run PoC, test, lint, security, and
 performance probes inside the repository CI workspace or an isolated temporary
 directory such as `mktemp -d` or `$RUNNER_TEMP`, with no persistent mutation
 outside test caches or scratch files. Default to a credential-scrubbed
-environment. If local tooling is missing or language/runtime versions differ,
-provision an isolated Docker, Docker Compose, devcontainer, Nix, or temporary
-package-install sandbox and run the verification there without persistent
-repository mutation. If repo-native verification legitimately needs network
-access or GitHub Secrets, pass only the specific environment variable names
-required, record why they were needed, and never print secret values; prefer
-synthetic/local substitutes over production services.
-When proposing a blocker fix, prefer proving the direction in an isolated
-scratch copy or temporary worktree: apply the minimal patch there, run the
-relevant tests, lint, or PoC, and cite the result. Do not commit, push, or
-mutate the reviewed branch; report the tested patch direction and include a
-GitHub suggestion-ready diff when concise enough.
+environment. If repo-native verification legitimately needs network access or
+GitHub Secrets, pass only the specific environment variable names required,
+record why they were needed, and never print secret values. If a useful
+verification cannot be sandboxed safely, do not run it; list it under
+`Suggested verification` with the missing sandbox condition.
 When available, prefer
 `python3 scripts/ci/sandboxed_verify.py --repo-root <reviewed worktree> --
 <verification command>` and cite its `SANDBOXED_VERIFY_RESULT` line as
@@ -94,19 +87,6 @@ For web applications that have both backend and frontend surfaces, prefer
 --backend-cmd <backend command> --frontend-cmd <frontend command> --e2e-cmd
 <e2e command>` with readiness URLs when available, then cite
 `SANDBOXED_WEB_E2E_RESULT`.
-
-For numerical, scientific, statistical, simulation, optimization,
-signal-processing, ML metric, estimator, inference, or formula-heavy changes,
-obtain the original paper/specification/reference through web search or
-official documentation before approving. Verify formulas, constants, priors,
-likelihoods, gradients, convergence criteria, random seeds, tolerances,
-parameter constraints, and numerical-stability choices against that source or
-an explicit derivation. Strengthen execution evidence with augmented scratch or
-repo tests across balanced and skewed true parameters, boundary values,
-degenerate or zero-variance inputs, deterministic seeds, numerical tolerance,
-convergence failure, and published-example or prior-version parity when
-applicable. A single happy-path test is not sufficient for a parameter-recovery
-or robustness claim.
 
 Forbidden bash usage includes commands that modify source files, commits,
 branches, tags, dependencies, databases, cloud resources, deployment state, or
@@ -121,31 +101,7 @@ integrity and concurrency, error handling and observability, performance and
 resource usage, maintainability, tests, documentation, accessibility,
 i18n/l10n, dependency license and supply-chain risk, IaC/cloud/Docker behavior,
 packaging, developer experience, and user experience. Prefer realistic
-interactions with changed code over generic checklists. Review connected code,
-rendering, test, documentation, generated-artifact, deployment, and operation
-paths instead of judging the changed hunk in isolation; flag contradictions
-between PR intent, code, docs, tests, schemas, generated files, UI rendering,
-and consumers. For changed scrolling, animation, transition, or motion behavior,
-verify that `prefers-reduced-motion: reduce` users are not forced through smooth
-scrolling or animated motion.
-When a PR replaces placeholder output, inferred output, or best-effort-generated
-output with concrete mapped values, trace each producer and fallback path for
-that mapping. Flag silent drops or regressions for legacy inputs, manual
-UI-created objects, handle-based objects, composite or ordered mappings,
-mismatched list lengths, or unmappable records, and require tests for the
-concrete path plus at least one fallback/legacy or composite path when present.
-For modal, dialog, drawer, popover, and toast overlays, verify viewport
-anchoring, inset coverage, scroll behavior, and mobile clipping; overlays must
-not be positioned relative to an inner app panel when the user needs a
-full-screen blocking layer.
-
-Review object naming and reserved-word safety for changed database tables,
-columns, primary keys, foreign keys, indexes, constraints, API fields, events,
-configuration keys, routes, classes, functions, methods, generated models, and
-serialized contracts. Follow local convention, but flag ambiguous single-word
-names such as `id`, `name`, `type`, `value`, `data`, `user`, `order`, `group`,
-or `key` when a two-word snake_case, camelCase, PascalCase, or local-equivalent
-name would reduce ORM, SQL reserved-word, serialization, or portability risk.
+interactions with changed code over generic checklists.
 
 Inspect repository-native execution contracts before choosing verification:
 `pyproject`, `tox`/`nox`, GitHub Actions matrices, `package.json`/engines/

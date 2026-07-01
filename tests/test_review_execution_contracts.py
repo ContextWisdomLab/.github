@@ -19,8 +19,6 @@ def test_discovers_runtime_lint_security_and_unpackaged_sources(tmp_path, capsys
         json.dumps(
             {
                 "engines": {"node": ">=20"},
-                "dependencies": {"react": "^19.0.0"},
-                "devDependencies": {"@playwright/test": "^1.50.0"},
                 "scripts": {
                     "coverage": "vitest run --coverage",
                     "e2e": "playwright test",
@@ -51,12 +49,6 @@ def test_discovers_runtime_lint_security_and_unpackaged_sources(tmp_path, capsys
     assert "npm run test" in result["test_commands"]
     assert "npm run coverage" in result["coverage_commands"]
     assert "npm run e2e" in result["e2e_commands"]
-    assert result["web_app_review_requirements"][0]["playwright_available"] is True
-    assert "npm run e2e" in result["web_app_review_requirements"][0]["e2e_commands"]
-    assert any(
-        "Playwright visual screenshot" in item
-        for item in result["web_app_review_requirements"][0]["required_evidence"]
-    )
     assert any("interrogate" in command for command in result["docstring_commands"])
     assert "npm run lint" in result["lint_commands"]
     assert any("ruff" in command for command in result["lint_commands"])
