@@ -203,6 +203,7 @@ _COMPILED_LABELS = {
     label: re.compile(re.escape(label)) for label in APPROVAL_VERIFICATION_LABELS
 }
 
+
 def control_review_text(value: dict[str, Any]) -> str:
     """Return human review text from a control block for policy validation."""
     chunks = [str(value.get("reason", "")), str(value.get("summary", ""))]
