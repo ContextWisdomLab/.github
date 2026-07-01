@@ -4193,6 +4193,7 @@ jobs:
                       select((.name // "") != "opencode-review")
                       | select((.workflow // "") != "OpenCode Review")
                       | select((.workflow // "") != "Required OpenCode Review")
+                      | select((.workflow // "") != "OpenCode PR Review")
                       | select((.conclusion // "" | ascii_upcase) as $c | ["FAILURE","TIMED_OUT","ACTION_REQUIRED","CANCELLED","STARTUP_FAILURE"] | index($c))
                       | select(((.conclusion // "" | ascii_downcase) == "cancelled" and (.name // "") == "metadata-only gate evaluation" and (.workflow // "") == "PR Governance") | not)
                       | select(((.conclusion // "" | ascii_downcase) == "cancelled" and ((.isRequired // false) | not) and (.workflow // "") == "CodeQL") | not)
@@ -4200,6 +4201,9 @@ jobs:
                       | "- " + (.label // "check") + ": " + (.conclusion // "unknown") + (if (.detailsUrl // "") != "" then " (" + .detailsUrl + ")" else "" end)
                     elif .kind == "status" then
                       select(((.label // "") | ascii_downcase | contains("opencode-review")) | not)
+                      | select((.label // "") != "OpenCode Review")
+                      | select((.label // "") != "Required OpenCode Review")
+                      | select((.label // "") != "OpenCode PR Review")
                       | select((.state // "" | ascii_upcase) as $s | ["FAILURE","ERROR"] | index($s))
                       | "- " + (.label // "status") + ": " + (.state // "unknown") + (if (.targetUrl // "") != "" then " (" + .targetUrl + ")" else "" end)
                     else
@@ -4279,6 +4283,7 @@ jobs:
                       select((.name // "") != "opencode-review")
                       | select((.checkSuite.workflowRun.workflow.name // "") != "OpenCode Review")
                       | select((.checkSuite.workflowRun.workflow.name // "") != "Required OpenCode Review")
+                      | select((.checkSuite.workflowRun.workflow.name // "") != "OpenCode PR Review")
                       | select((.status // "") != "COMPLETED")
                       | "- " + ((.checkSuite.workflowRun.workflow.name // "") + "/" + (.name // "check") | gsub("^/"; "")) + ": " + (.status // "unknown") + (if (.detailsUrl // "") != "" then " (" + .detailsUrl + ")" else "" end)
                     elif .__typename == "StatusContext" then
