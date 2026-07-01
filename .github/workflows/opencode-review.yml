@@ -174,7 +174,7 @@ jobs:
                 run_and_capture "Python test coverage" python3 -m coverage run -m pytest
                 run_and_capture "Python coverage threshold" python3 -m coverage report --fail-under=100
               elif python3 -c 'import pytest_cov' >/dev/null 2>&1; then
-                run_and_capture "Python pytest-cov coverage" PYTHONPATH=. python3 -m pytest --cov=. --cov-report=term-missing --cov-fail-under=100
+                run_and_capture "Python pytest-cov coverage" python3 -m pytest --cov=. --cov-report=term-missing --cov-fail-under=100
               else
                 append "### Python test coverage"
                 append ""
