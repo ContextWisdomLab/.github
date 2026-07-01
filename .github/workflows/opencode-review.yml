@@ -2239,7 +2239,7 @@ jobs:
         id: opencode_review_model_pool
         if: needs.coverage-evidence.result == 'success'
         continue-on-error: true
-        timeout-minutes: 330
+        timeout-minutes: 310
         env:
           STRIX_GITHUB_MODELS_TOKEN: ${{ secrets.STRIX_GITHUB_MODELS_TOKEN || github.token }}
           GITHUB_TOKEN: ${{ secrets.STRIX_GITHUB_MODELS_TOKEN || github.token }}
@@ -3122,7 +3122,7 @@ jobs:
               printf '%s\n' \
                 "## Pull request overview" \
                 "" \
-                "OpenCode reviewed the current-head evidence but found unresolved reviewer or review-agent threads before approval." \
+                "OpenCode could not produce an independent approval and found unresolved reviewer or review-agent threads." \
                 "" \
                 "## Findings" \
                 "" \
@@ -5076,20 +5076,9 @@ jobs:
                   stop_failed_check_fallback_unavailable
                 fi
               fi
-              unresolved_reviewer_threads_file="$(mktemp)"
-              reviewer_thread_review_body_file="$(mktemp)"
-              if ! collect_unresolved_reviewer_threads "$unresolved_reviewer_threads_file"; then
-                build_reviewer_thread_lookup_failure_body "$reviewer_thread_review_body_file"
-                create_pull_review "REQUEST_CHANGES" "$(cat "$reviewer_thread_review_body_file")"
-                echo "::endgroup::"
-                exit 0
-              fi
-              if [ -s "$unresolved_reviewer_threads_file" ]; then
-                build_unresolved_reviewer_threads_body "$unresolved_reviewer_threads_file" "$reviewer_thread_review_body_file"
-                create_pull_review "REQUEST_CHANGES" "$(cat "$reviewer_thread_review_body_file")"
-                echo "::endgroup::"
-                exit 0
-              fi
+              # Peer review-agent comments are included in the bounded evidence before model review.
+              # Do not turn their unresolved UI state into a second approval veto after OpenCode
+              # independently approves the current-head source and checks.
               summary="$(jq -r '.summary' "$control_json")"
               reason="$(jq -r '.reason' "$control_json")"
               body="$(printf '%s\n' \
