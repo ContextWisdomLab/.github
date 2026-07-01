@@ -1076,6 +1076,9 @@ jobs:
                       | select((.status // "") != "COMPLETED")
                     elif .__typename == "StatusContext" then
                       select((.context // "") != "opencode-review")
+                      | select((.context // "") != "OpenCode Review")
+                      | select((.context // "") != "Required OpenCode Review")
+                      | select((.context // "") != "OpenCode PR Review")
                       | select((.state // "" | ascii_upcase) as $s | ["PENDING","EXPECTED"] | index($s))
                     else
                       empty
@@ -4280,6 +4283,9 @@ jobs:
                       | "- " + ((.checkSuite.workflowRun.workflow.name // "") + "/" + (.name // "check") | gsub("^/"; "")) + ": " + (.status // "unknown") + (if (.detailsUrl // "") != "" then " (" + .detailsUrl + ")" else "" end)
                     elif .__typename == "StatusContext" then
                       select((.context // "") != "opencode-review")
+                      | select((.context // "") != "OpenCode Review")
+                      | select((.context // "") != "Required OpenCode Review")
+                      | select((.context // "") != "OpenCode PR Review")
                       | select((.state // "" | ascii_upcase) as $s | ["PENDING","EXPECTED"] | index($s))
                       | "- " + (.context // "status") + ": " + (.state // "unknown") + (if (.targetUrl // "") != "" then " (" + .targetUrl + ")" else "" end)
                     else
