@@ -209,6 +209,9 @@ def changed_new_lines(path_value: str) -> frozenset[int]:
 _file_cache: dict[Path, list[str]] = {}
 
 
+_file_cache: dict[Path, list[str]] = {}
+
+
 def finding_is_source_backed(finding: dict[str, object]) -> bool:
     path_value = str(finding.get("path", ""))
     if (
