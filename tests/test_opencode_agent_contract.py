@@ -125,8 +125,11 @@ def test_code_reviewer_prompt_preserves_review_only_policy():
     assert "object naming and reserved-word safety" in ci_prompt
     assert "opencode-review-control-v1" in ci_prompt
     assert "async effect cleanup and stale-response guards" in ci_prompt
-    assert "DOM structure against CSS layout contracts" in ci_prompt
-    assert "demo/visual-QA mode is isolated from production API behavior" in ci_prompt
+    assert "CSS layout contracts" in ci_prompt
+    assert "formerly blank sections receive real data" in ci_prompt
+    assert "deliberate empty states" in ci_prompt
+    assert "demo/visual-QA mode is isolated" in ci_prompt
+    assert "production API behavior" in ci_prompt
 
 
 def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
