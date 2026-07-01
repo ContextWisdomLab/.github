@@ -238,17 +238,42 @@ def test_context_reviews_threads_and_writer(monkeypatch, tmp_path):
     monkeypatch.setattr(context, "run_json", fake_run_json)
     assert [r["state"] for r in context.current_reviews("owner/repo", 7, head)] == ["APPROVED", "CHANGES_REQUESTED"]
     assert [t["id"] for t in context.review_threads("owner/repo", 7)] == ["active"]
+    assert context.thread_paths(context.review_threads("owner/repo", 7)) == ["x.py"]
 
     output = tmp_path / "context.md"
     context.write_context("owner/repo", 7, head, output)
     body = output.read_text()
     assert "APPROVED by opencode-agent" in body
+    assert "## Autofix Allowed Paths" in body
+    assert "- `x.py`" in body
     assert "Thread active" in body
     assert "- tests: COMPLETED SUCCESS" in body
+    assert body.index("## Autofix Allowed Paths") < body.index("## Current Reviews")
 
     monkeypatch.setattr(context, "pr_view", lambda repo, number: {**pr, "headRefOid": "c" * 40})
     with pytest.raises(RuntimeError, match="live head"):
         context.write_context("owner/repo", 7, head, output)
+
+
+def test_autofix_thread_paths_filters_unsafe_and_duplicate_paths():
+    """Autofix edits are bounded to unique safe repository-relative review paths."""
+    threads = [
+        {
+            "comments": {
+                "nodes": [
+                    {"path": "tests/test_example.py"},
+                    {"path": "tests/test_example.py"},
+                    {"path": "/etc/passwd"},
+                    {"path": "docs/../secret.md"},
+                    {"path": ""},
+                    {},
+                ]
+            }
+        },
+        {"comments": {"nodes": [{"path": "scripts/fix.py"}]}},
+    ]
+
+    assert context.thread_paths(threads) == ["tests/test_example.py", "scripts/fix.py"]
 
 
 def test_context_writer_empty_reviews_threads_and_validation(monkeypatch, tmp_path):
