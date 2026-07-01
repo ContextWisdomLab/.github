@@ -373,7 +373,7 @@ def test_main_escapes_html_chars(tmp_path):
     control_json = {
         "head_sha": "head",
         "run_id": "run",
-        "run_attempt": "1",
+        "run_attempt": "attempt",
         "result": "APPROVE",
         "reason": "Security review\nChanged files\npath.py",
         "summary": FULL_SUMMARY + "\n<script>alert(1)</script> & -->",
@@ -383,7 +383,7 @@ def test_main_escapes_html_chars(tmp_path):
 
     output_file = tmp_path / "output.md"
     output_file.write_text(input_text, encoding="utf-8")
-    argv = ["script", "head", "run", "1", str(output_file)]
+    argv = ["script", "head", "run", "attempt", str(output_file)]
 
     result = norm.main(argv)
     assert result == 0
