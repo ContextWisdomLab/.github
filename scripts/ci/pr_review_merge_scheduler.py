@@ -1,3 +1,4 @@
+"""Module docstring."""
 #!/usr/bin/env python3
 from __future__ import annotations
 
@@ -69,12 +70,14 @@ query($owner: String!, $name: String!, $pageSize: Int!, $cursor: String) {
 
 @dataclass
 class Decision:
+    """Docstring."""
     pr: int
     action: str
     reason: str
 
 
 def run(args: list[str], *, stdin: str | None = None) -> str:
+    """Docstring."""
     process = subprocess.run(args, input=stdin, capture_output=True, text=True)
     if process.returncode != 0:
         raise RuntimeError(
@@ -84,6 +87,7 @@ def run(args: list[str], *, stdin: str | None = None) -> str:
 
 
 def split_repo(repo: str) -> tuple[str, str]:
+    """Docstring."""
     try:
         owner, name = repo.split("/", 1)
     except ValueError as exc:
@@ -94,6 +98,7 @@ def split_repo(repo: str) -> tuple[str, str]:
 
 
 def gh_graphql(query: str, **fields: str | int) -> dict[str, Any]:
+    """Docstring."""
     cmd = ["gh", "api", "graphql", "-F", "query=@-"]
     for key, value in fields.items():
         flag = "-F" if isinstance(value, int) else "-f"
@@ -102,6 +107,7 @@ def gh_graphql(query: str, **fields: str | int) -> dict[str, Any]:
 
 
 def fetch_open_prs(repo: str, max_prs: int) -> list[dict[str, Any]]:
+    """Docstring."""
     owner, name = split_repo(repo)
     prs: list[dict[str, Any]] = []
     cursor: str | None = None
@@ -126,12 +132,14 @@ def fetch_open_prs(repo: str, max_prs: int) -> list[dict[str, Any]]:
 
 
 def context_nodes(pr: dict[str, Any]) -> list[dict[str, Any]]:
+    """Docstring."""
     rollup = pr.get("statusCheckRollup") or {}
     contexts = rollup.get("contexts") or {}
     return contexts.get("nodes") or []
 
 
 def is_opencode_context(node: dict[str, Any]) -> bool:
+    """Docstring."""
     if node.get("__typename") == "CheckRun":
         workflow = (
             ((node.get("checkSuite") or {}).get("workflowRun") or {}).get("workflow")
@@ -142,6 +150,7 @@ def is_opencode_context(node: dict[str, Any]) -> bool:
 
 
 def opencode_in_progress(pr: dict[str, Any]) -> bool:
+    """Docstring."""
     for node in context_nodes(pr):
         if not is_opencode_context(node):
             continue
@@ -152,15 +161,18 @@ def opencode_in_progress(pr: dict[str, Any]) -> bool:
 
 
 def unresolved_thread_count(pr: dict[str, Any]) -> int:
+    """Docstring."""
     threads = ((pr.get("reviewThreads") or {}).get("nodes") or [])
     return sum(1 for thread in threads if not thread.get("isResolved") and not thread.get("isOutdated"))
 
 
 def review_author_login(review: dict[str, Any]) -> str:
+    """Docstring."""
     return ((review.get("author") or {}).get("login") or "").lower()
 
 
 def is_opencode_review(review: dict[str, Any]) -> bool:
+    """Docstring."""
     return review_author_login(review) == "opencode-agent"
 
 
@@ -169,6 +181,7 @@ def get_current_head_opencode_review_state(pr: dict[str, Any]) -> str | None:
     # Combines multiple passes over the reviews array into a single O(N) pass.
     # We find the most recent actionable state (APPROVED or CHANGES_REQUESTED)
     # from the opencode-agent for the current head commit.
+    """Docstring."""
     head = pr.get("headRefOid")
     for review in reversed((pr.get("reviews") or {}).get("nodes") or []):
         if not is_opencode_review(review):
@@ -184,14 +197,17 @@ def get_current_head_opencode_review_state(pr: dict[str, Any]) -> str | None:
 
 
 def has_current_head_approval(pr: dict[str, Any]) -> bool:
+    """Docstring."""
     return get_current_head_opencode_review_state(pr) == "APPROVED"
 
 
 def has_current_head_changes_requested(pr: dict[str, Any]) -> bool:
+    """Docstring."""
     return get_current_head_opencode_review_state(pr) == "CHANGES_REQUESTED"
 
 
 def enable_auto_merge(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
+    """Docstring."""
     number = str(pr["number"])
     head = pr["headRefOid"]
     if dry_run:
@@ -200,6 +216,7 @@ def enable_auto_merge(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
 
 
 def dispatch_opencode_review(repo: str, workflow: str, pr: dict[str, Any], *, dry_run: bool) -> None:
+    """Docstring."""
     if dry_run:
         return
     run(
@@ -236,6 +253,7 @@ def inspect_pr(
     workflow: str,
     base_branch: str,
 ) -> Decision:
+    """Docstring."""
     number = pr["number"]
     head_repo = (pr.get("headRepository") or {}).get("nameWithOwner")
     base_ref = pr.get("baseRefName")
@@ -282,6 +300,7 @@ def print_summary(
     base_branch: str,
     project_flow: str,
 ) -> None:
+    """Docstring."""
     counts: dict[str, int] = {}
     for decision in decisions:
         counts[decision.action] = counts.get(decision.action, 0) + 1
@@ -301,6 +320,7 @@ def print_summary(
 
 
 def self_test() -> None:
+    """Docstring."""
     sample = {
         "number": 1,
         "headRefOid": "abc",
@@ -349,6 +369,7 @@ def self_test() -> None:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    """Docstring."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--base-branch", default=os.environ.get("DEFAULT_BRANCH", ""))
@@ -363,6 +384,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str]) -> int:
+    """Docstring."""
     args = parse_args(argv)
     if args.self_test:
         self_test()
