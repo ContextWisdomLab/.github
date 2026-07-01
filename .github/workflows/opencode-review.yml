@@ -4062,7 +4062,10 @@ jobs:
               rm -f "$pages_file"
               return 1
             fi
-            jq -r -s "$jq_filter" "$pages_file" >"$output_file"
+            if ! jq -r -s "$jq_filter" "$pages_file" >"$output_file"; then
+              rm -f "$pages_file"
+              return 1
+            fi
             rm -f "$pages_file"
           }
 
