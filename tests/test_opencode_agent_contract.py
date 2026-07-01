@@ -328,6 +328,21 @@ def test_opencode_runs_merge_scheduler_after_review_without_repo_local_dispatch(
     assert "Merge scheduler follow-up skipped after approval because no mutation credential was available" in workflow
 
 
+def test_opencode_pending_peer_checks_hold_approval_without_failing_required_workflow():
+    """Pending peer checks are a review hold, not an OpenCode source failure."""
+    workflow = Path(".github/workflows/opencode-review.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "hold_approval_without_review()" in workflow
+    assert "OpenCode review state unchanged; approval pending" in workflow
+    assert (
+        'hold_approval_without_review "WAITING_FOR_CHECKS" "$(cat "$failed_check_review_body_file")"'
+        in workflow
+    )
+    assert "build_waiting_for_checks_body" not in workflow
+
+
 def test_opencode_review_body_printf_blocks_close_on_separate_line():
     """Guard approval-gate review body builders against runner bash parse failures."""
     workflow = Path(".github/workflows/opencode-review.yml").read_text(encoding="utf-8")
