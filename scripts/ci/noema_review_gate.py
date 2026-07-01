@@ -9,6 +9,7 @@ import os
 import re
 import subprocess
 import sys
+import urllib.parse
 import urllib.request
 from collections.abc import Sequence
 from typing import Any
@@ -268,7 +269,7 @@ def call_llm(repo: str, number: int, pr: dict[str, Any], diff: str, truncated: b
         print("Noema LLM review unavailable: NOEMA_LLM_API_URL or NOEMA_LLM_API_KEY is not configured.")
         return None
     if not api_url.lower().startswith(("http://", "https://")):
-        scheme = api_url.split("://")[0] if "://" in api_url else "(none)"
+        scheme = urllib.parse.urlparse(api_url).scheme or "(no scheme)"
         raise ValueError(f"Invalid NOEMA_LLM_API_URL scheme: {scheme}")
 
     prompt = {
