@@ -22,3 +22,7 @@
 **Vulnerability:** Server-Side Request Forgery (SSRF) / Local File Inclusion
 **Learning:** Functions that fetch URLs provided via user inputs (e.g., `wait_for_url` fetching `--backend-ready-url` in CI scripts) can inadvertently read local files if they do not validate the scheme. Python's `urllib.request.urlopen` supports `file://` schemes, allowing attackers to access arbitrary file contents from the host machine or sandbox if they can control the URL parameter.
 **Prevention:** Always validate URL inputs to restrict allowed schemes. Check that URLs explicitly start with `http://` or `https://` before fetching them with standard libraries like `urllib`.
+## 2026-06-29 - Prevent API Key Leak via Subprocess Environment
+**Vulnerability:** API keys passed through environment variables without adequate masking
+**Learning:** In bash, passing secrets as environment variables to a child process (like `strix`) can inadvertently expose them in logs, process lists, or crash dumps. The Strix scanner specifically flagged `STRIX_CHILD_LLM_API_KEY` and `LLM_API_KEY` being passed as environment variables.
+**Prevention:** Whenever possible, write secrets to a temporary file with strict permissions (e.g., `umask 077`) and pass the file path to child processes instead of passing the secret string directly in the environment.

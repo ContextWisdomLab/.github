@@ -2253,14 +2253,14 @@ run_strix_once() {
 	fi
 	local start_epoch
 	start_epoch="$(date +%s)"
-	local child_llm_api_key=""
+	local child_llm_api_key_file=""
 	if ! is_vertex_model "$(normalize_model "$model")"; then
-		child_llm_api_key="$LLM_API_KEY"
+		child_llm_api_key_file="$LLM_API_KEY_FILE"
 	fi
 	set -o pipefail
 	set +e
 	STRIX_CHILD_MODEL="$child_model" \
-		STRIX_CHILD_LLM_API_KEY="$child_llm_api_key" \
+		STRIX_CHILD_LLM_API_KEY_FILE="$child_llm_api_key_file" \
 		STRIX_CHILD_LLM_API_BASE="$llm_api_base_value" \
 		STRIX_CHILD_REPORTS_DIR="$ACTIVE_REPORTS_DIR" \
 		python3 - "$timeout_seconds" "$resolved_target_path" "$SCAN_MODE" "$STRIX_LOG" <<'PY'
@@ -2307,8 +2307,8 @@ child_env["YARN_ENABLE_SCRIPTS"] = "false"
 child_env["BUN_CONFIG_IGNORE_SCRIPTS"] = "true"
 child_env["STRIX_LLM"] = os.environ["STRIX_CHILD_MODEL"]
 child_env["LLM_MODEL"] = os.environ["STRIX_CHILD_MODEL"]
-if os.environ.get("STRIX_CHILD_LLM_API_KEY"):
-    child_env["LLM_API_KEY"] = os.environ["STRIX_CHILD_LLM_API_KEY"]
+if os.environ.get("STRIX_CHILD_LLM_API_KEY_FILE"):
+    child_env["LLM_API_KEY_FILE"] = os.environ["STRIX_CHILD_LLM_API_KEY_FILE"]
 child_env["STRIX_REPORTS_DIR"] = os.environ["STRIX_CHILD_REPORTS_DIR"]
 for key, value in os.environ.items():
     if key.startswith("FAKE_STRIX_") and value:
