@@ -2736,14 +2736,6 @@ def test_action_error_guidance_distinguishes_update_branch_from_merge():
     assert "PR head likely changed after inspection" in stale_head_error
     assert "reads the new head before mutating" in stale_head_error
 
-def test_parse_external_head_update_reason():
-    """Test extracting the external head repository from update guidance."""
-    assert sched.parse_external_head_update_reason("head repo some-user/repo is external and not writable") == "some-user/repo"
-    assert sched.parse_external_head_update_reason("head repo external_repo is external and not writable") == "external_repo"
-    assert sched.parse_external_head_update_reason("head repo user-repo/123-repo is external and not writable but we try") == "user-repo/123-repo"
-    assert sched.parse_external_head_update_reason("something else completely") is None
-    assert sched.parse_external_head_update_reason("head repo  is external and not writable") is None
-
 def test_parse_conflict_reason_success():
     """Test parse_conflict_reason with valid complete conflict strings."""
     assert sched.parse_conflict_reason("merge conflict: DIRTY; base=main,head=feature-branch") == ("DIRTY", "main", "feature-branch")
@@ -2805,3 +2797,12 @@ def test_run_masks_secrets_in_args():
     err_msg = str(exc_info.value)
     assert "ghp_abcdef1234567890abcdef1234567890abcdef" not in err_msg
     assert "***" in err_msg
+
+
+def test_parse_external_head_update_reason():
+    """Test extracting the external head repository from update guidance."""
+    assert sched.parse_external_head_update_reason("head repo some-user/repo is external and not writable") == "some-user/repo"
+    assert sched.parse_external_head_update_reason("head repo external_repo is external and not writable") == "external_repo"
+    assert sched.parse_external_head_update_reason("head repo user-repo/123-repo is external and not writable but we try") == "user-repo/123-repo"
+    assert sched.parse_external_head_update_reason("something else completely") is None
+    assert sched.parse_external_head_update_reason("head repo  is external and not writable") is None
