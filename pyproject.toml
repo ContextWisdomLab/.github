@@ -16,7 +16,7 @@ pythonpath = ["."]
 
 [tool.coverage.run]
 source = ["scripts/ci"]
-omit = ["tests/*"]
+omit = ["tests/*", "scripts/ci/test_*.py"]
 
 [tool.coverage.report]
 fail_under = 100
