@@ -2623,7 +2623,12 @@ jobs:
           if [ -n "${OPENCODE_APP_TOKEN:-}" ] && [ "${GH_TOKEN:-}" = "${OPENCODE_APP_TOKEN:-}" ]; then
             check_lookup_token_source="opencode-app"
           fi
-          review_write_token="${OPENCODE_APP_TOKEN:-$GH_TOKEN}"
+          configured_review_write_token="${GH_TOKEN:-}"
+          review_write_token="${OPENCODE_APP_TOKEN:-$configured_review_write_token}"
+          review_write_fallback_token=""
+          if [ -n "${configured_review_write_token:-}" ] && [ "${configured_review_write_token:-}" != "${review_write_token:-}" ]; then
+            review_write_fallback_token="$configured_review_write_token"
+          fi
           review_write_token_source="configured"
           if [ -n "${OPENCODE_APP_TOKEN:-}" ]; then
             review_write_token_source="opencode-app"
@@ -2860,7 +2865,16 @@ jobs:
               --arg commit_id "$HEAD_SHA" \
               '{event: $event, body: $body, commit_id: $commit_id}' >"$review_payload_file"
             if ! env GH_TOKEN="$review_write_token" gh api -X POST "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}/reviews" --input "$review_payload_file" >/dev/null 2>"$gh_error_file"; then
-              warn_gh_publication_failure "pull review" "$gh_error_file"
+              warn_gh_publication_failure "pull review with primary review token" "$gh_error_file"
+              if [ -n "${review_write_fallback_token:-}" ]; then
+                : >"$gh_error_file"
+                if env GH_TOKEN="$review_write_fallback_token" gh api -X POST "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}/reviews" --input "$review_payload_file" >/dev/null 2>"$gh_error_file"; then
+                  rm -f "$gh_error_file" "$review_payload_file"
+                  update_review_overview "$event" "$body"
+                  return 0
+                fi
+                warn_gh_publication_failure "pull review with fallback review token" "$gh_error_file"
+              fi
               rm -f "$gh_error_file" "$review_payload_file"
               update_review_overview "$event" "$body" || true
               printf '::error::OpenCode could not publish the pull review for head %s, so the review state was not changed.\n' "$HEAD_SHA"
