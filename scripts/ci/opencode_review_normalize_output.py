@@ -526,6 +526,7 @@ def iter_json_objects(text: str) -> list[Any]:
 
     try:
         values.append(json.loads(text))
+        return values  # If the whole text is valid JSON, just return it
     except json.JSONDecodeError:
         # OpenCode exports may contain prose around the JSON control object.
         pass
