@@ -2239,7 +2239,7 @@ jobs:
         id: opencode_review_model_pool
         if: needs.coverage-evidence.result == 'success'
         continue-on-error: true
-        timeout-minutes: 20
+        timeout-minutes: 75
         env:
           STRIX_GITHUB_MODELS_TOKEN: ${{ secrets.STRIX_GITHUB_MODELS_TOKEN || github.token }}
           GITHUB_TOKEN: ${{ secrets.STRIX_GITHUB_MODELS_TOKEN || github.token }}
@@ -2248,12 +2248,12 @@ jobs:
           NPM_CONFIG_IGNORE_SCRIPTS: "true"
           NO_COLOR: "1"
           OPENCODE_MODEL_CANDIDATES: "github-models/openai/gpt-5-nano"
-          OPENCODE_MODEL_ATTEMPTS: "1"
-          OPENCODE_RUN_TIMEOUT_SECONDS: "240"
-          OPENCODE_EXPORT_TIMEOUT_SECONDS: "120"
-          OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "360"
+          OPENCODE_MODEL_ATTEMPTS: "4"
+          OPENCODE_RUN_TIMEOUT_SECONDS: "600"
+          OPENCODE_EXPORT_TIMEOUT_SECONDS: "180"
+          OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "3600"
           OPENCODE_BACKOFF_INITIAL_SECONDS: "30"
-          OPENCODE_BACKOFF_MAX_SECONDS: "30"
+          OPENCODE_BACKOFF_MAX_SECONDS: "300"
           OPENCODE_FIRST_ATTEMPT_AGENT: ci-review
           OPENCODE_AGENT: ci-review-fallback
           OPENCODE_EVIDENCE_FILE: ${{ runner.temp }}/opencode-review-evidence.md
