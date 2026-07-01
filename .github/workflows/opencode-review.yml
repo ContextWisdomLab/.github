@@ -4783,10 +4783,8 @@ jobs:
             while [ "${OPENCODE_MODEL_POOL_OUTCOME:-}" = "exhausted" ] && [ "$rekick_attempt" -le "$max_rekicks" ]; do
               printf 'OpenCode model pool exhausted; re-kicking model pool (%s/%s).\n' "$rekick_attempt" "$max_rekicks"
               rekick_output="$(mktemp)"
-              if GITHUB_OUTPUT="$rekick_output" OPENCODE_OUTPUT_FILE="$OPENCODE_MODEL_POOL_OUTPUT_FILE" \
-                bash "$GITHUB_WORKSPACE/scripts/ci/run_opencode_review_model_pool.sh"; then
-                :
-              fi
+              GITHUB_OUTPUT="$rekick_output" OPENCODE_OUTPUT_FILE="$OPENCODE_MODEL_POOL_OUTPUT_FILE" \
+                bash "$GITHUB_WORKSPACE/scripts/ci/run_opencode_review_model_pool.sh" || true
               outcome="$(awk -F= '/^review_status=/{v=$2} END{print v}' "$rekick_output")"
               model="$(awk -F= '/^review_model=/{v=$2} END{print v}' "$rekick_output")"
               rm -f "$rekick_output"
