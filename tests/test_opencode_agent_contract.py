@@ -211,7 +211,7 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert '"## Check outcome"' not in workflow
     assert "publish REQUEST_CHANGES when coverage-evidence blocker states" in workflow
     assert 'timeout-minutes: 75' in workflow
-    assert re.search(r"Run OpenCode PR Review model pool[\s\S]{0,240}timeout-minutes: 65", workflow)
+    assert re.search(r"Run OpenCode PR Review model pool[\s\S]{0,240}timeout-minutes: 75", workflow)
     assert 'APPROVAL_CHECK_WAIT_ATTEMPTS: "81"' in workflow
     assert 'APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "30"' in workflow
     assert 'OPENCODE_MODEL_CANDIDATES: "github-models/deepseek/deepseek-r1-0528 github-models/deepseek/deepseek-v3-0324 github-models/openai/gpt-5-chat github-models/openai/gpt-5-mini github-models/openai/gpt-5-nano github-models/openai/o3 github-models/openai/o3-mini github-models/openai/o4-mini github-models/mistral-ai/mistral-medium-2505 github-models/meta/llama-4-maverick-17b-128e-instruct-fp8 github-models/meta/llama-4-scout-17b-16e-instruct"' in workflow
