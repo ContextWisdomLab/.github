@@ -20,7 +20,6 @@ try:
         is_opencode_review,
         review_matches_current_head,
         run,
-        unresolved_thread_count,
     )
 except ModuleNotFoundError:
     from scripts.ci.pr_review_merge_scheduler import (
@@ -30,7 +29,6 @@ except ModuleNotFoundError:
         is_opencode_review,
         review_matches_current_head,
         run,
-        unresolved_thread_count,
     )
 
 
@@ -116,9 +114,6 @@ def needs_autofix(pr: dict[str, Any]) -> tuple[bool, tuple[str, ...]]:
     reasons: list[str] = []
     if has_current_head_changes_requested(pr) and change_request_is_autofixable(pr):
         reasons.append("current-head OpenCode requested changes")
-    unresolved = unresolved_thread_count(pr)
-    if unresolved:
-        reasons.append(f"{unresolved} active unresolved review thread(s)")
     return bool(reasons), tuple(reasons)
 
 
@@ -209,7 +204,7 @@ def inspect_pr(
 
     needs_fix, reasons = needs_autofix(pr)
     if not needs_fix:
-        return "skip", ("no current-head change request or active unresolved review thread",)
+        return "skip", ("no autofixable current-head OpenCode change request",)
 
     if comments is None:
         comments = issue_comments(repo, number)
@@ -344,8 +339,30 @@ def self_test() -> int:
                 }
             ]
         },
+        "reviewThreads": {
+            "nodes": [
+                {
+                    "isResolved": False,
+                    "isOutdated": False,
+                    "comments": {
+                        "nodes": [
+                            {
+                                "author": {"login": "copilot-pull-request-reviewer"},
+                                "path": "tools/validate_dom.py",
+                            }
+                        ]
+                    },
+                }
+            ]
+        },
     }
     assert needs_autofix(unresolved_thread_pr) == (False, ())
+    unresolved_only_pr = {
+        **pr,
+        "reviews": {"nodes": []},
+        "reviewThreads": unresolved_thread_pr["reviewThreads"],
+    }
+    assert needs_autofix(unresolved_only_pr) == (False, ())
     print("self-test passed")
     return 0
 
