@@ -18,15 +18,25 @@ on:
         required: false
         default: "1"
         type: string
+      target_repository:
+        description: Repository to scan, in owner/name form; defaults to the caller repository
+        required: false
+        default: ""
+        type: string
       retry_hours:
         description: Minimum hours before redispatching autofix for the same head
         required: false
         default: "24"
         type: string
       autofix_workflow:
-        description: Target repository autofix workflow file
+        description: Autofix workflow file to dispatch
         required: false
         default: "pr-review-autofix.yml"
+        type: string
+      autofix_repository:
+        description: Repository that owns the autofix workflow
+        required: false
+        default: "ContextualWisdomLab/.github"
         type: string
       base_branch:
         description: Base branch to scan; defaults to the caller repository default branch
@@ -53,17 +63,31 @@ on:
         description: Maximum autofix runs to dispatch
         required: false
         default: "1"
+      target_repository:
+        description: Repository to scan, in owner/name form; defaults to PR_REVIEW_FIX_TARGET_REPOSITORY or this repository
+        required: false
+        default: ""
+      base_branch:
+        description: Base branch to scan; defaults to PR_REVIEW_FIX_BASE_BRANCH or this repository default branch
+        required: false
+        default: ""
       retry_hours:
         description: Minimum hours before redispatching autofix for the same head
         required: false
         default: "24"
       autofix_workflow:
-        description: Target repository autofix workflow file
+        description: Autofix workflow file to dispatch
         required: false
         default: "pr-review-autofix.yml"
+      autofix_repository:
+        description: Repository that owns the autofix workflow
+        required: false
+        default: "ContextualWisdomLab/.github"
+  schedule:
+    - cron: "23 */2 * * *"
 
 concurrency:
-  group: central-pr-review-fix-scheduler-${{ github.repository }}
+  group: central-pr-review-fix-scheduler-${{ inputs.target_repository || vars.PR_REVIEW_FIX_TARGET_REPOSITORY || github.repository }}
   cancel-in-progress: false
 
 jobs:
@@ -77,17 +101,19 @@ jobs:
       statuses: read
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-      GH_TOKEN: ${{ github.token }}
-      DEFAULT_BRANCH: ${{ inputs.base_branch || github.event.repository.default_branch }}
+      GH_TOKEN: ${{ secrets.PR_REVIEW_MERGE_TOKEN || secrets.OPENCODE_APPROVE_TOKEN || github.token }}
+      TARGET_REPOSITORY: ${{ inputs.target_repository || vars.PR_REVIEW_FIX_TARGET_REPOSITORY || github.repository }}
+      DEFAULT_BRANCH: ${{ inputs.base_branch || vars.PR_REVIEW_FIX_BASE_BRANCH || github.event.repository.default_branch }}
       DRY_RUN: ${{ inputs.dry_run == true }}
       MAX_PRS: ${{ inputs.max_prs || '50' }}
       MAX_DISPATCHES: ${{ inputs.max_dispatches || '1' }}
       RETRY_HOURS: ${{ inputs.retry_hours || '24' }}
       AUTOFIX_WORKFLOW: ${{ inputs.autofix_workflow || 'pr-review-autofix.yml' }}
+      AUTOFIX_REPOSITORY: ${{ inputs.autofix_repository || 'ContextualWisdomLab/.github' }}
       CANONICAL_REF: ${{ inputs.canonical_ref || 'main' }}
     steps:
       - name: Checkout canonical scheduler
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: ContextualWisdomLab/.github
           ref: ${{ env.CANONICAL_REF }}
@@ -101,12 +127,13 @@ jobs:
         run: |
           set -euo pipefail
           args=(
-            --repo "$GITHUB_REPOSITORY"
+            --repo "$TARGET_REPOSITORY"
             --base-branch "$DEFAULT_BRANCH"
             --max-prs "$MAX_PRS"
             --max-dispatches "$MAX_DISPATCHES"
             --retry-hours "$RETRY_HOURS"
             --autofix-workflow "$AUTOFIX_WORKFLOW"
+            --autofix-repository "$AUTOFIX_REPOSITORY"
           )
           if [ "$DRY_RUN" = "true" ]; then
             args+=(--dry-run)
