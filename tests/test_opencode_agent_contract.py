@@ -215,11 +215,11 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert 'APPROVAL_CHECK_WAIT_ATTEMPTS: "81"' in workflow
     assert 'APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "30"' in workflow
     assert 'OPENCODE_MODEL_CANDIDATES: "github-models/openai/gpt-5-nano github-models/openai/gpt-5-mini github-models/openai/gpt-5-chat"' in workflow
-    assert 'OPENCODE_MODEL_ATTEMPTS: "1"' in workflow
+    assert 'OPENCODE_MODEL_ATTEMPTS: "2"' in workflow
     assert 'OPENCODE_RUN_TIMEOUT_SECONDS: "240"' in workflow
     assert 'OPENCODE_EXPORT_TIMEOUT_SECONDS: "120"' in workflow
     assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "720"' in workflow
-    assert 'OPENCODE_BACKOFF_MAX_SECONDS: "30"' in workflow
+    assert 'OPENCODE_BACKOFF_MAX_SECONDS: "60"' in workflow
     assert 'check_runs_pages_file="$(mktemp)" || return 1' in workflow
     assert 'jq -s "$jq_filter"' in workflow
     assert '--slurp \\\n              --jq "$jq_filter"' not in workflow
