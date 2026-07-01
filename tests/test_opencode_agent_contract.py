@@ -1,6 +1,11 @@
 import json
+import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 
 def test_code_reviewer_subagent_contract_is_configured():
@@ -223,6 +228,39 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "forced smooth scrolling" in prompt_template
 
 
+def test_opencode_approval_gate_shell_is_parseable():
+    """Guard the large inline approval shell against YAML-valid syntax breaks."""
+    if os.name == "nt":
+        pytest.skip("bash syntax check runs in Linux CI")
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash is unavailable")
+
+    workflow_lines = Path(".github/workflows/opencode-review.yml").read_text(encoding="utf-8").splitlines()
+    name_index = workflow_lines.index("      - name: Approve PR if OpenCode review passed")
+    run_index = next(
+        index
+        for index in range(name_index + 1, len(workflow_lines))
+        if workflow_lines[index] == "        run: |"
+    )
+    script_lines = []
+    for line in workflow_lines[run_index + 1 :]:
+        if line and not line.startswith("          "):
+            break
+        script_lines.append(line[10:] if line.startswith("          ") else "")
+    script = "\n".join(script_lines) + "\n"
+
+    result = subprocess.run(
+        [bash, "-n"],
+        input=script,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
 def test_merge_scheduler_uses_escalating_mutation_credentials():
     """Guard immediate merge/update execution credentials for central scheduling."""
     workflow = Path(".github/workflows/pr-review-merge-scheduler.yml").read_text(
@@ -258,6 +296,20 @@ def test_opencode_runs_merge_scheduler_after_review_without_repo_local_dispatch(
     assert "--enable-auto-merge" in workflow
     assert "--no-update-branches" in workflow
     assert "Merge scheduler follow-up skipped after approval because no mutation credential was available" in workflow
+
+
+def test_opencode_review_body_printf_blocks_close_on_separate_line():
+    """Guard approval-gate review body builders against runner bash parse failures."""
+    workflow = Path(".github/workflows/opencode-review.yml").read_text(encoding="utf-8")
+    risky_suffixes = (
+        "source finding.\")\"",
+        "has no blockers.\")\"",
+        "승인하지 않습니다.\")\"",
+        'Workflow attempt: ${RUN_ATTEMPT}")"',
+    )
+
+    for suffix in risky_suffixes:
+        assert suffix not in workflow
 
 
 def test_opencode_review_thread_jq_filters_preserve_bash_single_quotes():

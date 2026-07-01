@@ -3182,7 +3182,8 @@ jobs:
               "- Reason: ${reason}" \
               "- Head SHA: \`${HEAD_SHA}\`" \
               "- Workflow run: ${RUN_ID}" \
-              "- Workflow attempt: ${RUN_ATTEMPT}")"
+              "- Workflow attempt: ${RUN_ATTEMPT}"
+            )"
             create_pull_review "REQUEST_CHANGES" "$body"
           }
 
@@ -3537,7 +3538,8 @@ jobs:
               "- Workflow run: ${RUN_ID}" \
               "- Workflow attempt: ${RUN_ATTEMPT}" \
               "" \
-              "No PR review was posted because an evidence-mapping failure is a review-tool state, not a source finding.")"
+              "No PR review was posted because an evidence-mapping failure is a review-tool state, not a source finding."
+            )"
             stop_approval_without_review "FAILED_CHECK_DIAGNOSIS_UNAVAILABLE" "$body"
           }
 
@@ -4408,7 +4410,8 @@ jobs:
                 "- Workflow run: ${RUN_ID}" \
                 "- Workflow attempt: ${RUN_ATTEMPT}" \
                 "" \
-                "No PR review was posted because check lookup failure is a review-tool state, not a source finding.")"
+                "No PR review was posted because check lookup failure is a review-tool state, not a source finding."
+              )"
               stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
               fi
             elif [ "$wait_status" -eq 2 ]; then
@@ -4431,7 +4434,8 @@ jobs:
                 "- Workflow run: ${RUN_ID}" \
                 "- Workflow attempt: ${RUN_ATTEMPT}" \
                 "" \
-                "No PR review was posted because check lookup failure is a review-tool state, not a source finding.")"
+                "No PR review was posted because check lookup failure is a review-tool state, not a source finding."
+              )"
               stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
               fi
             fi
@@ -4548,7 +4552,8 @@ jobs:
               "- Workflow run: ${RUN_ID}" \
               "- Workflow attempt: ${RUN_ATTEMPT}" \
               "" \
-              "No PR approval was posted because model-output failure is not evidence that the PR has no blockers.")"
+              "No PR approval was posted because model-output failure is not evidence that the PR has no blockers."
+            )"
             if [ -n "$first_path" ] && [ -n "$first_line" ]; then
               payload_file="$(mktemp)"
               inline_failure_body_file="$(mktemp)"
@@ -4636,7 +4641,8 @@ jobs:
               "- Workflow run: ${RUN_ID}" \
               "- Workflow attempt: ${RUN_ATTEMPT}" \
               "" \
-              "이 fallback은 테스트/문서/리뷰 메타데이터만 변경된 low-risk PR에만 적용됩니다. Source, workflow, config, package, migration, generated artifact 변경은 모델 기반 review 없이 승인하지 않습니다.")"
+              "이 fallback은 테스트/문서/리뷰 메타데이터만 변경된 low-risk PR에만 적용됩니다. Source, workflow, config, package, migration, generated artifact 변경은 모델 기반 review 없이 승인하지 않습니다."
+            )"
             create_pull_review "APPROVE" "$body"
             return 0
           }
@@ -4691,7 +4697,8 @@ jobs:
               "- Reason: mergeStateStatus is \`${merge_state}\`; mergeable is \`${mergeable}\`." \
               "- Head SHA: \`${HEAD_SHA}\`" \
               "- Workflow run: ${RUN_ID}" \
-              "- Workflow attempt: ${RUN_ATTEMPT}")"
+              "- Workflow attempt: ${RUN_ATTEMPT}"
+            )"
             create_pull_review "REQUEST_CHANGES" "$body"
             return 0
           }
@@ -4784,7 +4791,8 @@ jobs:
                     "- Required next evidence: readable current-head statusCheckRollup plus a valid OpenCode control block." \
                     "- Head SHA: \`${HEAD_SHA}\`" \
                     "- Workflow run: ${RUN_ID}" \
-                    "- Workflow attempt: ${RUN_ATTEMPT}")"
+                    "- Workflow attempt: ${RUN_ATTEMPT}"
+                  )"
                   stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
                 fi
               fi
@@ -4930,7 +4938,8 @@ jobs:
                   "- Reason: GitHub Checks statusCheckRollup could not be read for current head \`${HEAD_SHA}\`." \
                   "- Head SHA: \`${HEAD_SHA}\`" \
                   "- Workflow run: ${RUN_ID}" \
-                  "- Workflow attempt: ${RUN_ATTEMPT}")"
+                  "- Workflow attempt: ${RUN_ATTEMPT}"
+                )"
                 stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
                 fi
               fi
@@ -4962,7 +4971,8 @@ jobs:
                   "- Reason: GitHub Checks statusCheckRollup could not be read for current head \`${HEAD_SHA}\`." \
                   "- Head SHA: \`${HEAD_SHA}\`" \
                   "- Workflow run: ${RUN_ID}" \
-                  "- Workflow attempt: ${RUN_ATTEMPT}")"
+                  "- Workflow attempt: ${RUN_ATTEMPT}"
+                )"
                 stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
                 fi
               fi
@@ -5033,7 +5043,8 @@ jobs:
                 "- Reason: ${reason}" \
                 "- Head SHA: \`${HEAD_SHA}\`" \
                 "- Workflow run: ${RUN_ID}" \
-                "- Workflow attempt: ${RUN_ATTEMPT}")"
+                "- Workflow attempt: ${RUN_ATTEMPT}"
+              )"
               create_pull_review "APPROVE" "$body"
               ;;
             REQUEST_CHANGES)
@@ -5052,7 +5063,8 @@ jobs:
                   "- Workflow run: ${RUN_ID}" \
                   "- Workflow attempt: ${RUN_ATTEMPT}" \
                   "" \
-                  "No PR review was posted because check lookup failure is a review-tool state, not a source finding.")"
+                  "No PR review was posted because check lookup failure is a review-tool state, not a source finding."
+                )"
                 stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
               fi
 
@@ -5098,7 +5110,8 @@ jobs:
                   "- Workflow run: ${RUN_ID}" \
                   "- Workflow attempt: ${RUN_ATTEMPT}" \
                   "" \
-                  "No PR review was posted because check lookup failure is a review-tool state, not a source finding.")"
+                  "No PR review was posted because check lookup failure is a review-tool state, not a source finding."
+                )"
                 stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
               fi
 
