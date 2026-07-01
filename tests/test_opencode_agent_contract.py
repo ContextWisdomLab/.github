@@ -138,6 +138,8 @@ def test_code_reviewer_prompt_preserves_review_only_policy():
     assert "deliberate empty states" in ci_prompt
     assert "demo/visual-QA mode is isolated" in ci_prompt
     assert "production API behavior" in ci_prompt
+    assert "prefers-reduced-motion: reduce" in prompt
+    assert "prefers-reduced-motion: reduce" in ci_prompt
 
 
 def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
@@ -163,6 +165,8 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "Accessibility/i18n:" in workflow
     assert "Supply-chain/license:" in workflow
     assert "Packaging:" in workflow
+    assert 'gsub("`"; "\'")' not in workflow
+    assert 'gsub("`"; "&apos;")' in workflow
     assert '"code-reviewer"' in workflow
     assert workflow.count('"reasoningEffort": "high"') >= 10
     assert '"task": "allow"' in workflow
@@ -220,6 +224,8 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "DOM structure against CSS layout contracts" in prompt_template
     assert "formerly blank sections receive real data or deliberate empty states" in prompt_template
     assert "demo/visual-QA mode is isolated from production API behavior" in prompt_template
+    assert "prefers-reduced-motion: reduce" in prompt_template
+    assert "forced smooth scrolling" in prompt_template
 
 
 def test_opencode_approval_gate_shell_is_parseable():
