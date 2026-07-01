@@ -1012,6 +1012,9 @@ assert_pr_review_merge_scheduler_uses_github_actions_bot_token() {
 	local fix_scheduler_file="$REPO_ROOT/scripts/ci/pr_review_fix_scheduler.py"
 	local readme_file="$REPO_ROOT/README.md"
 
+	assert_file_contains "$autofix_workflow_file" "Autofix allowed paths, authoritative:" "autofix prompt includes allowed paths outside the truncated review context"
+	assert_file_contains "$autofix_workflow_file" "<autofix-allowed-paths>" "autofix prompt has a dedicated allowed-paths block"
+	assert_file_contains "$autofix_workflow_file" 'git ls-files --others --exclude-standard' "autofix validation rejects untracked files outside allowed paths"
 	assert_file_contains "$workflow_file" 'workflow_call:' "scheduler can run as the central reusable workflow contract"
 	assert_file_contains "$workflow_file" 'push:' "scheduler wakes when a protected base branch advances and PR branches may become stale"
 	assert_file_contains "$workflow_file" 'branches: [main, develop, master]' "scheduler scans GitHub Flow and Git Flow default branches after base pushes"
