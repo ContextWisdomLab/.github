@@ -165,6 +165,10 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "connected code paths, rendering paths" in workflow
     assert "CHECK_LOOKUP_GH_TOKEN" in workflow
     assert "retrying with workflow github token" in workflow
+    assert 'review_write_token="$GH_TOKEN"' in workflow
+    assert 'review_write_token="$OPENCODE_APP_TOKEN"' in workflow
+    assert 'review_write_token="$CHECK_LOOKUP_GH_TOKEN"' in workflow
+    assert 'review_write_token="${OPENCODE_APP_TOKEN:-$GH_TOKEN}"' not in workflow
     assert "Review execution contracts" in workflow
     assert "Accessibility/i18n:" in workflow
     assert "Supply-chain/license:" in workflow

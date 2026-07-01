@@ -2624,21 +2624,27 @@ jobs:
             check_lookup_token_source="opencode-app"
           fi
           configured_review_write_token="${GH_TOKEN:-}"
-          review_write_token="${OPENCODE_APP_TOKEN:-$configured_review_write_token}"
-          review_write_fallback_token=""
-          if [ -n "${configured_review_write_token:-}" ] && [ "${configured_review_write_token:-}" != "${review_write_token:-}" ]; then
-            review_write_fallback_token="$configured_review_write_token"
-          fi
-          review_write_token_source="configured"
-          if [ -n "${OPENCODE_APP_TOKEN:-}" ]; then
-            review_write_token_source="opencode-app"
-          fi
-          overview_comment_token="$review_write_token"
           if [ -n "${CHECK_LOOKUP_GH_TOKEN:-}" ] && { [ -z "${OPENCODE_APP_TOKEN:-}" ] || [ "${GH_REPOSITORY:-}" = "${GITHUB_REPOSITORY:-}" ]; }; then
             GH_TOKEN="$CHECK_LOOKUP_GH_TOKEN"
             export GH_TOKEN
             check_lookup_token_source="github-token"
           fi
+          review_write_token="$GH_TOKEN"
+          review_write_fallback_token=""
+          review_write_token_source="configured"
+          if [ -n "${OPENCODE_APP_TOKEN:-}" ] && [ "${GH_REPOSITORY:-}" != "${GITHUB_REPOSITORY:-}" ]; then
+            review_write_token="$OPENCODE_APP_TOKEN"
+            review_write_token_source="opencode-app"
+          elif [ -n "${CHECK_LOOKUP_GH_TOKEN:-}" ] && [ "${GH_REPOSITORY:-}" = "${GITHUB_REPOSITORY:-}" ]; then
+            review_write_token="$CHECK_LOOKUP_GH_TOKEN"
+            review_write_token_source="github-token"
+          elif [ -n "${OPENCODE_APP_TOKEN:-}" ] && [ "${GH_TOKEN:-}" = "${OPENCODE_APP_TOKEN:-}" ]; then
+            review_write_token_source="opencode-app"
+          fi
+          if [ -n "${configured_review_write_token:-}" ] && [ "${configured_review_write_token:-}" != "${review_write_token:-}" ]; then
+            review_write_fallback_token="$configured_review_write_token"
+          fi
+          overview_comment_token="$review_write_token"
           echo "check lookup token source=${check_lookup_token_source}"
           echo "review write token source=${review_write_token_source}"
 
