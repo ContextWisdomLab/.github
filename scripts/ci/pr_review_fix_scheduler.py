@@ -48,6 +48,8 @@ NON_AUTOFIX_CHANGE_REQUEST_MARKERS = (
     "model pool exhausted",
     "could not establish approval sufficiency",
     "unresolved human review thread",
+    "unresolved reviewer thread",
+    "unresolved reviewer or review-agent thread",
     "failed check",
     "failed-check",
     "coverage-evidence",
@@ -338,7 +340,7 @@ def self_test() -> int:
                     "state": "CHANGES_REQUESTED",
                     "author": {"login": "opencode-agent"},
                     "commit": {"oid": head},
-                    "body": "OpenCode found unresolved human review thread evidence before approval.",
+                    "body": "OpenCode found unresolved reviewer or review-agent thread evidence before approval.",
                 }
             ]
         },
