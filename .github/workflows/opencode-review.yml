@@ -2638,6 +2638,7 @@ jobs:
           OPENCODE_AGENT: ci-review-fallback
           OPENCODE_EXHAUSTED_REKICK_INITIAL_SLEEP_SECONDS: "15"
           OPENCODE_EXHAUSTED_REKICK_MAX_SLEEP_SECONDS: "300"
+          OPENCODE_EXHAUSTED_REKICK_MAX_TOTAL_SECONDS: "4200"
         run: |
           set -euo pipefail
           echo "::group::OpenCode Review Approval Gate"
@@ -4781,8 +4782,20 @@ jobs:
             local rekick_output outcome model rekick_status
             local sleep_seconds="${OPENCODE_EXHAUSTED_REKICK_INITIAL_SLEEP_SECONDS:-15}"
             local max_sleep_seconds="${OPENCODE_EXHAUSTED_REKICK_MAX_SLEEP_SECONDS:-300}"
+            local max_total_seconds="${OPENCODE_EXHAUSTED_REKICK_MAX_TOTAL_SECONDS:-4200}"
+            local started_at now elapsed
+
+            started_at="$(date +%s)"
 
             while [ "${OPENCODE_MODEL_POOL_OUTCOME:-}" = "exhausted" ]; do
+              if [ "$max_total_seconds" -gt 0 ]; then
+                now="$(date +%s)"
+                elapsed="$((now - started_at))"
+                if [ "$elapsed" -ge "$max_total_seconds" ]; then
+                  printf 'OpenCode model pool remained exhausted for %s seconds; stopping re-kicks and continuing with fail-closed handling.\n' "$elapsed" >&2
+                  break
+                fi
+              fi
               printf 'OpenCode model pool exhausted; re-kicking model pool (attempt %s).\n' "$rekick_attempt"
               rekick_output="$(mktemp)"
               rekick_status=0
@@ -4809,7 +4822,7 @@ jobs:
                 break
               fi
               if [ "$sleep_seconds" -gt 0 ]; then
-                printf 'OpenCode model pool still exhausted after re-kick attempt %s; retrying in %ss.\n' "$rekick_attempt" "$sleep_seconds"
+                printf 'OpenCode model pool still exhausted after re-kick attempt %s; retrying in %s seconds.\n' "$rekick_attempt" "$sleep_seconds"
                 sleep "$sleep_seconds"
               fi
               if [ "$sleep_seconds" -lt "$max_sleep_seconds" ]; then
