@@ -200,8 +200,9 @@ def test_call_llm_handles_configuration_and_verdicts(monkeypatch):
 
     monkeypatch.setenv("NOEMA_LLM_API_URL", "file:///etc/passwd")
     monkeypatch.setenv("NOEMA_LLM_API_KEY", "secret")
-    with pytest.raises(ValueError, match="Invalid NOEMA_LLM_API_URL scheme"):
+    with pytest.raises(ValueError, match="Invalid NOEMA_LLM_API_URL scheme: file") as exc_info:
         noema.call_llm("owner/repo", 1, pr, "diff", False)
+    assert "/etc/passwd" not in str(exc_info.value)
 
     monkeypatch.setenv("NOEMA_LLM_API_URL", "https://llm.example.test/chat")
     monkeypatch.setenv("NOEMA_LLM_API_KEY", "secret")

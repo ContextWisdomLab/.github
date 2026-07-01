@@ -267,8 +267,9 @@ def call_llm(repo: str, number: int, pr: dict[str, Any], diff: str, truncated: b
     if not api_url or not api_key:
         print("Noema LLM review unavailable: NOEMA_LLM_API_URL or NOEMA_LLM_API_KEY is not configured.")
         return None
-    if not api_url.startswith(("http://", "https://")):
-        raise ValueError(f"Invalid NOEMA_LLM_API_URL scheme: {api_url}")
+    if not api_url.lower().startswith(("http://", "https://")):
+        scheme = api_url.split("://")[0] if "://" in api_url else "(none)"
+        raise ValueError(f"Invalid NOEMA_LLM_API_URL scheme: {scheme}")
 
     prompt = {
         "role": "user",
