@@ -658,10 +658,14 @@ jobs:
             done >"$changed_dockerfiles" < <(changed_files_for_coverage | grep -E '(^|/)Dockerfile(\..*)?$' || true)
             while IFS= read -r dockerfile; do
               [ -n "$dockerfile" ] || continue
+              docker_context="$(dirname "$dockerfile")"
+              if [ "$docker_context" = "." ]; then
+                docker_context="."
+              fi
               tag_suffix="$(printf '%s' "$dockerfile" | tr '[:upper:]' '[:lower:]' | tr '/.' '--' | tr -cd '[:alnum:]-' | cut -c1-80)"
               image_tag="opencode-review-${PR_HEAD_SHA:-head}-${tag_suffix}"
               run_and_capture "Docker build (${dockerfile})" \
-                docker build --pull=false -f "$dockerfile" -t "$image_tag" .
+                docker build --pull=false -f "$dockerfile" -t "$image_tag" "$docker_context"
             done <"$changed_dockerfiles"
             if has_changed_tracked_files 'docker-compose.yml' 'docker-compose.yaml' 'compose.yml' 'compose.yaml'; then
               for compose_file in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
@@ -819,6 +823,7 @@ jobs:
     needs: [coverage-evidence]
     if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target')
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     permissions:
       actions: write
       checks: read
@@ -1066,12 +1071,18 @@ jobs:
                   | .[]
                   | if .__typename == "CheckRun" then
                       select((.name // "") != "opencode-review")
+                      | select((.name // "") != "OpenCode Review")
+                      | select((.name // "") != "Required OpenCode Review")
+                      | select((.name // "") != "OpenCode PR Review")
                       | select((.checkSuite.workflowRun.workflow.name // "") != "OpenCode Review")
                       | select((.checkSuite.workflowRun.workflow.name // "") != "Required OpenCode Review")
                       | select((.checkSuite.workflowRun.workflow.name // "") != "OpenCode PR Review")
                       | select((.status // "") != "COMPLETED")
                     elif .__typename == "StatusContext" then
                       select((.context // "") != "opencode-review")
+                      | select((.context // "") != "OpenCode Review")
+                      | select((.context // "") != "Required OpenCode Review")
+                      | select((.context // "") != "OpenCode PR Review")
                       | select((.state // "" | ascii_upcase) as $s | ["PENDING","EXPECTED"] | index($s))
                     else
                       empty
@@ -2597,8 +2608,8 @@ jobs:
           OPENCODE_MODEL_POOL_OUTPUT_FILE: ${{ runner.temp }}/opencode-review-model-pool.md
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
-          APPROVAL_CHECK_WAIT_ATTEMPTS: "81"
-          APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "30"
+          APPROVAL_CHECK_WAIT_ATTEMPTS: "10"
+          APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "15"
           CHECK_LOOKUP_RETRY_ATTEMPTS: "5"
           CHECK_LOOKUP_RETRY_SLEEP_SECONDS: "5"
         run: |
@@ -2612,7 +2623,12 @@ jobs:
           if [ -n "${OPENCODE_APP_TOKEN:-}" ] && [ "${GH_TOKEN:-}" = "${OPENCODE_APP_TOKEN:-}" ]; then
             check_lookup_token_source="opencode-app"
           fi
-          review_write_token="${OPENCODE_APP_TOKEN:-$GH_TOKEN}"
+          configured_review_write_token="${GH_TOKEN:-}"
+          review_write_token="${OPENCODE_APP_TOKEN:-$configured_review_write_token}"
+          review_write_fallback_token=""
+          if [ -n "${configured_review_write_token:-}" ] && [ "${configured_review_write_token:-}" != "${review_write_token:-}" ]; then
+            review_write_fallback_token="$configured_review_write_token"
+          fi
           review_write_token_source="configured"
           if [ -n "${OPENCODE_APP_TOKEN:-}" ]; then
             review_write_token_source="opencode-app"
@@ -2849,7 +2865,16 @@ jobs:
               --arg commit_id "$HEAD_SHA" \
               '{event: $event, body: $body, commit_id: $commit_id}' >"$review_payload_file"
             if ! env GH_TOKEN="$review_write_token" gh api -X POST "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}/reviews" --input "$review_payload_file" >/dev/null 2>"$gh_error_file"; then
-              warn_gh_publication_failure "pull review" "$gh_error_file"
+              warn_gh_publication_failure "pull review with primary review token" "$gh_error_file"
+              if [ -n "${review_write_fallback_token:-}" ]; then
+                : >"$gh_error_file"
+                if env GH_TOKEN="$review_write_fallback_token" gh api -X POST "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}/reviews" --input "$review_payload_file" >/dev/null 2>"$gh_error_file"; then
+                  rm -f "$gh_error_file" "$review_payload_file"
+                  update_review_overview "$event" "$body"
+                  return 0
+                fi
+                warn_gh_publication_failure "pull review with fallback review token" "$gh_error_file"
+              fi
               rm -f "$gh_error_file" "$review_payload_file"
               update_review_overview "$event" "$body" || true
               printf '::error::OpenCode could not publish the pull review for head %s, so the review state was not changed.\n' "$HEAD_SHA"
@@ -4187,6 +4212,7 @@ jobs:
                       select((.name // "") != "opencode-review")
                       | select((.workflow // "") != "OpenCode Review")
                       | select((.workflow // "") != "Required OpenCode Review")
+                      | select((.workflow // "") != "OpenCode PR Review")
                       | select((.conclusion // "" | ascii_upcase) as $c | ["FAILURE","TIMED_OUT","ACTION_REQUIRED","CANCELLED","STARTUP_FAILURE"] | index($c))
                       | select(((.conclusion // "" | ascii_downcase) == "cancelled" and (.name // "") == "metadata-only gate evaluation" and (.workflow // "") == "PR Governance") | not)
                       | select(((.conclusion // "" | ascii_downcase) == "cancelled" and ((.isRequired // false) | not) and (.workflow // "") == "CodeQL") | not)
@@ -4194,6 +4220,9 @@ jobs:
                       | "- " + (.label // "check") + ": " + (.conclusion // "unknown") + (if (.detailsUrl // "") != "" then " (" + .detailsUrl + ")" else "" end)
                     elif .kind == "status" then
                       select(((.label // "") | ascii_downcase | contains("opencode-review")) | not)
+                      | select((.label // "") != "OpenCode Review")
+                      | select((.label // "") != "Required OpenCode Review")
+                      | select((.label // "") != "OpenCode PR Review")
                       | select((.state // "" | ascii_upcase) as $s | ["FAILURE","ERROR"] | index($s))
                       | "- " + (.label // "status") + ": " + (.state // "unknown") + (if (.targetUrl // "") != "" then " (" + .targetUrl + ")" else "" end)
                     else
@@ -4273,10 +4302,14 @@ jobs:
                       select((.name // "") != "opencode-review")
                       | select((.checkSuite.workflowRun.workflow.name // "") != "OpenCode Review")
                       | select((.checkSuite.workflowRun.workflow.name // "") != "Required OpenCode Review")
+                      | select((.checkSuite.workflowRun.workflow.name // "") != "OpenCode PR Review")
                       | select((.status // "") != "COMPLETED")
                       | "- " + ((.checkSuite.workflowRun.workflow.name // "") + "/" + (.name // "check") | gsub("^/"; "")) + ": " + (.status // "unknown") + (if (.detailsUrl // "") != "" then " (" + .detailsUrl + ")" else "" end)
                     elif .__typename == "StatusContext" then
                       select((.context // "") != "opencode-review")
+                      | select((.context // "") != "OpenCode Review")
+                      | select((.context // "") != "Required OpenCode Review")
+                      | select((.context // "") != "OpenCode PR Review")
                       | select((.state // "" | ascii_upcase) as $s | ["PENDING","EXPECTED"] | index($s))
                       | "- " + (.context // "status") + ": " + (.state // "unknown") + (if (.targetUrl // "") != "" then " (" + .targetUrl + ")" else "" end)
                     else
@@ -4346,8 +4379,8 @@ jobs:
 
           wait_for_peer_github_checks() {
             local output_file="$1"
-            local attempts="${APPROVAL_CHECK_WAIT_ATTEMPTS:-121}"
-            local sleep_seconds="${APPROVAL_CHECK_WAIT_SLEEP_SECONDS:-30}"
+            local attempts="${APPROVAL_CHECK_WAIT_ATTEMPTS:-10}"
+            local sleep_seconds="${APPROVAL_CHECK_WAIT_SLEEP_SECONDS:-15}"
             local attempt=1
 
             while [ "$attempt" -le "$attempts" ]; do
