@@ -248,6 +248,7 @@ def test_context_reviews_threads_and_writer(monkeypatch, tmp_path):
     assert "- `x.py`" in body
     assert "Thread active" in body
     assert "- tests: COMPLETED SUCCESS" in body
+    assert body.index("## Autofix Allowed Paths") < body.index("## Current Reviews")
 
     monkeypatch.setattr(context, "pr_view", lambda repo, number: {**pr, "headRefOid": "c" * 40})
     with pytest.raises(RuntimeError, match="live head"):

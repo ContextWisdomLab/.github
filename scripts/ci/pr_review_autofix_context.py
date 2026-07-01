@@ -158,6 +158,7 @@ def write_context(repo: str, number: int, head_sha: str, output: Path) -> None:
 
     reviews = current_reviews(repo, number, head_sha)
     threads = review_threads(repo, number)
+    paths = thread_paths(threads)
 
     lines = [
         "# PR Review Autofix Context",
@@ -170,9 +171,21 @@ def write_context(repo: str, number: int, head_sha: str, output: Path) -> None:
         f"- Head: {pr.get('headRefName')} @ {head_sha}",
         f"- Merge state: {pr.get('mergeStateStatus')}",
         "",
-        "## Current Reviews",
+        "## Autofix Allowed Paths",
         "",
     ]
+    if paths:
+        lines.extend(f"- `{path}`" for path in paths)
+        lines.append("")
+    else:
+        lines.extend(
+            [
+                "(no file-scoped unresolved review threads; automated edits must remain empty)",
+                "",
+            ]
+        )
+
+    lines.extend(["## Current Reviews", ""])
 
     if reviews:
         for review in reviews:
@@ -208,19 +221,6 @@ def write_context(repo: str, number: int, head_sha: str, output: Path) -> None:
                 )
     else:
         lines.extend(["(no unresolved non-outdated review threads)", ""])
-
-    lines.extend(["## Autofix Allowed Paths", ""])
-    paths = thread_paths(threads)
-    if paths:
-        lines.extend(f"- `{path}`" for path in paths)
-        lines.append("")
-    else:
-        lines.extend(
-            [
-                "(no file-scoped unresolved review threads; automated edits must remain empty)",
-                "",
-            ]
-        )
 
     lines.extend(["## Status Checks", ""])
     lines.extend(check_summary(pr.get("statusCheckRollup")))

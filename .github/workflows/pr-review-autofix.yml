@@ -384,7 +384,7 @@ jobs:
               if (line != "") print line
             }
           ' "$RUNNER_TEMP/pr-review-autofix-context.md" | sort -u >"$allowed_paths_file"
-          mapfile -t changed_files < <(git diff --name-only)
+          mapfile -t changed_files < <({ git diff --name-only; git ls-files --others --exclude-standard; } | sort -u)
           if [ "${#changed_files[@]}" -gt 0 ] && [ ! -s "$allowed_paths_file" ]; then
             echo "::error::Autofix changed files but no file-scoped review thread allowed edits."
             printf 'Changed files:\n'
@@ -399,11 +399,11 @@ jobs:
               exit 1
             fi
           done
-          mapfile -t changed_python_files < <(git diff --name-only -- '*.py')
+          mapfile -t changed_python_files < <(printf '%s\n' "${changed_files[@]}" | grep -E '\.py$' || true)
           if [ "${#changed_python_files[@]}" -gt 0 ]; then
             python3 -m py_compile "${changed_python_files[@]}"
           fi
-          mapfile -t changed_workflows < <(git diff --name-only -- '.github/workflows/*.yml' '.github/workflows/*.yaml')
+          mapfile -t changed_workflows < <(printf '%s\n' "${changed_files[@]}" | grep -E '^\.github/workflows/.*\.ya?ml$' || true)
           if [ "${#changed_workflows[@]}" -gt 0 ] && command -v actionlint >/dev/null 2>&1; then
             actionlint "${changed_workflows[@]}"
           fi
@@ -414,7 +414,7 @@ jobs:
         run: |
           set -euo pipefail
           cd "$TARGET_WORKSPACE"
-          if git diff --quiet; then
+          if git diff --quiet && [ -z "$(git ls-files --others --exclude-standard)" ]; then
             echo "No autofix changes produced."
             exit 0
           fi
