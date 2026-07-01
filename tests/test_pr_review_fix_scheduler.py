@@ -254,6 +254,27 @@ def test_context_reviews_threads_and_writer(monkeypatch, tmp_path):
         context.write_context("owner/repo", 7, head, output)
 
 
+def test_autofix_thread_paths_filters_unsafe_and_duplicate_paths():
+    """Autofix edits are bounded to unique safe repository-relative review paths."""
+    threads = [
+        {
+            "comments": {
+                "nodes": [
+                    {"path": "tests/test_example.py"},
+                    {"path": "tests/test_example.py"},
+                    {"path": "/etc/passwd"},
+                    {"path": "docs/../secret.md"},
+                    {"path": ""},
+                    {},
+                ]
+            }
+        },
+        {"comments": {"nodes": [{"path": "scripts/fix.py"}]}},
+    ]
+
+    assert context.thread_paths(threads) == ["tests/test_example.py", "scripts/fix.py"]
+
+
 def test_context_writer_empty_reviews_threads_and_validation(monkeypatch, tmp_path):
     """Context writer handles empty bounded review evidence."""
     head = "a" * 40
