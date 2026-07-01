@@ -101,6 +101,8 @@ def change_request_is_autofixable(pr: dict[str, Any]) -> bool:
         return False
 
     review = latest_current_head_opencode_review(pr)
+    if review is None:
+        return False
     body = str((review or {}).get("body") or "").lower()
     if any(marker in body for marker in NON_AUTOFIX_CHANGE_REQUEST_MARKERS):
         return False
