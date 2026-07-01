@@ -327,7 +327,9 @@ jobs:
           $(sed -n '1,260p' "$RUNNER_TEMP/pr-review-autofix-context.md")
           </review-context>
 
-          Edit only the checked-out repository files needed to satisfy current actionable feedback.
+          Edit only the checked-out repository files listed under "Autofix Allowed Paths".
+          If the allowed-path list is empty, leave the repository unchanged.
+          Do not delete, rename, or reformat unrelated files, even if they look stale or failing.
           Return a concise summary of changes made, or state that no safe change was made.
           EOF
           workspace_config_backup="${RUNNER_TEMP}/opencode-jsonc.backup"
@@ -371,6 +373,32 @@ jobs:
           set -euo pipefail
           cd "$TARGET_WORKSPACE"
           git diff --check
+          allowed_paths_file="${RUNNER_TEMP}/pr-review-autofix-allowed-paths.txt"
+          awk '
+            /^## Autofix Allowed Paths[[:space:]]*$/ { in_section=1; next }
+            /^## / { in_section=0 }
+            in_section && /^- `/ {
+              line=$0
+              sub(/^- `/, "", line)
+              sub(/`[[:space:]]*$/, "", line)
+              if (line != "") print line
+            }
+          ' "$RUNNER_TEMP/pr-review-autofix-context.md" | sort -u >"$allowed_paths_file"
+          mapfile -t changed_files < <(git diff --name-only)
+          if [ "${#changed_files[@]}" -gt 0 ] && [ ! -s "$allowed_paths_file" ]; then
+            echo "::error::Autofix changed files but no file-scoped review thread allowed edits."
+            printf 'Changed files:\n'
+            printf -- '- %s\n' "${changed_files[@]}"
+            exit 1
+          fi
+          for changed_file in "${changed_files[@]}"; do
+            if ! grep -Fxq -- "$changed_file" "$allowed_paths_file"; then
+              echo "::error::Autofix modified ${changed_file}, which is outside Autofix Allowed Paths."
+              printf 'Allowed paths:\n'
+              sed 's/^/- /' "$allowed_paths_file"
+              exit 1
+            fi
+          done
           mapfile -t changed_python_files < <(git diff --name-only -- '*.py')
           if [ "${#changed_python_files[@]}" -gt 0 ]; then
             python3 -m py_compile "${changed_python_files[@]}"

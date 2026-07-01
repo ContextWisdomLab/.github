@@ -173,11 +173,14 @@ def test_context_reviews_threads_and_writer(monkeypatch, tmp_path):
     monkeypatch.setattr(context, "run_json", fake_run_json)
     assert [r["state"] for r in context.current_reviews("owner/repo", 7, head)] == ["APPROVED", "CHANGES_REQUESTED"]
     assert [t["id"] for t in context.review_threads("owner/repo", 7)] == ["active"]
+    assert context.thread_paths(context.review_threads("owner/repo", 7)) == ["x.py"]
 
     output = tmp_path / "context.md"
     context.write_context("owner/repo", 7, head, output)
     body = output.read_text()
     assert "APPROVED by opencode-agent" in body
+    assert "## Autofix Allowed Paths" in body
+    assert "- `x.py`" in body
     assert "Thread active" in body
     assert "- tests: COMPLETED SUCCESS" in body
 
