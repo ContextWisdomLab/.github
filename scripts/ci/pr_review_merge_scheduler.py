@@ -164,25 +164,31 @@ def is_opencode_review(review: dict[str, Any]) -> bool:
     return review_author_login(review) == "opencode-agent"
 
 
-def current_head_review_state(pr: dict[str, Any], state: str) -> bool:
+def get_current_head_opencode_review_state(pr: dict[str, Any]) -> str | None:
+    # ⚡ BOLT OPTIMIZATION:
+    # Combines multiple passes over the reviews array into a single O(N) pass.
+    # We find the most recent actionable state (APPROVED or CHANGES_REQUESTED)
+    # from the opencode-agent for the current head commit.
     head = pr.get("headRefOid")
     for review in reversed((pr.get("reviews") or {}).get("nodes") or []):
         if not is_opencode_review(review):
             continue
-        if (review.get("state") or "").upper() != state:
+        state = (review.get("state") or "").upper()
+        # Ignore comments and other non-actionable states
+        if state not in {"APPROVED", "CHANGES_REQUESTED"}:
             continue
         commit = (review.get("commit") or {}).get("oid")
         if commit == head:
-            return True
-    return False
+            return state
+    return None
 
 
 def has_current_head_approval(pr: dict[str, Any]) -> bool:
-    return current_head_review_state(pr, "APPROVED")
+    return get_current_head_opencode_review_state(pr) == "APPROVED"
 
 
 def has_current_head_changes_requested(pr: dict[str, Any]) -> bool:
-    return current_head_review_state(pr, "CHANGES_REQUESTED")
+    return get_current_head_opencode_review_state(pr) == "CHANGES_REQUESTED"
 
 
 def enable_auto_merge(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
@@ -245,10 +251,13 @@ def inspect_pr(
     if unresolved:
         return Decision(number, "block", f"{unresolved} unresolved review thread(s)")
 
-    if has_current_head_changes_requested(pr):
+    # ⚡ BOLT OPTIMIZATION: Only evaluate the PR's review list once.
+    head_review_state = get_current_head_opencode_review_state(pr)
+
+    if head_review_state == "CHANGES_REQUESTED":
         return Decision(number, "block", "current-head OpenCode review requested changes")
 
-    if has_current_head_approval(pr):
+    if head_review_state == "APPROVED":
         if pr.get("autoMergeRequest"):
             return Decision(number, "wait", "current head is approved; auto-merge already enabled")
         if not enable_auto_merge_flag:
