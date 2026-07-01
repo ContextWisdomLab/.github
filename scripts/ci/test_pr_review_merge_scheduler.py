@@ -2,6 +2,7 @@
 import pytest
 import argparse
 import json
+import os
 import subprocess
 from unittest.mock import patch, MagicMock
 
@@ -206,12 +207,14 @@ def test_main():
 
         assert scheduler.main(["--repo", "r", "--base-branch", "b", "--project-flow", "f"]) == 0
 
-        with pytest.raises(SystemExit) as se:
-            scheduler.main(["--base-branch", "b", "--project-flow", "f"])
-        with pytest.raises(SystemExit) as se:
-            scheduler.main(["--repo", "r", "--project-flow", "f"])
-        with pytest.raises(SystemExit) as se:
-            scheduler.main(["--repo", "r", "--base-branch", "b"])
+        # Clear environment variables to test argument validation
+        with patch.dict("os.environ", {"GITHUB_REPOSITORY": "", "DEFAULT_BRANCH": "", "PROJECT_FLOW": ""}, clear=False):
+            with pytest.raises(SystemExit) as se:
+                scheduler.main(["--base-branch", "b", "--project-flow", "f"])
+            with pytest.raises(SystemExit) as se:
+                scheduler.main(["--repo", "r", "--project-flow", "f"])
+            with pytest.raises(SystemExit) as se:
+                scheduler.main(["--repo", "r", "--base-branch", "b"])
 
 
         assert scheduler.main(['--self-test']) == 0
