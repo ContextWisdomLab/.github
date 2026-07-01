@@ -43,6 +43,8 @@ def test_code_reviewer_subagent_contract_is_configured():
         "openai/gpt-5",
         "openai/gpt-5-chat",
         "openai/gpt-5-mini",
+        "openai/gpt-5-nano",
+        "deepseek/deepseek-r1",
         "deepseek/deepseek-r1-0528",
         "openai/o3",
         "openai/o3-mini",
@@ -167,14 +169,20 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "--config \"$OPENCODE_REVIEW_WORKDIR/opencode.jsonc\"" in workflow
     assert 'timeout --kill-after=15s "${export_timeout_seconds}s" opencode export' in model_pool_runner
     assert "session export did not complete within %ss" in model_pool_runner
+    assert "Read and follow the complete review contract" in model_pool_runner
+    assert "compact launcher as a reduced review policy" in model_pool_runner
+    assert "is_context_overflow_failure" in model_pool_runner
+    assert "tokens_limit_reached" in model_pool_runner
+    assert "skipping remaining attempts for this model" in model_pool_runner
     assert "approve_low_risk_review_fallback_after_model_exhaustion" in workflow
     assert "changed_file_is_low_risk_review_fallback" in workflow
     assert "production source 또는 package manifest 변경이 없습니다" in workflow
     assert "Source, workflow, config, package, migration, generated artifact 변경은 모델 기반 review 없이 승인하지 않습니다" in workflow
-    assert 'timeout-minutes: 45' in workflow
-    assert 'OPENCODE_RUN_TIMEOUT_SECONDS: "180"' in workflow
-    assert 'OPENCODE_EXPORT_TIMEOUT_SECONDS: "60"' in workflow
-    assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "2400"' in workflow
+    assert 'timeout-minutes: 310' in workflow
+    assert 'OPENCODE_MODEL_ATTEMPTS: "3"' in workflow
+    assert 'OPENCODE_RUN_TIMEOUT_SECONDS: "900"' in workflow
+    assert 'OPENCODE_EXPORT_TIMEOUT_SECONDS: "120"' in workflow
+    assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "18000"' in workflow
     assert "${{ runner.temp }}/opencode-review-model-pool.md" in workflow
 
     strix_workflow = Path(".github/workflows/strix.yml").read_text(encoding="utf-8")
