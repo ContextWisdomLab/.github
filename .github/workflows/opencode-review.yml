@@ -819,6 +819,7 @@ jobs:
     needs: [coverage-evidence]
     if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       actions: write
       checks: read
@@ -1066,6 +1067,9 @@ jobs:
                   | .[]
                   | if .__typename == "CheckRun" then
                       select((.name // "") != "opencode-review")
+                      | select((.name // "") != "OpenCode Review")
+                      | select((.name // "") != "Required OpenCode Review")
+                      | select((.name // "") != "OpenCode PR Review")
                       | select((.checkSuite.workflowRun.workflow.name // "") != "OpenCode Review")
                       | select((.checkSuite.workflowRun.workflow.name // "") != "Required OpenCode Review")
                       | select((.checkSuite.workflowRun.workflow.name // "") != "OpenCode PR Review")
@@ -4237,8 +4241,8 @@ jobs:
 
           wait_for_peer_github_checks() {
             local output_file="$1"
-            local attempts="${APPROVAL_CHECK_WAIT_ATTEMPTS:-121}"
-            local sleep_seconds="${APPROVAL_CHECK_WAIT_SLEEP_SECONDS:-30}"
+            local attempts="${APPROVAL_CHECK_WAIT_ATTEMPTS:-10}"
+            local sleep_seconds="${APPROVAL_CHECK_WAIT_SLEEP_SECONDS:-15}"
             local attempt=1
 
             while [ "$attempt" -le "$attempts" ]; do
