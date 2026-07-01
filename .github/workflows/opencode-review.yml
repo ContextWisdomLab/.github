@@ -1448,7 +1448,8 @@ jobs:
               PR_MERGE_BASE="$PR_BASE_SHA"
             fi
             printf -- "- Merge base SHA: \`%s\`\n\n" "$PR_MERGE_BASE"
-            if ! git -C "$OPENCODE_SOURCE_WORKDIR" diff --name-only --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA" >"$OPENCODE_CHANGED_FILES_FILE"; then
+            if ! git -C "$OPENCODE_SOURCE_WORKDIR" diff --name-only --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA" |
+              awk 'NF > 0 && $0 !~ /^\// && $0 !~ /(^|\/)\.\.($|\/)/ { print }' >"$OPENCODE_CHANGED_FILES_FILE"; then
               printf 'Changed-file discovery failed; downstream review must inspect the PR head directly.\n\n'
               : >"$OPENCODE_CHANGED_FILES_FILE"
             fi
@@ -1505,14 +1506,11 @@ jobs:
             safe_git_diff "diff stat" --stat --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA"
             printf '\n## Focused changed hunks\n\n'
             printf '```diff\n'
-            mapfile -t focused_hunk_paths < <(
-              git -C "$OPENCODE_SOURCE_WORKDIR" diff --name-only --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA" |
-                awk 'NF > 0 && $0 !~ /^\// && $0 !~ /(^|\/)\.\.($|\/)/ { print }'
-            )
+            mapfile -t focused_hunk_paths <"$OPENCODE_CHANGED_FILES_FILE"
             if [ "${#focused_hunk_paths[@]}" -gt 0 ]; then
               focused_hunks_file="$(mktemp)"
               if ! git -C "$OPENCODE_SOURCE_WORKDIR" diff --unified=12 --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA" -- "${focused_hunk_paths[@]}" >"$focused_hunks_file"; then
-                printf 'Focused hunk extraction failed; inspect changed files directly from changed-files.txt.\n' >"$focused_hunks_file"
+                printf 'Focused hunk extraction failed; inspect the PR head and available changed-file evidence directly.\n' >"$focused_hunks_file"
               fi
               emit_file_prefix "$focused_hunks_file" 12000
               rm -f "$focused_hunks_file"
