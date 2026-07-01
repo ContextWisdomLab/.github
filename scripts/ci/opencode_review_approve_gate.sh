@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if command -v py >/dev/null 2>&1 && ! python3 -c 'import sys; sys.exit(0)' >/dev/null 2>&1; then
+  python3() {
+    py -3 "$@"
+  }
+fi
+
 if [ $# -ne 4 ] && [ $# -ne 5 ]; then
   echo "usage: $0 <expected_head_sha> <expected_run_id> <expected_run_attempt> <comment_body_file> [normalized_json_file]" >&2
   exit 64
