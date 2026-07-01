@@ -2670,7 +2670,10 @@ jobs:
           echo "review write token source=${review_write_token_source}"
 
           app_token_limited_check_lookup() {
-            [ "${check_lookup_token_source:-}" = "opencode-app" ] && [ -n "${OPENCODE_APP_TOKEN:-}" ]
+            if [ "${check_lookup_token_source:-}" = "opencode-app" ] && [ -n "${OPENCODE_APP_TOKEN:-}" ]; then
+              return 0
+            fi
+            [ "${check_lookup_token_source:-}" = "configured" ] && [ "${GH_REPOSITORY:-}" != "${GITHUB_REPOSITORY:-}" ]
           }
 
           warn_gh_publication_failure() {
@@ -4476,7 +4479,7 @@ jobs:
             if app_token_limited_check_lookup &&
               [ -n "$fallback_check_lookup_token" ] &&
               [ "$fallback_check_lookup_token" != "$primary_check_lookup_token" ]; then
-              printf 'GitHub Checks lookup failed with OpenCode app token; retrying with workflow github token before changing review state.\n' >&2
+              printf 'GitHub Checks lookup failed with configured cross-repository token; retrying with workflow github token before changing review state.\n' >&2
               attempt=1
               while [ "$attempt" -le "$attempts" ]; do
                 if GH_TOKEN="$fallback_check_lookup_token" "$collector" "$output_file"; then
@@ -4530,7 +4533,7 @@ jobs:
             wait_for_peer_github_checks "$pending_file" || wait_status=$?
             if [ "$wait_status" -eq 1 ]; then
               if app_token_limited_check_lookup; then
-                echo "GitHub Checks statusCheckRollup lookup is unavailable to the OpenCode app token before model-failure hold; branch protection remains authoritative for target-repository checks."
+                echo "GitHub Checks statusCheckRollup lookup is unavailable to the configured cross-repository token before model-failure hold; branch protection remains authoritative for target-repository checks."
                 : >"$pending_file"
                 wait_status=0
               else
@@ -4555,7 +4558,7 @@ jobs:
 
             if ! collect_github_checks_with_retry collect_failed_github_checks "$failed_file"; then
               if app_token_limited_check_lookup; then
-                echo "GitHub failed-check lookup is unavailable to the OpenCode app token before model-failure hold; branch protection remains authoritative for target-repository checks."
+                echo "GitHub failed-check lookup is unavailable to the configured cross-repository token before model-failure hold; branch protection remains authoritative for target-repository checks."
                 : >"$failed_file"
               else
               body="$(printf '%s\n' \
@@ -4850,7 +4853,7 @@ jobs:
               set -e
               if [ "$pending_wait_status" -eq 1 ]; then
                 if app_token_limited_check_lookup; then
-                  echo "GitHub Checks statusCheckRollup lookup is unavailable to the OpenCode app token before model-exhaustion review publication; branch protection remains authoritative for target-repository checks."
+                  echo "GitHub Checks statusCheckRollup lookup is unavailable to the configured cross-repository token before model-exhaustion review publication; branch protection remains authoritative for target-repository checks."
                   : >"$pending_checks_file"
                   pending_wait_status=0
                 else
@@ -4983,7 +4986,7 @@ jobs:
               set -e
               if [ "$pending_wait_status" -eq 1 ]; then
                 if app_token_limited_check_lookup; then
-                  echo "GitHub Checks statusCheckRollup lookup is unavailable to the OpenCode app token; branch protection remains authoritative for target-repository checks."
+                  echo "GitHub Checks statusCheckRollup lookup is unavailable to the configured cross-repository token; branch protection remains authoritative for target-repository checks."
                   : >"$pending_checks_file"
                   pending_wait_status=0
                 else
@@ -5017,7 +5020,7 @@ jobs:
               failed_checks_file="$(mktemp)"
               if ! collect_github_checks_with_retry collect_failed_github_checks "$failed_checks_file"; then
                 if app_token_limited_check_lookup; then
-                  echo "GitHub failed-check lookup is unavailable to the OpenCode app token; approving based on source-backed OpenCode result and successful coverage evidence while branch protection remains authoritative."
+                  echo "GitHub failed-check lookup is unavailable to the configured cross-repository token; approving based on source-backed OpenCode result and successful coverage evidence while branch protection remains authoritative."
                   : >"$failed_checks_file"
                 else
                 body="$(printf '%s\n' \
