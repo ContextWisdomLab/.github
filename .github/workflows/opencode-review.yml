@@ -823,7 +823,7 @@ jobs:
     needs: [coverage-evidence]
     if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target')
     runs-on: ubuntu-latest
-    timeout-minutes: 330
+    timeout-minutes: 75
     permissions:
       actions: write
       checks: read
@@ -2239,7 +2239,7 @@ jobs:
         id: opencode_review_model_pool
         if: needs.coverage-evidence.result == 'success'
         continue-on-error: true
-        timeout-minutes: 330
+        timeout-minutes: 20
         env:
           STRIX_GITHUB_MODELS_TOKEN: ${{ secrets.STRIX_GITHUB_MODELS_TOKEN || github.token }}
           GITHUB_TOKEN: ${{ secrets.STRIX_GITHUB_MODELS_TOKEN || github.token }}
@@ -2248,10 +2248,10 @@ jobs:
           NPM_CONFIG_IGNORE_SCRIPTS: "true"
           NO_COLOR: "1"
           OPENCODE_MODEL_CANDIDATES: "github-models/openai/gpt-5-nano"
-          OPENCODE_MODEL_ATTEMPTS: "15"
+          OPENCODE_MODEL_ATTEMPTS: "4"
           OPENCODE_RUN_TIMEOUT_SECONDS: "600"
           OPENCODE_EXPORT_TIMEOUT_SECONDS: "180"
-          OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "18000"
+          OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "3600"
           OPENCODE_BACKOFF_INITIAL_SECONDS: "30"
           OPENCODE_BACKOFF_MAX_SECONDS: "300"
           OPENCODE_FIRST_ATTEMPT_AGENT: ci-review
@@ -2602,7 +2602,7 @@ jobs:
 
       - name: Approve PR if OpenCode review passed
         if: always()
-        timeout-minutes: 330
+        timeout-minutes: 75
         env:
           GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || steps.opencode_app_token.outputs.token || github.token }}
           CHECK_LOOKUP_GH_TOKEN: ${{ github.token }}
@@ -3896,7 +3896,7 @@ jobs:
             } >"$prompt_file"
 
             cd "$OPENCODE_REVIEW_WORKDIR"
-            if ! timeout --kill-after=30s "${OPENCODE_RUN_TIMEOUT_SECONDS:-240}s" opencode run "$(cat "$prompt_file")" \
+            if ! timeout --kill-after=30s "${OPENCODE_RUN_TIMEOUT_SECONDS:-600}s" opencode run "$(cat "$prompt_file")" \
               --pure \
               --agent ci-review-fallback \
               --model "$MODEL" \
