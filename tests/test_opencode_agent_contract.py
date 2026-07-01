@@ -102,6 +102,7 @@ def test_code_reviewer_prompt_preserves_review_only_policy():
     """Guard the reviewer-only behavior and output rubric in the prompt."""
     prompt = Path("code-reviewer-prompt.md").read_text(encoding="utf-8")
     ci_prompt = Path("ci-review-prompt.md").read_text(encoding="utf-8")
+    ci_prompt_normalized = re.sub(r"\s+", " ", ci_prompt)
 
     assert "senior staff-level code reviewer" in prompt
     assert "Do not edit files" in prompt
@@ -134,12 +135,15 @@ def test_code_reviewer_prompt_preserves_review_only_policy():
     assert "opencode-review-control-v1" in ci_prompt
     assert "async effect cleanup and stale-response guards" in ci_prompt
     assert "CSS layout contracts" in ci_prompt
-    assert "formerly blank sections receive real data" in ci_prompt
+    assert "modal, dialog, drawer, popover, and toast overlays" in ci_prompt_normalized
+    assert "viewport anchoring, inset coverage, scroll behavior, and mobile clipping" in ci_prompt_normalized
+    assert "full-screen blocking layer" in ci_prompt_normalized
+    assert "formerly blank sections receive real data" in ci_prompt_normalized
     assert "deliberate empty states" in ci_prompt
-    assert "demo/visual-QA mode is isolated" in ci_prompt
+    assert "demo/visual-QA mode is isolated" in ci_prompt_normalized
     assert "production API behavior" in ci_prompt
     assert "prefers-reduced-motion: reduce" in prompt
-    assert "prefers-reduced-motion: reduce" in ci_prompt
+    assert "prefers-reduced-motion: reduce" in ci_prompt_normalized
 
 
 def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
@@ -222,6 +226,7 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "Never approve material workflow, script, source, config, package, or test changes" in prompt_template
     assert "async effect cleanup and stale-response guards" in prompt_template
     assert "DOM structure against CSS layout contracts" in prompt_template
+    assert "viewport anchoring, inset coverage, scroll behavior, and mobile clipping" in prompt_template
     assert "formerly blank sections receive real data or deliberate empty states" in prompt_template
     assert "demo/visual-QA mode is isolated from production API behavior" in prompt_template
     assert "prefers-reduced-motion: reduce" in prompt_template
