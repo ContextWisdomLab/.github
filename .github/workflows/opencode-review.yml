@@ -2239,7 +2239,7 @@ jobs:
         id: opencode_review_model_pool
         if: needs.coverage-evidence.result == 'success'
         continue-on-error: true
-        timeout-minutes: 300
+        timeout-minutes: 20
         env:
           STRIX_GITHUB_MODELS_TOKEN: ${{ secrets.STRIX_GITHUB_MODELS_TOKEN || github.token }}
           GITHUB_TOKEN: ${{ secrets.STRIX_GITHUB_MODELS_TOKEN || github.token }}
@@ -2248,12 +2248,12 @@ jobs:
           NPM_CONFIG_IGNORE_SCRIPTS: "true"
           NO_COLOR: "1"
           OPENCODE_MODEL_CANDIDATES: "github-models/openai/gpt-5-nano"
-          OPENCODE_MODEL_ATTEMPTS: "5"
-          OPENCODE_RUN_TIMEOUT_SECONDS: "300"
+          OPENCODE_MODEL_ATTEMPTS: "1"
+          OPENCODE_RUN_TIMEOUT_SECONDS: "240"
           OPENCODE_EXPORT_TIMEOUT_SECONDS: "120"
-          OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "18000"
-          OPENCODE_BACKOFF_INITIAL_SECONDS: "60"
-          OPENCODE_BACKOFF_MAX_SECONDS: "300"
+          OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "360"
+          OPENCODE_BACKOFF_INITIAL_SECONDS: "30"
+          OPENCODE_BACKOFF_MAX_SECONDS: "30"
           OPENCODE_FIRST_ATTEMPT_AGENT: ci-review
           OPENCODE_AGENT: ci-review-fallback
           OPENCODE_EVIDENCE_FILE: ${{ runner.temp }}/opencode-review-evidence.md
@@ -2629,10 +2629,10 @@ jobs:
           OPENCODE_MODEL_POOL_OUTPUT_FILE: ${{ runner.temp }}/opencode-review-model-pool.md
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
-          APPROVAL_CHECK_WAIT_ATTEMPTS: "81"
-          APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "30"
-          CHECK_LOOKUP_RETRY_ATTEMPTS: "5"
-          CHECK_LOOKUP_RETRY_SLEEP_SECONDS: "5"
+          APPROVAL_CHECK_WAIT_ATTEMPTS: "200"
+          APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "60"
+          CHECK_LOOKUP_RETRY_ATTEMPTS: "10"
+          CHECK_LOOKUP_RETRY_SLEEP_SECONDS: "10"
         run: |
           set -euo pipefail
           echo "::group::OpenCode Review Approval Gate"
