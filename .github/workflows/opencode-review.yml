@@ -4792,6 +4792,7 @@ jobs:
               rm -f "$rekick_output"
 
               if [ -z "$outcome" ]; then
+                printf 'OpenCode model pool re-kick did not publish review_status; treating outcome as exhausted.\n' >&2
                 outcome="exhausted"
               fi
               OPENCODE_MODEL_POOL_OUTCOME="$outcome"
