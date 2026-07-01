@@ -26,32 +26,6 @@ def _extract_run_block(workflow_text: str, step_name: str) -> str:
     return "\n".join(block_lines) + "\n"
 
 
-def _logical_shell_commands(script: str) -> list[str]:
-    commands = []
-    command = ""
-
-    for raw_line in script.splitlines():
-        line = raw_line.strip()
-        if not line:
-            if command:
-                commands.append(command)
-                command = ""
-            continue
-
-        command = f"{command} {line}".strip()
-        if command.endswith("\\"):
-            command = command[:-1].rstrip()
-            continue
-
-        commands.append(command)
-        command = ""
-
-    if command:
-        commands.append(command)
-
-    return commands
-
-
 def test_opencode_review_run_blocks_are_valid_bash():
     workflow_text = (REPO_ROOT / ".github/workflows/opencode-review.yml").read_text(
         encoding="utf-8"
@@ -85,13 +59,35 @@ def test_opencode_review_workflow_avoids_unsupported_gh_slurp_jq_combo():
     workflow_text = (REPO_ROOT / ".github/workflows/opencode-review.yml").read_text(
         encoding="utf-8"
     )
-    approve_script = _extract_run_block(workflow_text, "Approve PR if OpenCode review passed")
+    logical_commands = []
+    command = ""
+
+    for raw_line in workflow_text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            if command:
+                logical_commands.append(command)
+                command = ""
+            continue
+
+        if command:
+            command = f"{command} {line}"
+        else:
+            command = line
+
+        if command.endswith("\\"):
+            command = command[:-1].rstrip()
+            continue
+
+        logical_commands.append(command)
+        command = ""
+
+    if command:
+        logical_commands.append(command)
 
     offenders = [
         command
-        for command in _logical_shell_commands(approve_script)
-        if "gh api" in command
-        and "--slurp" in command.split()
-        and "--jq" in command.split()
+        for command in logical_commands
+        if "gh api" in command and "--slurp" in command and "--jq" in command
     ]
     assert offenders == []
