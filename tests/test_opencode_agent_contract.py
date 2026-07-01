@@ -1,6 +1,11 @@
 import json
+import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 
 def test_code_reviewer_subagent_contract_is_configured():
@@ -215,6 +220,50 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "DOM structure against CSS layout contracts" in prompt_template
     assert "formerly blank sections receive real data or deliberate empty states" in prompt_template
     assert "demo/visual-QA mode is isolated from production API behavior" in prompt_template
+
+
+def test_opencode_review_gate_run_blocks_are_bash_syntax_valid():
+    """Guard long inline review-gate scripts against shell quoting regressions."""
+    bash = shutil.which("bash")
+    if bash and os.name == "nt" and "\\system32\\bash.exe" in bash.lower():
+        for root in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)")):
+            if not root:
+                continue
+            git_bash = Path(root) / "Git" / "bin" / "bash.exe"
+            if git_bash.exists():
+                bash = str(git_bash)
+                break
+    if bash is None:
+        pytest.skip("bash is not available")
+
+    workflow = Path(".github/workflows/opencode-review.yml").read_text(encoding="utf-8")
+
+    def extract_run_block(step_name: str) -> str:
+        step_match = re.search(rf"^      - name: {re.escape(step_name)}\n", workflow, re.MULTILINE)
+        assert step_match is not None, step_name
+        run_match = re.search(r"^        run: \|\n", workflow[step_match.end() :], re.MULTILINE)
+        assert run_match is not None, step_name
+        block_start = step_match.end() + run_match.end()
+        next_step = re.search(r"^      - name: ", workflow[block_start:], re.MULTILINE)
+        block_end = block_start + next_step.start() if next_step else len(workflow)
+        block_lines = [
+            line[10:] if line.startswith("          ") else ""
+            for line in workflow[block_start:block_end].splitlines()
+        ]
+        return "\n".join(block_lines) + "\n"
+
+    for step_name in (
+        "Prepare bounded OpenCode review evidence",
+        "Approve PR if OpenCode review passed",
+    ):
+        result = subprocess.run(
+            [bash, "-n", "-s"],
+            input=extract_run_block(step_name),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, f"{step_name} bash -n failed:\n{result.stderr}"
 
 
 def test_merge_scheduler_uses_escalating_mutation_credentials():
