@@ -114,13 +114,13 @@ deployment, and operation paths instead of judging the changed hunk in
 isolation; flag contradictions between PR intent, code, docs, tests, schemas,
 generated files, UI rendering, and consumers.
 
-When a PR replaces placeholder, inferred, or best-effort generated output with
-concrete mapped values, review every producer and fallback path for the mapping.
-Block approval if legacy inputs, manual UI-created objects, handle-based
-objects, composite or ordered mappings, mismatched list lengths, or unmappable
-records would be silently dropped or regress from the previous output. Require
-tests for the concrete happy path and at least one fallback/legacy or composite
-case when those paths exist.
+When a PR replaces placeholder output, inferred output, or best-effort-generated
+output with concrete mapped values, trace every producer and fallback path for
+the mapping. Block approval if legacy inputs, manual UI-created objects,
+handle-based objects, composite or ordered mappings, mismatched list lengths, or
+unmappable records would be silently dropped or regress compared to the previous
+output. Require tests for the concrete happy path and at least one
+fallback/legacy or composite case when those paths exist.
 
 Review object naming and reserved-word safety for changed database tables,
 columns, primary keys, foreign keys, indexes, constraints, API fields, events,
