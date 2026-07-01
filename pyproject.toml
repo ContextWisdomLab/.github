@@ -1,0 +1,23 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["scripts/ci"]
+
+[tool.coverage.run]
+source = ["pr_review_merge_scheduler", "opencode_review_normalize_output"]
+branch = false
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true
+
+[tool.interrogate]
+fail-under = 100
+exclude = ["tests", "setup.py"]
+ignore-init-method = false
+ignore-init-module = false
+ignore-magic = false
+ignore-semiprivate = false
+ignore-private = false
+ignore-property-decorators = false
+ignore-module = false
+ignore-nested-functions = false

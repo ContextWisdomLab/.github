@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Schedule OpenCode reviews and auto-merges for open pull requests."""
 from __future__ import annotations
 
 import argparse
@@ -69,12 +70,15 @@ query($owner: String!, $name: String!, $pageSize: Int!, $cursor: String) {
 
 @dataclass
 class Decision:
+    """Holds the scheduling decision for a single pull request."""
+
     pr: int
     action: str
     reason: str
 
 
 def run(args: list[str], *, stdin: str | None = None) -> str:
+    """Run a subprocess and return its stdout, raising RuntimeError on failure."""
     process = subprocess.run(args, input=stdin, capture_output=True, text=True)
     if process.returncode != 0:
         raise RuntimeError(
@@ -84,6 +88,7 @@ def run(args: list[str], *, stdin: str | None = None) -> str:
 
 
 def split_repo(repo: str) -> tuple[str, str]:
+    """Split an 'owner/name' repository string into a (owner, name) tuple."""
     try:
         owner, name = repo.split("/", 1)
     except ValueError as exc:
@@ -94,6 +99,7 @@ def split_repo(repo: str) -> tuple[str, str]:
 
 
 def gh_graphql(query: str, **fields: str | int) -> dict[str, Any]:
+    """Execute a GitHub GraphQL query via the gh CLI and return the parsed JSON response."""
     cmd = ["gh", "api", "graphql", "-F", "query=@-"]
     for key, value in fields.items():
         flag = "-F" if isinstance(value, int) else "-f"
@@ -102,6 +108,7 @@ def gh_graphql(query: str, **fields: str | int) -> dict[str, Any]:
 
 
 def fetch_open_prs(repo: str, max_prs: int) -> list[dict[str, Any]]:
+    """Fetch up to max_prs open pull requests from the repository using pagination."""
     owner, name = split_repo(repo)
     prs: list[dict[str, Any]] = []
     cursor: str | None = None
@@ -126,12 +133,14 @@ def fetch_open_prs(repo: str, max_prs: int) -> list[dict[str, Any]]:
 
 
 def context_nodes(pr: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return the list of status-check context nodes from a PR's statusCheckRollup."""
     rollup = pr.get("statusCheckRollup") or {}
     contexts = rollup.get("contexts") or {}
     return contexts.get("nodes") or []
 
 
 def is_opencode_context(node: dict[str, Any]) -> bool:
+    """Return True if the status-check node belongs to the OpenCode review workflow."""
     if node.get("__typename") == "CheckRun":
         workflow = (
             ((node.get("checkSuite") or {}).get("workflowRun") or {}).get("workflow")
@@ -142,6 +151,7 @@ def is_opencode_context(node: dict[str, Any]) -> bool:
 
 
 def opencode_in_progress(pr: dict[str, Any]) -> bool:
+    """Return True if an OpenCode review is currently queued or running for the PR."""
     for node in context_nodes(pr):
         if not is_opencode_context(node):
             continue
@@ -152,19 +162,23 @@ def opencode_in_progress(pr: dict[str, Any]) -> bool:
 
 
 def unresolved_thread_count(pr: dict[str, Any]) -> int:
+    """Return the number of non-outdated, unresolved review threads on the PR."""
     threads = ((pr.get("reviewThreads") or {}).get("nodes") or [])
     return sum(1 for thread in threads if not thread.get("isResolved") and not thread.get("isOutdated"))
 
 
 def review_author_login(review: dict[str, Any]) -> str:
+    """Return the lowercased login of the review author, or empty string if absent."""
     return ((review.get("author") or {}).get("login") or "").lower()
 
 
 def is_opencode_review(review: dict[str, Any]) -> bool:
+    """Return True if the review was submitted by the opencode-agent bot."""
     return review_author_login(review) == "opencode-agent"
 
 
 def current_head_review_state(pr: dict[str, Any], state: str) -> bool:
+    """Return True if the latest opencode-agent review on the current head has the given state."""
     head = pr.get("headRefOid")
     for review in reversed((pr.get("reviews") or {}).get("nodes") or []):
         if not is_opencode_review(review):
@@ -178,14 +192,17 @@ def current_head_review_state(pr: dict[str, Any], state: str) -> bool:
 
 
 def has_current_head_approval(pr: dict[str, Any]) -> bool:
+    """Return True if the opencode-agent approved the current head commit."""
     return current_head_review_state(pr, "APPROVED")
 
 
 def has_current_head_changes_requested(pr: dict[str, Any]) -> bool:
+    """Return True if the opencode-agent requested changes on the current head commit."""
     return current_head_review_state(pr, "CHANGES_REQUESTED")
 
 
 def enable_auto_merge(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
+    """Enable auto-merge for the PR via gh CLI, unless dry_run is True."""
     number = str(pr["number"])
     head = pr["headRefOid"]
     if dry_run:
@@ -194,6 +211,7 @@ def enable_auto_merge(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
 
 
 def dispatch_opencode_review(repo: str, workflow: str, pr: dict[str, Any], *, dry_run: bool) -> None:
+    """Trigger the OpenCode review workflow for the PR, unless dry_run is True."""
     if dry_run:
         return
     run(
@@ -230,6 +248,7 @@ def inspect_pr(
     workflow: str,
     base_branch: str,
 ) -> Decision:
+    """Determine what action to take for a single open pull request."""
     number = pr["number"]
     head_repo = (pr.get("headRepository") or {}).get("nameWithOwner")
     base_ref = pr.get("baseRefName")
@@ -273,6 +292,7 @@ def print_summary(
     base_branch: str,
     project_flow: str,
 ) -> None:
+    """Print a per-PR decision log and a JSON summary to stdout."""
     counts: dict[str, int] = {}
     for decision in decisions:
         counts[decision.action] = counts.get(decision.action, 0) + 1
@@ -292,6 +312,7 @@ def print_summary(
 
 
 def self_test() -> None:
+    """Run built-in assertions to verify core logic is correct."""
     sample = {
         "number": 1,
         "headRefOid": "abc",
@@ -340,6 +361,7 @@ def self_test() -> None:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    """Parse command-line arguments and return the resulting Namespace."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--base-branch", default=os.environ.get("DEFAULT_BRANCH", ""))
@@ -354,6 +376,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str]) -> int:
+    """Entry point: parse args, fetch PRs, inspect each, print summary."""
     args = parse_args(argv)
     if args.self_test:
         self_test()
@@ -386,7 +409,7 @@ def main(argv: list[str]) -> int:
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     try:
         raise SystemExit(main(sys.argv[1:]))
     except RuntimeError as exc:
