@@ -6,10 +6,6 @@
 **Vulnerability:** Workflow CI Security Bypass / Markdown Injection
 **Learning:** The GitHub Actions workflow `opencode-review.yml` attempted to optimize performance by doing a fast-path bash string extraction. If this succeeded, it skipped the Python JSON normalizer (`opencode_review_normalize_output.py`). This is a security flaw because the bash script does not escape `<, >, &` characters, allowing attackers to inject `-->` directly in JSON strings to break out of HTML comment sections.
 **Prevention:** Removed the fast-path check entirely. We must always enforce JSON normalization via `opencode_review_normalize_output.py` because it correctly parses the JSON payload and safely escapes all characters as `\u003c`, `\u003e` and `\u0026`.
-## 2026-06-29 - Prevent API Key Leak via Subprocess Environment
-**Vulnerability:** API keys passed through environment variables without adequate masking
-**Learning:** In bash, passing secrets as environment variables to a child process (like `strix`) can inadvertently expose them in logs, process lists, or crash dumps. The Strix scanner specifically flagged `STRIX_CHILD_LLM_API_KEY` and `LLM_API_KEY` being passed as environment variables.
-**Prevention:** Whenever possible, write secrets to a temporary file with strict permissions (e.g., `umask 077`) and pass the file path to child processes instead of passing the secret string directly in the environment.
 ## 2026-06-28 - Align Sensitive Log Redaction Across Languages
 **Vulnerability:** Information Disclosure / Secret Leakage
 **Learning:** The Bash CI script (`collect_failed_check_evidence.sh`) aggressively redacted a broad range of secrets like AWS keys, Slack tokens, and generic API keys. However, the Python PR review scheduler script (`pr_review_merge_scheduler.py`) only redacted a very narrow set of standard GitHub tokens (`ghp_` and `github_pat_`). This disparity left the Python-driven command logs vulnerable to exposing other high-value secrets on command failure if they were passed via environment or arguments and inadvertently caught in error tracebacks.
@@ -26,3 +22,7 @@
 **Vulnerability:** Server-Side Request Forgery (SSRF) / Local File Inclusion
 **Learning:** Functions that fetch URLs provided via user inputs (e.g., `wait_for_url` fetching `--backend-ready-url` in CI scripts) can inadvertently read local files if they do not validate the scheme. Python's `urllib.request.urlopen` supports `file://` schemes, allowing attackers to access arbitrary file contents from the host machine or sandbox if they can control the URL parameter.
 **Prevention:** Always validate URL inputs to restrict allowed schemes. Check that URLs explicitly start with `http://` or `https://` before fetching them with standard libraries like `urllib`.
+## 2026-06-29 - Prevent API Key Leak via Subprocess Environment
+**Vulnerability:** API keys passed through environment variables without adequate masking
+**Learning:** In bash, passing secrets as environment variables to a child process (like `strix`) can inadvertently expose them in logs, process lists, or crash dumps. The Strix scanner specifically flagged `STRIX_CHILD_LLM_API_KEY` and `LLM_API_KEY` being passed as environment variables.
+**Prevention:** Whenever possible, write secrets to a temporary file with strict permissions (e.g., `umask 077`) and pass the file path to child processes instead of passing the secret string directly in the environment.
