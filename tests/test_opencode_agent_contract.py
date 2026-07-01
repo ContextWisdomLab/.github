@@ -1,5 +1,8 @@
 import json
+import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 
@@ -252,3 +255,36 @@ def test_opencode_runs_merge_scheduler_after_review_without_repo_local_dispatch(
     assert "--enable-auto-merge" in workflow
     assert "--no-update-branches" in workflow
     assert "Merge scheduler follow-up skipped after approval because no mutation credential was available" in workflow
+
+
+def test_opencode_approval_gate_run_block_is_bash_syntax_valid():
+    """Guard inline jq/shell quoting in the long approval-gate run block."""
+    if os.name == "nt":
+        return
+    if shutil.which("bash") is None:
+        return
+
+    workflow_lines = Path(".github/workflows/opencode-review.yml").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    step_index = workflow_lines.index("      - name: Approve PR if OpenCode review passed")
+    run_index = next(
+        index
+        for index in range(step_index, len(workflow_lines))
+        if workflow_lines[index] == "        run: |"
+    )
+    script_lines: list[str] = []
+    for line in workflow_lines[run_index + 1 :]:
+        if line.startswith("      - name: "):
+            break
+        script_lines.append(line[10:] if line.startswith("          ") else line)
+
+    completed = subprocess.run(
+        ["bash", "-n"],
+        input="\n".join(script_lines),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
