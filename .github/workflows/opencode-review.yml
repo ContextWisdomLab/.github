@@ -4018,6 +4018,40 @@ jobs:
             rm -f "$runs_json"
           }
 
+          collect_current_head_commit_check_runs() {
+            local output_file="$1"
+            local mode="$2"
+            local jq_filter
+
+            case "$mode" in
+              failed)
+                jq_filter='
+                  .check_runs[]?
+                  | select((.name // "") != "opencode-review")
+                  | select((.status // "") == "completed")
+                  | select((.conclusion // "" | ascii_upcase) as $c | ["FAILURE","TIMED_OUT","ACTION_REQUIRED","CANCELLED","STARTUP_FAILURE"] | index($c))
+                  | "- " + (if (.name // "") == "strix" then "Strix Security Scan/strix" else ((.name // "check") + " check run") end) + ": " + (.conclusion // "unknown") + (if (.details_url // .html_url // "") != "" then " (" + (.details_url // .html_url) + ")" else "" end)
+                '
+                ;;
+              pending)
+                jq_filter='
+                  .check_runs[]?
+                  | select((.name // "") != "opencode-review")
+                  | select((.status // "") != "completed")
+                  | "- " + (if (.name // "") == "strix" then "Strix Security Scan/strix" else ((.name // "check") + " check run") end) + ": " + (.status // "unknown") + (if (.details_url // .html_url // "") != "" then " (" + (.details_url // .html_url) + ")" else "" end)
+                '
+                ;;
+              *)
+                return 1
+                ;;
+            esac
+
+            gh api -X GET "repos/${GH_REPOSITORY}/commits/${HEAD_SHA}/check-runs" \
+              -f per_page=100 \
+              --paginate \
+              --jq "$jq_filter" >"$output_file"
+          }
+
           current_head_manual_strix_success_status() {
             local status_target
             local manual_run_line
@@ -4182,9 +4216,11 @@ jobs:
             local pr_node_id
             local rollup_file
             local strix_runs_file
+            local commit_check_runs_file
             local filtered_rollup_file
             rollup_file="$(mktemp)"
             strix_runs_file="$(mktemp)"
+            commit_check_runs_file="$(mktemp)"
             filtered_rollup_file="$(mktemp)"
             if ! pr_node_id="$(gh api graphql \
               -f owner="$owner" \
@@ -4192,11 +4228,11 @@ jobs:
               -F number="$PR_NUMBER" \
               -f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id}}}' \
               --jq '.data.repository.pullRequest.id // empty')"; then
-              rm -f "$rollup_file" "$strix_runs_file" "$filtered_rollup_file"
+              rm -f "$rollup_file" "$strix_runs_file" "$commit_check_runs_file" "$filtered_rollup_file"
               return 1
             fi
             if [ -z "$pr_node_id" ]; then
-              rm -f "$rollup_file" "$strix_runs_file" "$filtered_rollup_file"
+              rm -f "$rollup_file" "$strix_runs_file" "$commit_check_runs_file" "$filtered_rollup_file"
               return 1
             fi
             # shellcheck disable=SC2016
@@ -4293,22 +4329,26 @@ jobs:
                   )
                 | .[]
               ' >"$rollup_file"; then
-              rm -f "$rollup_file" "$strix_runs_file" "$filtered_rollup_file"
+              rm -f "$rollup_file" "$strix_runs_file" "$commit_check_runs_file" "$filtered_rollup_file"
               return 1
             fi
             filter_superseded_strix_failures "$rollup_file" "$filtered_rollup_file"
             mv "$filtered_rollup_file" "$rollup_file"
 
             if ! collect_current_head_strix_workflow_runs "$strix_runs_file" failed; then
-              rm -f "$rollup_file" "$strix_runs_file" "$filtered_rollup_file"
+              rm -f "$rollup_file" "$strix_runs_file" "$commit_check_runs_file" "$filtered_rollup_file"
+              return 1
+            fi
+            if ! collect_current_head_commit_check_runs "$commit_check_runs_file" failed; then
+              rm -f "$rollup_file" "$strix_runs_file" "$commit_check_runs_file" "$filtered_rollup_file"
               return 1
             fi
             if grep -Fq -- "Strix Security Scan/strix:" "$rollup_file"; then
-              cat "$rollup_file" >"$output_file"
+              cat "$rollup_file" "$commit_check_runs_file" | sort -u >"$output_file"
             else
-              cat "$rollup_file" "$strix_runs_file" >"$output_file"
+              cat "$rollup_file" "$strix_runs_file" "$commit_check_runs_file" | sort -u >"$output_file"
             fi
-            rm -f "$rollup_file" "$strix_runs_file" "$filtered_rollup_file"
+            rm -f "$rollup_file" "$strix_runs_file" "$commit_check_runs_file" "$filtered_rollup_file"
 
           }
 
@@ -4318,8 +4358,10 @@ jobs:
             local name="${GH_REPOSITORY#*/}"
             local rollup_file
             local strix_runs_file
+            local commit_check_runs_file
             rollup_file="$(mktemp)"
             strix_runs_file="$(mktemp)"
+            commit_check_runs_file="$(mktemp)"
             # shellcheck disable=SC2016
             if ! gh api graphql \
               -f owner="$owner" \
@@ -4380,20 +4422,24 @@ jobs:
                   )
                 | .[]
               ' >"$rollup_file"; then
-              rm -f "$rollup_file" "$strix_runs_file"
+              rm -f "$rollup_file" "$strix_runs_file" "$commit_check_runs_file"
               return 1
             fi
 
             if ! collect_current_head_strix_workflow_runs "$strix_runs_file" pending; then
-              rm -f "$rollup_file" "$strix_runs_file"
+              rm -f "$rollup_file" "$strix_runs_file" "$commit_check_runs_file"
+              return 1
+            fi
+            if ! collect_current_head_commit_check_runs "$commit_check_runs_file" pending; then
+              rm -f "$rollup_file" "$strix_runs_file" "$commit_check_runs_file"
               return 1
             fi
             if grep -Fq -- "Strix Security Scan/strix:" "$rollup_file"; then
-              cat "$rollup_file" >"$output_file"
+              cat "$rollup_file" "$commit_check_runs_file" | sort -u >"$output_file"
             else
-              cat "$rollup_file" "$strix_runs_file" >"$output_file"
+              cat "$rollup_file" "$strix_runs_file" "$commit_check_runs_file" | sort -u >"$output_file"
             fi
-            rm -f "$rollup_file" "$strix_runs_file"
+            rm -f "$rollup_file" "$strix_runs_file" "$commit_check_runs_file"
 
           }
 
