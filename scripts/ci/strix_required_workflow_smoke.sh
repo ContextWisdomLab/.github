@@ -57,6 +57,8 @@ assert_file_contains "$workflow_file" "workflow_sha" "Strix workflow prefers req
 assert_file_contains "$workflow_file" "Checkout trusted Strix source" "Strix workflow checks out central source"
 assert_file_contains "$workflow_file" 'repository: ${{ steps.trusted_source.outputs.repository }}' "Strix workflow checks out resolved central repository"
 assert_file_contains "$workflow_file" 'ref: ${{ steps.trusted_source.outputs.ref }}' "Strix workflow checks out resolved central ref"
+assert_file_contains "$workflow_file" "Materialize central Strix dependency lock from PR head" "Strix workflow validates same-repo central lock-file PRs against the PR head lock"
+assert_file_contains "$workflow_file" "requirements-strix-ci-hashes.txt" "Strix workflow can materialize the central Strix hashed requirements lock"
 assert_file_contains "$workflow_file" "Materialize target workspace" "Strix workflow separates target workspace from trusted source"
 assert_file_contains "$workflow_file" 'STRIX_REPO_ROOT:' "Strix workflow passes target root explicitly"
 assert_file_contains "$workflow_file" 'bash "$TRUSTED_STRIX_GATE"' "Strix workflow executes central Strix gate"
