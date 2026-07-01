@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
+"""Test opencode_review_normalize_output.py escaping functions."""
 import json
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 def test_json_escaping():
+    """Test that json normalizer escapes markdown injection sequences."""
     repo_root = Path(__file__).resolve().parent.parent.parent
     normalizer = repo_root / "scripts" / "ci" / "opencode_review_normalize_output.py"
 
@@ -20,17 +21,18 @@ def test_json_escaping():
     }
     input_text = json.dumps(dummy_control)
 
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as tmp:
-        tmp.write(input_text)
-        test_file = Path(tmp.name)
+    input_file = Path("test_input.json")
+    input_file.write_text(input_text, encoding="utf-8")
+
+    output_file = Path("test_input.json")
 
     try:
         subprocess.run(
-            [sys.executable, str(normalizer), "abc123def456", "12345", "1", str(test_file)],
+            [sys.executable, str(normalizer), "abc123def456", "12345", "1", str(output_file)],
             check=True
         )
 
-        output_text = test_file.read_text(encoding="utf-8")
+        output_text = output_file.read_text(encoding="utf-8")
 
         # Check if the output contains the properly escaped characters
         assert r"\u003c" in output_text, "Failed to escape <"
@@ -45,8 +47,8 @@ def test_json_escaping():
 
         print("opencode_review_normalize_output escaping tests passed")
     finally:
-        if test_file.exists():
-            test_file.unlink()
+        if input_file.exists():
+            input_file.unlink()
 
 if __name__ == "__main__":
     test_json_escaping()

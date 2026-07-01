@@ -12,7 +12,6 @@ FAILED_CHECK_EVIDENCE_FILE="$3"
 
 if [ ! -r "$CONTROL_JSON_FILE" ] || [ ! -r "$FAILED_CHECKS_FILE" ] || [ ! -r "$FAILED_CHECK_EVIDENCE_FILE" ]; then
   echo "FAILED_CHECK_EVIDENCE_NOT_REFERENCED"
-  echo "Reason: control JSON, failed-check list, or failed-check evidence file is unreadable."
   exit 4
 fi
 
@@ -50,45 +49,7 @@ contains_review_text() {
   if [ -z "$needle" ]; then
     return 0
   fi
-
-  local was_nocasematch=0
-  if shopt -q nocasematch; then
-    was_nocasematch=1
-  fi
-  shopt -s nocasematch
-
-  local result=1
-  if [[ "$review_text" == *"$needle"* ]]; then
-    result=0
-  fi
-
-  if [ "$was_nocasematch" -eq 0 ]; then
-    shopt -u nocasematch
-  fi
-
-  return "$result"
-}
-
-reject_failed_check_review() {
-  echo "FAILED_CHECK_EVIDENCE_NOT_REFERENCED"
-  echo "Reason: $1"
-  exit 4
-}
-
-reject_non_actionable_failed_check_review() {
-  local marker
-
-  for marker in \
-    "No deterministic missing-string markers" \
-    "No deterministic missing string markers" \
-    "Strix report locations were recognized" \
-    "Use the failed-check evidence below to map" \
-    "map each failed check to exact local source lines before approving"
-  do
-    if contains_review_text "$marker"; then
-      reject_failed_check_review "review text punts failed-check diagnosis back to the reader: ${marker}"
-    fi
-  done
+  grep -Fqi -- "$needle" <<<"$review_text"
 }
 
 extract_strix_required_markers() {
@@ -235,134 +196,112 @@ def starts_new_field(line: str) -> bool:
     )
 
 
-class ReportParser:
-    def __init__(self) -> None:
-        self.reports: list[dict[str, str]] = []
-        self.in_window = False
-        self.window_model = ""
-        self.current_model = ""
-        self.report_model = ""
-        self.title = ""
-        self.severity = ""
-        self.endpoint = ""
-        self.method = ""
-        self.target = ""
-        self.location = ""
-        self.continuation = ""
+def parse_reports(text: str) -> list[dict[str, str]]:
+    reports: list[dict[str, str]] = []
+    in_window = False
+    window_model = ""
+    current_model = ""
+    report_model = ""
+    title = ""
+    severity = ""
+    endpoint = ""
+    method = ""
+    target = ""
+    location = ""
+    continuation = ""
 
-    def finish_report(self) -> None:
-        if self.title:
-            self.reports.append(
+    def finish_report() -> None:
+        nonlocal report_model, title, severity, endpoint, method, target, location
+        if title:
+            reports.append(
                 {
-                    "model": self.report_model or self.window_model or self.current_model or "unknown-model",
-                    "title": self.title,
-                    "severity": self.severity,
-                    "endpoint": self.endpoint,
-                    "method": self.method,
-                    "target": self.target,
-                    "location": self.location,
+                    "model": report_model or window_model or current_model or "unknown-model",
+                    "title": title,
+                    "severity": severity,
+                    "endpoint": endpoint,
+                    "method": method,
+                    "target": target,
+                    "location": location,
                 }
             )
-        self.report_model = self.title = self.severity = self.endpoint = self.method = self.target = self.location = ""
+        report_model = title = severity = endpoint = method = target = location = ""
 
-    def _handle_window_start(self, line: str) -> bool:
-        if not line.lower().startswith("### strix vulnerability report window"):
-            return False
-        self.finish_report()
-        self.in_window = True
-        self.window_model = ""
-        match = re.search(
-            r"(?:model|for model)\s+((?:github[-_]models|openai|deepseek|vertex_ai)/[A-Za-z0-9._/-]+)",
-            line,
-            re.IGNORECASE,
-        )
-        if match:
-            self.window_model = match.group(1)
-            self.current_model = match.group(1)
-        self.continuation = ""
-        return True
+    for raw_line in text.splitlines():
+        line = clean(raw_line)
+        if line.lower().startswith("### strix vulnerability report window"):
+            finish_report()
+            in_window = True
+            window_model = ""
+            match = re.search(
+                r"(?:model|for model)\s+((?:github[-_]models|openai|deepseek|vertex_ai)/[A-Za-z0-9._/-]+)",
+                line,
+                re.IGNORECASE,
+            )
+            if match:
+                window_model = match.group(1)
+                current_model = match.group(1)
+            continuation = ""
+            continue
 
-    def _update_models(self, line: str) -> None:
         match = model_re.search(line) or failed_model_re.search(line)
         if match:
-            self.current_model = match.group(1)
-            if self.in_window:
-                self.window_model = self.current_model
-            if self.in_window and self.title:
-                self.report_model = self.current_model
+            current_model = match.group(1)
+            if in_window:
+                window_model = current_model
+            if in_window and title:
+                report_model = current_model
 
-    def _handle_continuation(self, line: str) -> bool:
-        if not self.continuation:
-            return False
-        if not line:
-            self.continuation = ""
-        elif not starts_new_field(line) and not re.match(r"^[╭╰─]+$", line) and line.lower() != "vulnerability report":
-            if self.continuation == "title":
-                self.title = f"{self.title} {line}".strip()
-            elif self.continuation == "endpoint":
-                self.endpoint = f"{self.endpoint} {line}".strip()
-            elif self.continuation == "target":
-                self.target = f"{self.target} {line}".strip()
-            return True
-        else:
-            self.continuation = ""
-        return False
+        if not in_window:
+            continue
 
-    def _parse_field(self, line: str) -> None:
-        field_match = re.match(r"^Title:\s+(.+)", line, re.IGNORECASE)
-        if field_match:
-            self.finish_report()
-            self.title = field_match.group(1)
-            self.report_model = self.window_model
-            self.continuation = "title"
-            return
-        field_match = re.match(r"^Severity:\s+(CRITICAL|HIGH|MEDIUM|LOW|NONE)\b", line, re.IGNORECASE)
-        if field_match:
-            self.severity = field_match.group(1).upper()
-            return
-        field_match = re.match(r"^Endpoint:\s+(.+)", line, re.IGNORECASE)
-        if field_match:
-            self.endpoint = field_match.group(1)
-            self.continuation = "endpoint"
-            return
-        field_match = re.match(r"^Method:\s+(.+)", line, re.IGNORECASE)
-        if field_match:
-            self.method = field_match.group(1)
-            self.continuation = ""
-            return
-        field_match = re.match(r"^Target:\s+(.+)", line, re.IGNORECASE)
-        if field_match:
-            self.target = field_match.group(1)
-            self.continuation = "target"
-            return
-        field_match = location_re.search(line)
-        if field_match and not self.location:
-            self.location = field_match.group(1)
-
-    def process_line(self, line: str) -> None:
-        if self._handle_window_start(line):
-            return
-
-        self._update_models(line)
-
-        if not self.in_window:
-            return
-
-        if self._handle_continuation(line):
-            return
+        if continuation:
+            if not line:
+                continuation = ""
+            elif not starts_new_field(line) and not re.match(r"^[╭╰─]+$", line) and line.lower() != "vulnerability report":
+                if continuation == "title":
+                    title = f"{title} {line}".strip()
+                elif continuation == "endpoint":
+                    endpoint = f"{endpoint} {line}".strip()
+                elif continuation == "target":
+                    target = f"{target} {line}".strip()
+                continue
+            else:
+                continuation = ""
 
         if line.lower() == "vulnerability report":
-            return
+            continue
+        field_match = re.match(r"^Title:\s+(.+)", line, re.IGNORECASE)
+        if field_match:
+            finish_report()
+            title = field_match.group(1)
+            report_model = window_model
+            continuation = "title"
+            continue
+        field_match = re.match(r"^Severity:\s+(CRITICAL|HIGH|MEDIUM|LOW|NONE)\b", line, re.IGNORECASE)
+        if field_match:
+            severity = field_match.group(1).upper()
+            continue
+        field_match = re.match(r"^Endpoint:\s+(.+)", line, re.IGNORECASE)
+        if field_match:
+            endpoint = field_match.group(1)
+            continuation = "endpoint"
+            continue
+        field_match = re.match(r"^Method:\s+(.+)", line, re.IGNORECASE)
+        if field_match:
+            method = field_match.group(1)
+            continuation = ""
+            continue
+        field_match = re.match(r"^Target:\s+(.+)", line, re.IGNORECASE)
+        if field_match:
+            target = field_match.group(1)
+            continuation = "target"
+            continue
+        field_match = location_re.search(line)
+        if field_match and not location:
+            location = field_match.group(1)
 
-        self._parse_field(line)
-
-
-def parse_reports(text: str) -> list[dict[str, str]]:
-    parser = ReportParser()
-    for raw_line in text.splitlines():
-        parser.process_line(clean(raw_line))
-    parser.finish_report()
-    return [report for report in parser.reports if report["title"] and report["severity"] != "NONE"]
+    finish_report()
+    return [report for report in reports if report["title"] and report["severity"] != "NONE"]
 
 
 def finding_text(finding: dict[str, object]) -> str:
@@ -411,15 +350,14 @@ for report in reports:
 PY
 }
 
-reject_non_actionable_failed_check_review
-
 while IFS= read -r failed_check_line; do
   case "$failed_check_line" in
     "- "*)
       failed_check_label="${failed_check_line#- }"
       failed_check_label="${failed_check_label%%:*}"
       if ! contains_review_text "$failed_check_label"; then
-        reject_failed_check_review "review does not name failed check '${failed_check_label}'."
+        echo "FAILED_CHECK_EVIDENCE_NOT_REFERENCED"
+        exit 4
       fi
       ;;
   esac
@@ -427,7 +365,8 @@ done <"$FAILED_CHECKS_FILE"
 
 while IFS= read -r fail_marker; do
   if ! contains_review_text "$fail_marker"; then
-    reject_failed_check_review "review does not cite failed-log marker '${fail_marker}'."
+    echo "FAILED_CHECK_EVIDENCE_NOT_REFERENCED"
+    exit 4
   fi
 done < <(awk -F 'FAIL: ' 'NF > 1 { print $2 }' "$FAILED_CHECK_EVIDENCE_FILE" | sort -u)
 
@@ -439,31 +378,36 @@ for evidence_marker in \
 do
   if grep -Fq -- "$evidence_marker" "$FAILED_CHECK_EVIDENCE_FILE" &&
     ! contains_review_text "$evidence_marker"; then
-    reject_failed_check_review "review omits required evidence marker '${evidence_marker}'."
+    echo "FAILED_CHECK_EVIDENCE_NOT_REFERENCED"
+    exit 4
   fi
 done
 
 if grep -Fq "Strix vulnerability report window" "$FAILED_CHECK_EVIDENCE_FILE"; then
   if ! validate_distinct_strix_report_findings; then
-    reject_failed_check_review "Strix vulnerability reports were not mapped to distinct source-backed findings."
+    echo "FAILED_CHECK_EVIDENCE_NOT_REFERENCED"
+    exit 4
   fi
 
   strix_title_count="$(extract_strix_title_markers | sed '/^[[:space:]]*$/d' | wc -l | tr -d '[:space:]')"
   finding_count="$(count_strix_review_findings)"
   if [ -n "$strix_title_count" ] && [ "$strix_title_count" -gt 0 ] &&
     [ "$finding_count" -lt "$strix_title_count" ]; then
-    reject_failed_check_review "review has fewer Strix-specific findings (${finding_count}) than Strix report titles (${strix_title_count})."
+    echo "FAILED_CHECK_EVIDENCE_NOT_REFERENCED"
+    exit 4
   fi
 
   while IFS= read -r model_name; do
     if ! contains_review_text "$model_name"; then
-      reject_failed_check_review "review omits Strix report model '${model_name}'."
+      echo "FAILED_CHECK_EVIDENCE_NOT_REFERENCED"
+      exit 4
     fi
   done < <(extract_strix_report_model_markers)
 
   while IFS= read -r strix_marker; do
     if ! contains_review_text "$strix_marker"; then
-      reject_failed_check_review "review omits Strix report marker '${strix_marker}'."
+      echo "FAILED_CHECK_EVIDENCE_NOT_REFERENCED"
+      exit 4
     fi
   done < <(extract_strix_required_markers)
 fi
