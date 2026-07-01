@@ -4535,13 +4535,16 @@ jobs:
             first_parent="$1"
             second_parent="$2"
 
-            if [ -n "${PR_BASE_SHA:-}" ] && [ "$second_parent" != "$PR_BASE_SHA" ]; then
+            if [ -z "${PR_BASE_SHA:-}" ]; then
+              return 1
+            fi
+            if [ "$second_parent" != "$PR_BASE_SHA" ]; then
               if ! git -C "$OPENCODE_SOURCE_WORKDIR" merge-base --is-ancestor "$second_parent" "$PR_BASE_SHA" 2>/dev/null; then
                 return 1
               fi
             fi
 
-            if ! reviews_json="$(gh api -X GET "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}/reviews" --paginate)"; then
+            if ! reviews_json="$(gh api -X GET "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}/reviews" --paginate | jq -s 'add')"; then
               return 1
             fi
             approved_parent_count="$(
@@ -4550,7 +4553,7 @@ jobs:
                   .[]
                   | select(.commit_id == $sha)
                   | select(.user.login == "opencode-agent[bot]" or .user.login == "opencode-agent")
-                  | select(.state == "APPROVED" or (.state == "DISMISSED" and ((.body // "") | contains("Result: APPROVE"))))
+                  | select(.state == "APPROVED")
                 ]
                 | length
               ' <<<"$reviews_json"

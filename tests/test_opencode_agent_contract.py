@@ -181,6 +181,8 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "approve_previously_reviewed_merge_update_after_model_exhaustion" in workflow
     assert "2-parent merge update" in workflow
     assert "Prior review: OpenCode approval exists on first parent" in workflow
+    assert 'reviews" --paginate | jq -s' in workflow
+    assert 'select(.state == "APPROVED")' in workflow
     assert "이 fallback은 이미 승인된 PR head를 최신 base에 병합한 merge-update commit에만 적용됩니다" in workflow
     assert 'timeout-minutes: 310' in workflow
     assert 'OPENCODE_MODEL_ATTEMPTS: "3"' in workflow
