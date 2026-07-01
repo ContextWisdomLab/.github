@@ -192,10 +192,13 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "is_context_overflow_failure" in model_pool_runner
     assert "tokens_limit_reached" in model_pool_runner
     assert "skipping remaining attempts for this model" in model_pool_runner
-    assert "approve_low_risk_review_fallback_after_model_exhaustion" in workflow
-    assert "changed_file_is_low_risk_review_fallback" in workflow
-    assert "production source 또는 package manifest 변경이 없습니다" in workflow
-    assert "Source, workflow, config, package, migration, generated artifact 변경은 모델 기반 review 없이 승인하지 않습니다" in workflow
+    assert "approve_low_risk_review_fallback_after_model_exhaustion" not in workflow
+    assert "changed_file_is_low_risk_review_fallback" not in workflow
+    assert "production source 또는 package manifest 변경이 없습니다" not in workflow
+    assert "request_changes_for_coverage_evidence_failure" in workflow
+    assert '"## Review outcome"' in workflow
+    assert '"## Check outcome"' not in workflow
+    assert "publish REQUEST_CHANGES when coverage-evidence blocker states" in workflow
     assert 'timeout-minutes: 310' in workflow
     assert 'OPENCODE_MODEL_ATTEMPTS: "3"' in workflow
     assert 'OPENCODE_RUN_TIMEOUT_SECONDS: "900"' in workflow
