@@ -99,10 +99,9 @@ def test_run_passes_stdin():
     with patch("subprocess.run") as mock_sub:
         mock_sub.return_value = MagicMock(returncode=0, stdout="", stderr="")
         run(["cat"], stdin="data")
-        _, kwargs = mock_sub.call_args
-        assert kwargs.get("input") == "data" or mock_sub.call_args[0][1] == "data" or True
-        # The important check is that subprocess.run was called
         mock_sub.assert_called_once()
+        call_kwargs = mock_sub.call_args[1]
+        assert call_kwargs.get("input") == "data"
 
 
 # ---------------------------------------------------------------------------
