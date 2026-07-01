@@ -325,6 +325,20 @@ def test_opencode_runs_merge_scheduler_after_review_without_repo_local_dispatch(
     assert "Merge scheduler follow-up skipped after approval because no mutation credential was available" in workflow
 
 
+def test_opencode_review_body_printf_blocks_close_on_separate_line():
+    """Guard approval-gate review body builders against runner bash parse failures."""
+    workflow = Path(".github/workflows/opencode-review.yml").read_text(encoding="utf-8")
+    risky_suffixes = (
+        "source finding.\")\"",
+        "has no blockers.\")\"",
+        "승인하지 않습니다.\")\"",
+        'Workflow attempt: ${RUN_ATTEMPT}")"',
+    )
+
+    for suffix in risky_suffixes:
+        assert suffix not in workflow
+
+
 def test_opencode_review_thread_jq_filters_preserve_bash_single_quotes():
     """Guard jq filters embedded in single-quoted shell strings."""
     workflow = Path(".github/workflows/opencode-review.yml").read_text(
