@@ -2798,6 +2798,7 @@ def test_run_masks_secrets_in_args():
     assert "ghp_abcdef1234567890abcdef1234567890abcdef" not in err_msg
     assert "***" in err_msg
 
+
 def test_parse_workflow_action_required_reason():
     """Test extracting ACTION_REQUIRED check names from a scheduler reason."""
     # Test valid marker extraction
