@@ -214,14 +214,17 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert re.search(r"Run OpenCode PR Review model pool[\s\S]{0,240}timeout-minutes: 20", workflow)
     assert 'APPROVAL_CHECK_WAIT_ATTEMPTS: "81"' in workflow
     assert 'APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "30"' in workflow
-    assert 'OPENCODE_MODEL_CANDIDATES: "github-models/openai/gpt-5-nano"' in workflow
-    assert 'OPENCODE_MODEL_ATTEMPTS: "1"' in workflow
+    assert 'OPENCODE_MODEL_CANDIDATES: "github-models/openai/gpt-5-nano github-models/openai/gpt-5-mini github-models/openai/gpt-5-chat"' in workflow
+    assert 'OPENCODE_MODEL_ATTEMPTS: "2"' in workflow
     assert 'OPENCODE_RUN_TIMEOUT_SECONDS: "240"' in workflow
     assert 'OPENCODE_EXPORT_TIMEOUT_SECONDS: "120"' in workflow
-    assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "360"' in workflow
-    assert 'OPENCODE_BACKOFF_MAX_SECONDS: "30"' in workflow
+    assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "720"' in workflow
+    assert 'OPENCODE_BACKOFF_MAX_SECONDS: "60"' in workflow
+    assert 'check_runs_pages_file="$(mktemp)" || return 1' in workflow
+    assert 'jq -s "$jq_filter"' in workflow
+    assert '--slurp \\\n              --jq "$jq_filter"' not in workflow
     assert "${{ runner.temp }}/opencode-review-model-pool.md" in workflow
-    assert re.search(r'check-runs" \\\n\s+-f per_page=100 \\\n\s+--paginate \\\n\s+--slurp \|\n\s+jq -r "\$jq_filter"', workflow)
+    assert re.search(r'check-runs" \\\n\s+-f per_page=100 \\\n\s+--paginate >"\$check_runs_pages_file"', workflow)
     assert not re.search(r"--slurp\s*\\\n\s*--jq", workflow)
     assert "falling back to current-head REST check-runs" in workflow
 
