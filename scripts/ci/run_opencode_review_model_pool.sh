@@ -94,7 +94,7 @@ run_one_model_attempt() {
 	local opencode_export_file="$8"
 	local run_timeout_seconds export_timeout_seconds opencode_status session_id
 
-	run_timeout_seconds="${OPENCODE_RUN_TIMEOUT_SECONDS:-180}"
+	run_timeout_seconds="${OPENCODE_RUN_TIMEOUT_SECONDS:-18000}"
 	export_timeout_seconds="${OPENCODE_EXPORT_TIMEOUT_SECONDS:-60}"
 
 	rm -f "$opencode_json_file" "$opencode_export_file" "$candidate_output_file"
@@ -149,7 +149,7 @@ main() {
 	local opencode_json_file opencode_export_file agent retry_sleep original_run_timeout run_status
 
 	attempts="${OPENCODE_MODEL_ATTEMPTS:-3}"
-	original_run_timeout="${OPENCODE_RUN_TIMEOUT_SECONDS:-900}"
+	original_run_timeout="${OPENCODE_RUN_TIMEOUT_SECONDS:-18000}"
 	deadline=$((SECONDS + ${OPENCODE_TOTAL_RETRY_BUDGET_SECONDS:-18000}))
 	: >"$OPENCODE_OUTPUT_FILE"
 	cd "$OPENCODE_REVIEW_WORKDIR"
