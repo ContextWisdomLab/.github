@@ -26,11 +26,11 @@ def _extract_run_block(workflow_text: str, step_name: str) -> str:
     return "\n".join(block_lines) + "\n"
 
 
-def test_opencode_evidence_run_block_is_valid_bash():
+def test_opencode_review_run_blocks_are_valid_bash():
     workflow_text = (REPO_ROOT / ".github/workflows/opencode-review.yml").read_text(
         encoding="utf-8"
     )
-    assert 'gsub("`"; "\\u0027")' in workflow_text
+    assert 'gsub("`"; "&apos;")' in workflow_text
     assert 'gsub("`"; "\'")' not in workflow_text
 
     if sys.platform == "win32":
@@ -39,14 +39,17 @@ def test_opencode_evidence_run_block_is_valid_bash():
     if bash is None:
         return
 
-    script = _extract_run_block(workflow_text, "Prepare bounded OpenCode review evidence")
+    for step_name in (
+        "Prepare bounded OpenCode review evidence",
+        "Approve PR if OpenCode review passed",
+    ):
+        script = _extract_run_block(workflow_text, step_name)
+        result = subprocess.run(
+            [bash, "-n"],
+            input=script,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
 
-    result = subprocess.run(
-        [bash, "-n"],
-        input=script,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    assert result.returncode == 0, result.stderr
+        assert result.returncode == 0, f"{step_name}: {result.stderr}"
