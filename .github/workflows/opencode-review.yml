@@ -4022,7 +4022,6 @@ jobs:
             local output_file="$1"
             local mode="$2"
             local jq_filter
-            local pages_file
 
             case "$mode" in
               failed)
@@ -4055,15 +4054,11 @@ jobs:
                 ;;
             esac
 
-            pages_file="$(mktemp)"
-            if ! gh api -X GET "repos/${GH_REPOSITORY}/commits/${HEAD_SHA}/check-runs" \
+            gh api -X GET "repos/${GH_REPOSITORY}/commits/${HEAD_SHA}/check-runs" \
               -f per_page=100 \
-              --paginate >"$pages_file"; then
-              rm -f "$pages_file"
-              return 1
-            fi
-            jq -r -s "$jq_filter" "$pages_file" >"$output_file"
-            rm -f "$pages_file"
+              --paginate \
+              --slurp \
+              --jq "$jq_filter" >"$output_file"
           }
 
           current_head_manual_strix_success_status() {
