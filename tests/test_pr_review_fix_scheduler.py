@@ -119,6 +119,57 @@ def test_change_request_requires_current_head_opencode_review():
     assert not fix.change_request_is_autofixable(stale_review_pr)
 
 
+@pytest.mark.parametrize("merge_state", ["DIRTY", "CONFLICTING"])
+def test_needs_autofix_blocks_non_clean_merge_states(merge_state):
+    """Autofix dispatch does not try to repair merge-state blockers."""
+    head = "a" * 40
+    pr = make_pr(
+        headRefOid=head,
+        mergeStateStatus=merge_state,
+        reviews={
+            "nodes": [
+                {
+                    "state": "CHANGES_REQUESTED",
+                    "author": {"login": "opencode-agent"},
+                    "commit": {"oid": head},
+                    "body": "Actionable source-backed finding with a suggested diff.",
+                }
+            ]
+        },
+    )
+
+    assert fix.needs_autofix(pr) == (False, ())
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "OpenCode could not establish approval sufficiency because the model pool exhausted.",
+        "OpenCode found unresolved human review thread evidence before approval.",
+        "Failed check evidence shows coverage-evidence failed on the current head.",
+    ],
+)
+def test_needs_autofix_blocks_process_only_reviews(body):
+    """Process-only OpenCode requests do not trigger code autofix dispatch."""
+    head = "a" * 40
+    pr = make_pr(
+        headRefOid=head,
+        mergeStateStatus="CLEAN",
+        reviews={
+            "nodes": [
+                {
+                    "state": "CHANGES_REQUESTED",
+                    "author": {"login": "opencode-agent"},
+                    "commit": {"oid": head},
+                    "body": body,
+                }
+            ]
+        },
+    )
+
+    assert fix.needs_autofix(pr) == (False, ())
+
+
 def test_process_queue_dispatches_same_repo_current_head(monkeypatch, capsys):
     """The queue path dispatches one same-repository autofix."""
     pr = make_pr()
