@@ -1285,7 +1285,7 @@ jobs:
                     (.comments[-1] |
                       "- Latest reviewer comment: @\(.author) at \(.createdAt)",
                       "- Comment URL: \(.url)",
-                      "- Comment excerpt: \((.body | gsub("\r"; "") | gsub("`"; "'") | gsub("<"; "&lt;") | gsub(">"; "&gt;") | split("\n") | map(select(length > 0)) | .[0:8] | join(" / ") | .[0:600]))"
+              "- Comment excerpt: \((.body | gsub("\r"; "") | gsub("`"; "\u0027") | gsub("<"; "&lt;") | gsub(">"; "&gt;") | split("\n") | map(select(length > 0)) | .[0:8] | join(" / ") | .[0:600]))"
                     ),
                     ""
                   )
@@ -1429,14 +1429,29 @@ jobs:
             printf '\n\n[Prompt evidence truncated after %s of %s bytes. Full failed-check evidence is copied to failed-check-evidence.md in the OpenCode review workspace when present.]\n' "$max_bytes" "$byte_count"
           }
 
+          safe_git_diff() {
+            local description="$1"
+            shift
+
+            if ! git -C "$OPENCODE_SOURCE_WORKDIR" diff "$@"; then
+              printf 'Unable to collect %s from `%s` to `%s`; continue review from available changed-file evidence and direct file inspection.\n' "$description" "$PR_MERGE_BASE" "$PR_HEAD_SHA"
+            fi
+          }
+
           {
             printf '# OpenCode bounded PR review evidence\n\n'
             printf -- '- PR: #%s\n' "$PR_NUMBER"
             printf -- "- Base SHA: \`%s\`\n" "$PR_BASE_SHA"
             printf -- "- Head SHA: \`%s\`\n\n" "$PR_HEAD_SHA"
-            PR_MERGE_BASE="$(git -C "$OPENCODE_SOURCE_WORKDIR" merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")"
+            if ! PR_MERGE_BASE="$(git -C "$OPENCODE_SOURCE_WORKDIR" merge-base "$PR_BASE_SHA" "$PR_HEAD_SHA")"; then
+              printf 'Merge-base discovery failed for `%s` and `%s`; falling back to base SHA for bounded diff evidence.\n\n' "$PR_BASE_SHA" "$PR_HEAD_SHA"
+              PR_MERGE_BASE="$PR_BASE_SHA"
+            fi
             printf -- "- Merge base SHA: \`%s\`\n\n" "$PR_MERGE_BASE"
-            git -C "$OPENCODE_SOURCE_WORKDIR" diff --name-only --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA" >"$OPENCODE_CHANGED_FILES_FILE"
+            if ! git -C "$OPENCODE_SOURCE_WORKDIR" diff --name-only --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA" >"$OPENCODE_CHANGED_FILES_FILE"; then
+              printf 'Changed-file discovery failed; downstream review must inspect the PR head directly.\n\n'
+              : >"$OPENCODE_CHANGED_FILES_FILE"
+            fi
 
             printf '## CodeGraph evidence\n\n'
             printf 'The workflow initialized CodeGraph before this evidence file was built.\n'
@@ -1481,13 +1496,13 @@ jobs:
             printf 'Do not request a rollback solely because a model memory says the version is unreleased or unsupported. Treat version availability as a blocker only when a current-head GitHub Check failed, a validated registry lookup failed, or a cited local source line is internally inconsistent with the documented runtime contract.\n\n'
 
             printf '## Changed files\n\n'
-            git -C "$OPENCODE_SOURCE_WORKDIR" diff --name-status "$PR_MERGE_BASE" "$PR_HEAD_SHA"
+            safe_git_diff "changed file status" --name-status "$PR_MERGE_BASE" "$PR_HEAD_SHA"
             printf '\n## Changed file history evidence\n\n'
-            emit_changed_file_history_evidence
+            emit_changed_file_history_evidence || printf 'Changed file history evidence could not be collected.\n'
             printf '\n## Changed docs repository tree evidence\n\n'
-            emit_changed_docs_tree_evidence
+            emit_changed_docs_tree_evidence || printf 'Changed docs repository tree evidence could not be collected.\n'
             printf '\n## Diff stat\n\n'
-            git -C "$OPENCODE_SOURCE_WORKDIR" diff --stat --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA"
+            safe_git_diff "diff stat" --stat --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA"
             printf '\n## Focused changed hunks\n\n'
             printf '```diff\n'
             mapfile -t focused_hunk_paths < <(
@@ -1496,7 +1511,9 @@ jobs:
             )
             if [ "${#focused_hunk_paths[@]}" -gt 0 ]; then
               focused_hunks_file="$(mktemp)"
-              git -C "$OPENCODE_SOURCE_WORKDIR" diff --unified=12 --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA" -- "${focused_hunk_paths[@]}" >"$focused_hunks_file"
+              if ! git -C "$OPENCODE_SOURCE_WORKDIR" diff --unified=12 --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA" -- "${focused_hunk_paths[@]}" >"$focused_hunks_file"; then
+                printf 'Focused hunk extraction failed; inspect changed files directly from changed-files.txt.\n' >"$focused_hunks_file"
+              fi
               emit_file_prefix "$focused_hunks_file" 12000
               rm -f "$focused_hunks_file"
             else
@@ -3016,7 +3033,7 @@ jobs:
                     (.comments[-1] |
                       "- Latest reviewer comment: @\(.author) at \(.createdAt)",
                       "- Comment URL: \(.url)",
-                      "- Comment excerpt: \((.body | gsub("\r"; "") | gsub("`"; "'") | gsub("<"; "&lt;") | gsub(">"; "&gt;") | split("\n") | map(select(length > 0)) | .[0:8] | join(" / ") | .[0:600]))"
+              "- Comment excerpt: \((.body | gsub("\r"; "") | gsub("`"; "\u0027") | gsub("<"; "&lt;") | gsub(">"; "&gt;") | split("\n") | map(select(length > 0)) | .[0:8] | join(" / ") | .[0:600]))"
                     ),
                     ""
                   )
