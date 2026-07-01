@@ -273,4 +273,4 @@ def test_opencode_review_jq_blocks_do_not_embed_shell_single_quotes():
     workflow = Path(".github/workflows/opencode-review.yml").read_text(encoding="utf-8")
 
     assert 'gsub("`"; "\'")' not in workflow
-    assert 'gsub("`"; "\\u0027")' in workflow
+    assert 'gsub("`"; "&apos;")' in workflow
