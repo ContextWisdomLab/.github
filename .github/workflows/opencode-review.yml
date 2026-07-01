@@ -2039,8 +2039,8 @@ jobs:
           NO_COLOR: "1"
           OPENCODE_MODEL_CANDIDATES: "github-models/deepseek/deepseek-r1-0528 github-models/deepseek/deepseek-v3-0324 github-models/openai/gpt-5 github-models/openai/gpt-5-chat github-models/openai/gpt-5-mini github-models/openai/o3 github-models/openai/o3-mini github-models/openai/o4-mini github-models/mistral-ai/mistral-medium-2505 github-models/meta/llama-4-scout-17b-16e-instruct"
           OPENCODE_MODEL_ATTEMPTS: "2"
-          OPENCODE_RUN_TIMEOUT_SECONDS: "600"
-          OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "3600"
+          OPENCODE_RUN_TIMEOUT_SECONDS: "180"
+          OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "2400"
           OPENCODE_BACKOFF_INITIAL_SECONDS: "30"
           OPENCODE_BACKOFF_MAX_SECONDS: "300"
           OPENCODE_FIRST_ATTEMPT_AGENT: ci-review
@@ -4290,23 +4290,51 @@ jobs:
               changed_files_summary="bounded current-head evidence"
             fi
 
+            first_line_file="$(mktemp)"
+            if gh pr diff "$PR_NUMBER" --repo "$GH_REPOSITORY" --patch 2>/dev/null |
+              awk '
+                /^\+\+\+ b\// { path = substr($0, 7); next }
+                /^@@ / {
+                  if (match($0, /\+[0-9]+/)) {
+                    new_line = substr($0, RSTART + 1, RLENGTH - 1) - 1
+                    in_hunk = 1
+                  }
+                  next
+                }
+                in_hunk && /^\+/ && !/^\+\+\+/ {
+                  new_line++
+                  print path "\t" new_line
+                  exit
+                }
+                in_hunk && /^ / {
+                  new_line++
+                  next
+                }
+              ' >"$first_line_file" && [ -s "$first_line_file" ]; then
+              first_path="$(cut -f1 "$first_line_file" | head -n 1)"
+              first_line="$(cut -f2 "$first_line_file" | head -n 1)"
+            else
+              first_path=""
+              first_line=""
+            fi
+
             body="$(printf '%s\n' \
               "## Pull request overview" \
               "" \
-              "OpenCode exhausted the configured model pool without a usable current-head review conclusion, so the check failed closed without posting a deterministic REQUEST_CHANGES review." \
+              "OpenCode exhausted the configured model pool without a usable current-head review conclusion. This is not approval evidence, so the PR is blocked until a source-backed review can establish approval sufficiency or identify concrete fixes." \
               "" \
               "## Findings" \
               "" \
-              "### 1. HIGH review evidence:1 - OpenCode could not establish approval sufficiency" \
+              "### 1. HIGH ${first_path:-review evidence}:1 - OpenCode could not establish approval sufficiency" \
               "- Problem: every configured model path failed to produce a usable current-head control block." \
               "- Root cause: model execution, timeout, export, normalization, or approval-gate validation did not complete after exponential retry across the configured model pool." \
               "- Impact: approving from deterministic check state alone would miss PR-intent mismatches, missing files, edge-case bugs, robustness gaps, UX/DX regressions, security issues, and CodeGraph-backed base/head flow changes." \
-              "- Fix: rerun OpenCode after model availability recovers; the gate now keeps review state unchanged instead of posting deterministic model-exhaustion REQUEST_CHANGES." \
-              "- Regression test: keep the approval gate failing closed with review state unchanged when no model produces a valid current-head review." \
+              "- Fix: rerun OpenCode after model availability recovers, or update the PR with the missing files, tests, docs, generated artifacts, and verification evidence needed for a source-backed review conclusion." \
+              "- Regression test: keep the approval gate posting REQUEST_CHANGES, not APPROVE or check-only failure, when no model produces a valid current-head review." \
               "" \
               "## Summary" \
               "" \
-              "- Result: MODEL_POOL_EXHAUSTED" \
+              "- Result: REQUEST_CHANGES" \
               "- Reason: coverage-evidence passed and peer GitHub Checks completed without failures, but no model produced a valid review control block." \
               "- Deterministic evidence checked but not used for approval: current-head changed-file evidence (${changed_files_summary}); coverage-evidence result ${COVERAGE_EVIDENCE_RESULT:-unknown}; peer checks from statusCheckRollup excluding this OpenCode check." \
               "- Model outcome: model_pool=${OPENCODE_MODEL_POOL_OUTCOME:-unknown}; selected_model=${OPENCODE_MODEL_POOL_MODEL:-none}." \
@@ -4315,7 +4343,34 @@ jobs:
               "- Workflow attempt: ${RUN_ATTEMPT}" \
               "" \
               "No PR approval was posted because model-output failure is not evidence that the PR has no blockers.")"
-            stop_approval_without_review "MODEL_POOL_EXHAUSTED" "$body"
+            if [ -n "$first_path" ] && [ -n "$first_line" ]; then
+              payload_file="$(mktemp)"
+              inline_failure_body_file="$(mktemp)"
+              jq -n \
+                --arg body "$body" \
+                --arg commit_id "$HEAD_SHA" \
+                --arg path "$first_path" \
+                --argjson line "$first_line" \
+                '{
+                  event: "REQUEST_CHANGES",
+                  body: $body,
+                  commit_id: $commit_id,
+                  comments: [{
+                    path: $path,
+                    line: $line,
+                    side: "RIGHT",
+                    body: "### HIGH OpenCode could not establish approval sufficiency\n\n- Problem: the model pool exhausted without a valid current-head review control block, so this changed line cannot be approved from deterministic check state alone.\n- Impact: PR-intent mismatches, missing files, robustness bugs, UX/DX regressions, and CodeGraph-backed flow changes could be missed.\n- Fix: rerun OpenCode after model availability recovers, or add the missing source/test/docs/generated verification evidence needed for a source-backed approval.\n- Verification: rerun the OpenCode Review workflow and confirm it emits APPROVE or source-backed REQUEST_CHANGES for this head SHA."
+                  }]
+                }' >"$payload_file"
+              printf '%s\n' "$body" >"$inline_failure_body_file"
+              create_pull_review_with_payload "REQUEST_CHANGES" "$body" "$payload_file" "$inline_failure_body_file"
+              rm -f "$payload_file" "$inline_failure_body_file" "$first_line_file"
+            else
+              body="$(printf '%s\n\n%s\n' "$body" "Inline comment note: OpenCode could not find an added RIGHT-side diff line for this PR, so the model-exhaustion blocker is attached to the PR review body instead of a file line.")"
+              create_pull_review "REQUEST_CHANGES" "$body"
+              rm -f "$first_line_file"
+            fi
+            return 0
           }
 
                     request_changes_for_merge_conflict_if_present() {
