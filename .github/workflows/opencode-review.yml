@@ -4026,7 +4026,11 @@ jobs:
             case "$mode" in
               failed)
                 jq_filter='
-                  .check_runs[]?
+                  [.[].check_runs[]?]
+                  | sort_by((.started_at // .completed_at // .created_at // ""), (.id // 0))
+                  | group_by(.name // "")
+                  | map(last)
+                  | .[]?
                   | select((.name // "") != "opencode-review")
                   | select((.status // "") == "completed")
                   | select((.conclusion // "" | ascii_upcase) as $c | ["FAILURE","TIMED_OUT","ACTION_REQUIRED","CANCELLED","STARTUP_FAILURE"] | index($c))
@@ -4035,7 +4039,11 @@ jobs:
                 ;;
               pending)
                 jq_filter='
-                  .check_runs[]?
+                  [.[].check_runs[]?]
+                  | sort_by((.started_at // .completed_at // .created_at // ""), (.id // 0))
+                  | group_by(.name // "")
+                  | map(last)
+                  | .[]?
                   | select((.name // "") != "opencode-review")
                   | select((.status // "") != "completed")
                   | "- " + (if (.name // "") == "strix" then "Strix Security Scan/strix" else ((.name // "check") + " check run") end) + ": " + (.status // "unknown") + (if (.details_url // .html_url // "") != "" then " (" + (.details_url // .html_url) + ")" else "" end)
@@ -4049,6 +4057,7 @@ jobs:
             gh api -X GET "repos/${GH_REPOSITORY}/commits/${HEAD_SHA}/check-runs" \
               -f per_page=100 \
               --paginate \
+              --slurp \
               --jq "$jq_filter" >"$output_file"
           }
 
