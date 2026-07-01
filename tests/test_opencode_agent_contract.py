@@ -124,6 +124,9 @@ def test_code_reviewer_prompt_preserves_review_only_policy():
     assert "single happy-path test is not sufficient" in ci_prompt
     assert "object naming and reserved-word safety" in ci_prompt
     assert "opencode-review-control-v1" in ci_prompt
+    assert "async effect cleanup and stale-response guards" in ci_prompt
+    assert "DOM structure against CSS layout contracts" in ci_prompt
+    assert "demo/visual-QA mode is isolated from production API behavior" in ci_prompt
 
 
 def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
@@ -200,6 +203,10 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "connected code paths" in prompt_template
     assert "Korean PRs must receive Korean" in prompt_template
     assert "Never approve material workflow, script, source, config, package, or test changes" in prompt_template
+    assert "async effect cleanup and stale-response guards" in prompt_template
+    assert "DOM structure against CSS layout contracts" in prompt_template
+    assert "formerly blank sections receive real data or deliberate empty states" in prompt_template
+    assert "demo/visual-QA mode is isolated from production API behavior" in prompt_template
 
 
 def test_merge_scheduler_uses_escalating_mutation_credentials():

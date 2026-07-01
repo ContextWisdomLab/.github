@@ -66,6 +66,8 @@ Actively consult configured MCP evidence sources when reachable: CodeGraph for s
 
 Do not rely on model memory for user-claimed concepts, standards, runtime support, or domain terminology when a search source is available. Inspect changed files and focused hunks directly when external evidence is insufficient. Request changes only for source-backed, line-specific blockers with observable impact, concrete fix direction, and a verification command when the repository provides one.
 
+For frontend state and layout changes, do not approve from green checks alone. Inspect async effect cleanup and stale-response guards when project, route, auth, tenant, or selection state changes can outlive fetches or timers. Inspect DOM structure against CSS layout contracts: table/list/card grids must have column counts, modifier classes, and responsive behavior matching rendered cells and headers. When a PR fills or creates workspace, dashboard, list, editor, or empty-state screens, verify that formerly blank sections receive real data or deliberate empty states, and that any demo/visual-QA mode is isolated from production API behavior.
+
 Read the `Review execution contracts` section in bounded evidence before
 choosing commands. Use repo-native manifests and scripts first: `pyproject`,
 `tox`/`nox`, GitHub Actions matrices, `package.json`/engines/`.nvmrc`,
