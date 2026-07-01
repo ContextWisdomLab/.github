@@ -2378,12 +2378,6 @@ jobs:
             fi
           }
 
-          gh_error_is_rate_limited() {
-            local error_file="$1"
-            [ -s "$error_file" ] || return 1
-            grep -Eiq '(API rate limit exceeded|rate limit exceeded|secondary rate limit)' "$error_file"
-          }
-
                     emit_change_flow_mermaid_graph() {
                       local merge_state="${1:-UNKNOWN}"
                       local changed_files_file surfaces_file idx next_node
@@ -2901,22 +2895,6 @@ jobs:
                   return 0
                 fi
                 warn_gh_publication_failure "pull review with fallback review token" "$gh_error_file"
-              fi
-              if [ "$event" = "APPROVE" ] && gh_error_is_rate_limited "$gh_error_file"; then
-                rm -f "$gh_error_file" "$review_payload_file"
-                update_review_overview "$event" "$body" || true
-                if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
-                  {
-                    printf '## OpenCode approve review publication skipped\n\n'
-                    printf -- '- Head SHA: `%s`\n' "$HEAD_SHA"
-                    printf -- '- Workflow run: %s\n' "$RUN_ID"
-                    printf -- '- Workflow attempt: %s\n\n' "$RUN_ATTEMPT"
-                    printf 'OpenCode completed the approval gate, but GitHub rejected the pull-review write due to API rate limiting. The required workflow remains successful because failed checks, mergeability, and unresolved review threads were already gated before approval.\n\n'
-                    printf '%s\n' "$body"
-                  } >>"$GITHUB_STEP_SUMMARY"
-                fi
-                printf '::warning::OpenCode could not publish the APPROVE pull review for head %s because the GitHub API rate limit was exceeded; keeping the successful approval gate result because pre-approval source, check, mergeability, and review-thread gates passed.\n' "$HEAD_SHA"
-                return 0
               fi
               rm -f "$gh_error_file" "$review_payload_file"
               update_review_overview "$event" "$body" || true
