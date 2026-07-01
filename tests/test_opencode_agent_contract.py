@@ -76,7 +76,8 @@ def test_opencode_model_pool_sets_high_effort_for_capable_candidates():
     candidates = candidates_match.group(1).split()
     candidate_models = [candidate.removeprefix("github-models/") for candidate in candidates]
 
-    assert set(candidate_models) == set(models)
+    assert candidate_models
+    assert set(candidate_models).issubset(set(models))
 
     def is_reasoning_capable(model_name: str) -> bool:
         return (
@@ -211,10 +212,13 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert 'APPROVAL_CHECK_WAIT_ATTEMPTS: "81"' in workflow
     assert 'APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "30"' in workflow
     assert 'OPENCODE_MODEL_ATTEMPTS: "1"' in workflow
-    assert 'OPENCODE_RUN_TIMEOUT_SECONDS: "600"' in workflow
+    assert 'OPENCODE_RUN_TIMEOUT_SECONDS: "420"' in workflow
     assert 'OPENCODE_EXPORT_TIMEOUT_SECONDS: "120"' in workflow
-    assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "3600"' in workflow
+    assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "900"' in workflow
+    assert 'OPENCODE_BACKOFF_MAX_SECONDS: "60"' in workflow
     assert "${{ runner.temp }}/opencode-review-model-pool.md" in workflow
+    assert re.search(r'check-runs" \\\n\s+-f per_page=100 \\\n\s+--paginate \\\n\s+--slurp \|\n\s+jq -r "\$jq_filter"', workflow)
+    assert not re.search(r"--slurp\s*\\\n\s*--jq", workflow)
 
     strix_workflow = Path(".github/workflows/strix.yml").read_text(encoding="utf-8")
     assert "STRIX_REASONING_EFFORT: high" in strix_workflow

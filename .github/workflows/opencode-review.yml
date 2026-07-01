@@ -4057,8 +4057,8 @@ jobs:
             gh api -X GET "repos/${GH_REPOSITORY}/commits/${HEAD_SHA}/check-runs" \
               -f per_page=100 \
               --paginate \
-              --slurp \
-              --jq "$jq_filter" >"$output_file"
+              --slurp |
+              jq -r "$jq_filter" >"$output_file"
           }
 
           current_head_manual_strix_success_status() {
