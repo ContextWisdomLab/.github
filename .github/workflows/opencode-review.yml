@@ -2629,8 +2629,8 @@ jobs:
           OPENCODE_MODEL_POOL_OUTPUT_FILE: ${{ runner.temp }}/opencode-review-model-pool.md
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
-          APPROVAL_CHECK_WAIT_ATTEMPTS: "10"
-          APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "15"
+          APPROVAL_CHECK_WAIT_ATTEMPTS: "81"
+          APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "30"
           CHECK_LOOKUP_RETRY_ATTEMPTS: "5"
           CHECK_LOOKUP_RETRY_SLEEP_SECONDS: "5"
         run: |
@@ -2645,21 +2645,27 @@ jobs:
             check_lookup_token_source="opencode-app"
           fi
           configured_review_write_token="${GH_TOKEN:-}"
-          review_write_token="${OPENCODE_APP_TOKEN:-$configured_review_write_token}"
-          review_write_fallback_token=""
-          if [ -n "${configured_review_write_token:-}" ] && [ "${configured_review_write_token:-}" != "${review_write_token:-}" ]; then
-            review_write_fallback_token="$configured_review_write_token"
-          fi
-          review_write_token_source="configured"
-          if [ -n "${OPENCODE_APP_TOKEN:-}" ]; then
-            review_write_token_source="opencode-app"
-          fi
-          overview_comment_token="$review_write_token"
           if [ -n "${CHECK_LOOKUP_GH_TOKEN:-}" ] && { [ -z "${OPENCODE_APP_TOKEN:-}" ] || [ "${GH_REPOSITORY:-}" = "${GITHUB_REPOSITORY:-}" ]; }; then
             GH_TOKEN="$CHECK_LOOKUP_GH_TOKEN"
             export GH_TOKEN
             check_lookup_token_source="github-token"
           fi
+          review_write_token="$GH_TOKEN"
+          review_write_fallback_token=""
+          review_write_token_source="configured"
+          if [ -n "${OPENCODE_APP_TOKEN:-}" ] && [ "${GH_REPOSITORY:-}" != "${GITHUB_REPOSITORY:-}" ]; then
+            review_write_token="$OPENCODE_APP_TOKEN"
+            review_write_token_source="opencode-app"
+          elif [ -n "${CHECK_LOOKUP_GH_TOKEN:-}" ] && [ "${GH_REPOSITORY:-}" = "${GITHUB_REPOSITORY:-}" ]; then
+            review_write_token="$CHECK_LOOKUP_GH_TOKEN"
+            review_write_token_source="github-token"
+          elif [ -n "${OPENCODE_APP_TOKEN:-}" ] && [ "${GH_TOKEN:-}" = "${OPENCODE_APP_TOKEN:-}" ]; then
+            review_write_token_source="opencode-app"
+          fi
+          if [ -n "${configured_review_write_token:-}" ] && [ "${configured_review_write_token:-}" != "${review_write_token:-}" ]; then
+            review_write_fallback_token="$configured_review_write_token"
+          fi
+          overview_comment_token="$review_write_token"
           echo "check lookup token source=${check_lookup_token_source}"
           echo "review write token source=${review_write_token_source}"
 

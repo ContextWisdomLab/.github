@@ -165,6 +165,10 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "connected code paths, rendering paths" in workflow
     assert "CHECK_LOOKUP_GH_TOKEN" in workflow
     assert "retrying with workflow github token" in workflow
+    assert 'review_write_token="$GH_TOKEN"' in workflow
+    assert 'review_write_token="$OPENCODE_APP_TOKEN"' in workflow
+    assert 'review_write_token="$CHECK_LOOKUP_GH_TOKEN"' in workflow
+    assert 'review_write_token="${OPENCODE_APP_TOKEN:-$GH_TOKEN}"' not in workflow
     assert "Review execution contracts" in workflow
     assert "Accessibility/i18n:" in workflow
     assert "Supply-chain/license:" in workflow
@@ -204,6 +208,8 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert '"## Check outcome"' not in workflow
     assert "publish REQUEST_CHANGES when coverage-evidence blocker states" in workflow
     assert 'timeout-minutes: 75' in workflow
+    assert 'APPROVAL_CHECK_WAIT_ATTEMPTS: "81"' in workflow
+    assert 'APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "30"' in workflow
     assert 'OPENCODE_MODEL_ATTEMPTS: "1"' in workflow
     assert 'OPENCODE_RUN_TIMEOUT_SECONDS: "600"' in workflow
     assert 'OPENCODE_EXPORT_TIMEOUT_SECONDS: "120"' in workflow
