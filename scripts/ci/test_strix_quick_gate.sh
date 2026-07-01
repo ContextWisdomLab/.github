@@ -786,6 +786,7 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" 'warn_gh_publication_failure "pull review with primary review token"' "opencode approval explains primary review publication failures"
 	assert_file_contains "$workflow_file" 'warn_gh_publication_failure "pull review with fallback review token"' "opencode approval explains fallback review publication failures"
 	assert_file_contains "$workflow_file" 'OpenCode could not publish the pull review for head %s, so the review state was not changed.' "opencode approval fails closed when review publication fails"
+	assert_file_contains "$workflow_file" 'REQUEST_CHANGES | INLINE_COMMENT_PUBLISH_FAILED) echo "::endgroup::" ;;' "opencode only closes a review-body log group for events that opened one"
 	assert_file_not_contains "$workflow_file" 'OpenCode approve review publication skipped' "opencode approval does not report skipped approval publication as success"
 	assert_file_not_contains "$workflow_file" 'keeping the successful approval gate result' "opencode approval does not soft-pass without publishing an approving review"
 	assert_file_contains "$workflow_file" 'warn_gh_publication_failure "review overview comment"' "opencode approval soft-fails permission-denied overview publication"
