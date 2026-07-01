@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.request
@@ -33,6 +34,20 @@ RUNNING_STATES = {"QUEUED", "IN_PROGRESS", "PENDING", "REQUESTED", "WAITING", "E
 MAX_DIFF_CHARS = 60000
 
 
+def scrub_sensitive_data(text: str | None) -> str | None:
+    """Mask sensitive tokens in text to prevent secret leakage."""
+    if not text:
+        return text
+    text = re.sub(r'(?i)(bearer\s+)[^\s"\'\\]+', r'\1***', text)
+    text = re.sub(r'(?i)(token\s+)[^\s"\'\\]+', r'\1***', text)
+    text = re.sub(r'(?i)\b(?:github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9_]+)\b', '***', text)
+    text = re.sub(r'\b(sk-[A-Za-z0-9_-]+)', '***', text)
+    text = re.sub(r'\b(xox[baprs]-[A-Za-z0-9-]+)', '***', text)
+    text = re.sub(r'\b(AKIA[0-9A-Z]{16})', '***', text)
+    text = re.sub(r'(?i)((?:api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|password|passwd|secret)\s*[:=]\s*)["\']?[^"\'\s]+["\']?', r'\1***', text)
+    return text
+
+
 def run(args: Sequence[str], *, stdin: str | None = None) -> str:
     """Run a command without invoking a shell and return stdout."""
     if isinstance(args, str):
@@ -44,10 +59,12 @@ def run(args: Sequence[str], *, stdin: str | None = None) -> str:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         check=False,
+        shell=False,
     )
     if completed.returncode != 0:
+        scrubbed_stderr = scrub_sensitive_data(completed.stderr.strip())
         raise RuntimeError(
-            f"Command failed ({completed.returncode}): {' '.join(args)}\n{completed.stderr.strip()}"
+            f"Command failed ({completed.returncode}): {args[0]}\n{scrubbed_stderr}"
         )
     return completed.stdout
 

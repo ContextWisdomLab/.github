@@ -49,6 +49,7 @@ permissions:
   contents: read
   id-token: write
   models: read
+  statuses: write
 
 jobs:
   strix:
@@ -538,7 +539,7 @@ jobs:
           VERTEX_LOCATION: ${{ secrets.VERTEX_LOCATION || 'us-central1' }}
           STRIX_TARGET_PATH: ${{ (github.event_name == 'pull_request_target' || github.event.inputs.pr_number != '') && '__PR_SCOPE__' || './' }}
           STRIX_SOURCE_DIRS: ". backend frontend"
-          STRIX_REASONING_EFFORT: low
+          STRIX_REASONING_EFFORT: high
           STRIX_LLM_MAX_RETRIES: 1
           STRIX_TRANSIENT_RETRY_PER_MODEL: 2
           STRIX_TRANSIENT_RETRY_BACKOFF_SECONDS: 60
@@ -603,7 +604,8 @@ jobs:
       - name: Publish same-head manual Strix status
         if: ${{ always() && !cancelled() && github.event_name == 'workflow_dispatch' && github.event.inputs.pr_head_sha != '' }}
         env:
-          GH_TOKEN: ${{ steps.target_app_token.outputs.token || secrets.OPENCODE_APPROVE_TOKEN || github.token }}
+          PRIMARY_STATUS_TOKEN: ${{ steps.target_app_token.outputs.token || secrets.OPENCODE_APPROVE_TOKEN || '' }}
+          FALLBACK_STATUS_TOKEN: ${{ github.token }}
           TARGET_REPOSITORY: ${{ github.event.inputs.target_repository || github.repository }}
           PR_HEAD_SHA: ${{ github.event.inputs.pr_head_sha }}
           STRIX_RESULT: ${{ job.status }}
@@ -629,14 +631,25 @@ jobs:
               ;;
           esac
 
-          gh api -X POST "repos/${TARGET_REPOSITORY}/statuses/${PR_HEAD_SHA}" \
-            -f state="$state" \
-            -f context="strix" \
-            -f description="$description" \
-            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" || {
-              echo "::warning::Could not publish manual Strix status from scan job; keeping scan evidence result authoritative in the workflow run."
-              exit 0
-            }
+          post_strix_status() {
+            token="$1"
+            if [ -z "$token" ]; then
+              return 1
+            fi
+            GH_TOKEN="$token" gh api -X POST "repos/${TARGET_REPOSITORY}/statuses/${PR_HEAD_SHA}" \
+              -f state="$state" \
+              -f context="strix" \
+              -f description="$description" \
+              -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          }
+
+          if post_strix_status "$PRIMARY_STATUS_TOKEN"; then
+            exit 0
+          fi
+          if [ "$TARGET_REPOSITORY" = "$GITHUB_REPOSITORY" ] && post_strix_status "$FALLBACK_STATUS_TOKEN"; then
+            exit 0
+          fi
+          echo "::warning::Could not publish manual Strix status from scan job; keeping scan evidence result authoritative in the workflow run."
 
   publish-manual-pr-evidence-status:
     name: publish-manual-pr-evidence-status
@@ -715,7 +728,8 @@ jobs:
 
       - name: Publish same-head manual Strix status
         env:
-          GH_TOKEN: ${{ steps.target_app_token.outputs.token || secrets.OPENCODE_APPROVE_TOKEN || github.token }}
+          PRIMARY_STATUS_TOKEN: ${{ steps.target_app_token.outputs.token || secrets.OPENCODE_APPROVE_TOKEN || '' }}
+          FALLBACK_STATUS_TOKEN: ${{ github.token }}
           TARGET_REPOSITORY: ${{ github.event.inputs.target_repository || github.repository }}
           PR_HEAD_SHA: ${{ github.event.inputs.pr_head_sha }}
           STRIX_RESULT: ${{ needs.strix.result }}
@@ -741,11 +755,22 @@ jobs:
               ;;
           esac
 
-          gh api -X POST "repos/${TARGET_REPOSITORY}/statuses/${PR_HEAD_SHA}" \
-            -f state="$state" \
-            -f context="strix" \
-            -f description="$description" \
-            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" || {
-              echo "::warning::Could not publish manual Strix status from follow-up job; scan job publishes the authoritative status when target credentials are available."
-              exit 0
-            }
+          post_strix_status() {
+            token="$1"
+            if [ -z "$token" ]; then
+              return 1
+            fi
+            GH_TOKEN="$token" gh api -X POST "repos/${TARGET_REPOSITORY}/statuses/${PR_HEAD_SHA}" \
+              -f state="$state" \
+              -f context="strix" \
+              -f description="$description" \
+              -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          }
+
+          if post_strix_status "$PRIMARY_STATUS_TOKEN"; then
+            exit 0
+          fi
+          if [ "$TARGET_REPOSITORY" = "$GITHUB_REPOSITORY" ] && post_strix_status "$FALLBACK_STATUS_TOKEN"; then
+            exit 0
+          fi
+          echo "::warning::Could not publish manual Strix status from follow-up job; scan job publishes the authoritative status when target credentials are available."

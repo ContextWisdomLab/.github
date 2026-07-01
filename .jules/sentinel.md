@@ -14,3 +14,11 @@
 **Vulnerability:** Information Disclosure / Command Injection
 **Learning:** `subprocess.run` defaults to `shell=False`, but linters like Bandit require explicit `shell=False` to pass security checks. Furthermore, failing GitHub CLI commands or curl requests can include full command arguments and stderr in raised errors. These strings can contain GitHub PATs, Bearer/token authorizations, API keys, or specialized GitHub token prefixes such as `gho_`, `ghu_`, `ghs_`, and `ghr_`.
 **Prevention:** Always explicitly define `shell=False` when using `subprocess.run()`. Scrub sensitive tokens from both command arguments and `stderr` before including them in exceptions or logs from CI scripts, including the `gh[pousr]_` prefix family and `github_pat_`.
+## 2026-06-30 - Prevent Security Theater in Subprocess Fixes
+**Vulnerability:** Command Injection / Incomplete Fix
+**Learning:** Fixing a `shell=True` vulnerability by replacing it with `shell=False` and wrapping the command string in `["/bin/bash", "-c", command]` is security theater. If `command` contains untrusted input, passing it to `bash -c` as a single string means it is still completely vulnerable to shell injection, while misleading linters into reporting the code as secure.
+**Prevention:** When refactoring away from `shell=True`, avoid invoking shells entirely. Use `shlex.split(command)` to safely parse the string into a list of arguments and pass that list directly to `subprocess.Popen` or `subprocess.run`, ensuring untrusted input is never evaluated by a shell.
+## 2026-06-30 - Prevent SSRF and Local File Inclusion via Unvalidated URL Schemes
+**Vulnerability:** Server-Side Request Forgery (SSRF) / Local File Inclusion
+**Learning:** Functions that fetch URLs provided via user inputs (e.g., `wait_for_url` fetching `--backend-ready-url` in CI scripts) can inadvertently read local files if they do not validate the scheme. Python's `urllib.request.urlopen` supports `file://` schemes, allowing attackers to access arbitrary file contents from the host machine or sandbox if they can control the URL parameter.
+**Prevention:** Always validate URL inputs to restrict allowed schemes. Check that URLs explicitly start with `http://` or `https://` before fetching them with standard libraries like `urllib`.

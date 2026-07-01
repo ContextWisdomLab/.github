@@ -43,6 +43,24 @@ def test_run_split_repo_graphql_and_fetch_pr(monkeypatch):
         noema.run([sys.executable, "-c", "import sys; sys.exit(5)"])
 
     assert noema.split_repo("owner/repo") == ("owner", "repo")
+
+def test_scrub_sensitive_data():
+    assert noema.scrub_sensitive_data(None) is None
+    assert noema.scrub_sensitive_data("") == ""
+    assert noema.scrub_sensitive_data("ok") == "ok"
+    assert noema.scrub_sensitive_data("Bearer abcdef123") == "Bearer ***"
+    assert noema.scrub_sensitive_data("TOKEN xyz_987") == "TOKEN ***"
+    assert noema.scrub_sensitive_data("github_pat_123456789") == "***"
+    assert noema.scrub_sensitive_data("ghp_12345") == "***"
+    assert noema.scrub_sensitive_data("sk-abc-123_456") == "***"
+    assert noema.scrub_sensitive_data("xoxb-1234-5678") == "***"
+    assert noema.scrub_sensitive_data("AKIA1234567890ABCDEF") == "***"
+    assert noema.scrub_sensitive_data("api_key=12345") == "api_key=***"
+    assert noema.scrub_sensitive_data("client_secret='abc'") == "client_secret=***"
+    assert noema.scrub_sensitive_data("password: xyz") == "password: ***"
+
+
+def test_split_repo_and_graphql(monkeypatch):
     with pytest.raises(ValueError):
         noema.split_repo("owner")
     with pytest.raises(ValueError):

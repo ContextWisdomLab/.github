@@ -36,6 +36,7 @@ def make_pr(**overrides):
             ]
         },
         "reviewThreads": {"nodes": []},
+        "files": {"nodes": []},
         "reviews": {"nodes": []},
         "statusCheckRollup": {"contexts": {"nodes": []}},
     }
@@ -410,6 +411,9 @@ def test_rest_pr_fallback_shapes_reviews_and_checks(monkeypatch):
                 }
             ]
         },
+        "repos/owner/repo/pulls/42/files?per_page=20": [
+            {"filename": "scripts/ci/pr_review_merge_scheduler.py"},
+        ],
     }
 
     def fake_api(path):
@@ -439,10 +443,12 @@ def test_rest_pr_fallback_shapes_reviews_and_checks(monkeypatch):
     assert calls == [
         "repos/owner/repo/pulls/42/reviews?per_page=100",
         "repos/owner/repo/commits/abc123/check-runs?per_page=100",
+        "repos/owner/repo/pulls/42/files?per_page=20",
     ]
     assert node["number"] == 42
     assert node["mergeStateStatus"] == "CLEAN"
     assert node["restMergeableState"] == "CLEAN"
+    assert node["files"]["nodes"] == [{"path": "scripts/ci/pr_review_merge_scheduler.py"}]
     assert node["headRepository"] == {"nameWithOwner": "owner/repo"}
     assert not node["isCrossRepository"]
     assert node["reviews"]["nodes"][0]["author"]["login"] == "opencode-agent[bot]"
@@ -542,15 +548,27 @@ def test_fetch_open_prs_rest_base_branch_empty_and_next_page(monkeypatch):
     assert paths == list(pages)
 
 
-def test_graphql_read_errors_only_fall_back_for_integration_denials(monkeypatch):
+def test_graphql_read_errors_fall_back_for_transient_failures(monkeypatch):
     def fail_graphql(*args, **kwargs):
-        raise RuntimeError("gh: timeout")
+        raise RuntimeError("Command failed (1): gh api graphql\ngh: HTTP 504")
+
+    monkeypatch.setattr(sched, "gh_graphql", fail_graphql)
+    monkeypatch.setattr(sched, "fetch_open_prs_rest", lambda repo, max_prs: [{"repo": repo, "max": max_prs}])
+    monkeypatch.setattr(sched, "fetch_pr_rest", lambda repo, number: [{"repo": repo, "number": number}])
+
+    assert sched.fetch_open_prs("owner/repo", 1) == [{"repo": "owner/repo", "max": 1}]
+    assert sched.fetch_pr("owner/repo", 1) == [{"repo": "owner/repo", "number": 1}]
+
+
+def test_graphql_read_errors_do_not_fall_back_for_schema_errors(monkeypatch):
+    def fail_graphql(*args, **kwargs):
+        raise RuntimeError("gh: Field 'unknown' doesn't exist on type 'PullRequest'")
 
     monkeypatch.setattr(sched, "gh_graphql", fail_graphql)
 
-    with pytest.raises(RuntimeError, match="timeout"):
+    with pytest.raises(RuntimeError, match="unknown"):
         sched.fetch_open_prs("owner/repo", 1)
-    with pytest.raises(RuntimeError, match="timeout"):
+    with pytest.raises(RuntimeError, match="unknown"):
         sched.fetch_pr("owner/repo", 1)
 
 
@@ -869,6 +887,28 @@ def test_review_state_and_failed_checks():
         },
     )
     assert sched.has_current_head_approval(body_sha_match)
+    deterministic_fallback = make_pr(
+        headRefOid=exact_head,
+        reviews={
+            "nodes": [
+                {
+                    **opencode_review("APPROVED", exact_head),
+                    "body": (
+                        "OpenCode model attempts did not emit a usable current-head "
+                        "control block, so the approval gate used deterministic "
+                        "current-head evidence instead of model prose."
+                    ),
+                }
+            ]
+        },
+    )
+    assert sched.is_deterministic_fallback_approval(
+        deterministic_fallback["reviews"]["nodes"][0]
+    )
+    assert not sched.is_deterministic_fallback_approval(
+        opencode_review("CHANGES_REQUESTED", exact_head)
+    )
+    assert not sched.has_current_head_approval(deterministic_fallback)
     stale_review = make_pr(
         reviews={
             "nodes": [
@@ -1214,7 +1254,11 @@ def test_print_summary_writes_github_step_summary(monkeypatch, tmp_path, capsys)
     summary_path = tmp_path / "summary.md"
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
     conflict_reason = sched.merge_conflict_guidance(
-        make_pr(number=7, headRefName="feature|x"),
+        make_pr(
+            number=7,
+            headRefName="feature|x",
+            files={"nodes": [{"path": "scripts/ci/pr_review_merge_scheduler.py"}, {"path": "tests/test_pr_review_merge_scheduler.py"}]},
+        ),
         "DIRTY",
     )
     decisions = [
@@ -1271,6 +1315,10 @@ def test_print_summary_writes_github_step_summary(monkeypatch, tmp_path, capsys)
     assert payload["decisions"][0]["guidance"]["merge_state"] == "DIRTY"
     assert payload["decisions"][0]["guidance"]["base_ref"] == "main"
     assert payload["decisions"][0]["guidance"]["head_ref"] == "feature|x"
+    assert payload["decisions"][0]["guidance"]["changed_files_to_inspect"] == [
+        "scripts/ci/pr_review_merge_scheduler.py",
+        "tests/test_pr_review_merge_scheduler.py",
+    ]
     assert "update-branch cannot choose" in payload["decisions"][0]["guidance"]["automation_limit"]
     assert "gh pr checkout 7" in payload["decisions"][0]["guidance"]["commands"]
     assert "git merge --no-ff origin/main" in payload["decisions"][0]["guidance"]["commands"]
@@ -1289,7 +1337,7 @@ def test_print_summary_writes_github_step_summary(monkeypatch, tmp_path, capsys)
     assert payload["decisions"][5]["guidance"]["head_repository"] == "fork/repo"
     summary = summary_path.read_text(encoding="utf-8")
     assert "## PR review merge scheduler" in summary
-    assert "| #7 | block | merge conflict: DIRTY; base=main, head=feature\\|x; run" in summary
+    assert "| #7 | block | merge conflict: DIRTY; base=main, head=feature\\|x; changed files to inspect first:" in summary
     assert "do not retry update-branch until the conflict is repaired" in summary
     assert "### Outdated review threads" in summary
     assert "Would resolve 1 outdated review thread(s)" in summary
@@ -1307,6 +1355,9 @@ def test_print_summary_writes_github_step_summary(monkeypatch, tmp_path, capsys)
     assert "gh pr checkout 7" in summary
     assert "git fetch origin main" in summary
     assert "git merge --no-ff origin/main" in summary
+    assert "Changed files to inspect first:" in summary
+    assert "- `scripts/ci/pr_review_merge_scheduler.py`" in summary
+    assert "- `tests/test_pr_review_merge_scheduler.py`" in summary
     assert "git push --force-with-lease" in summary
     assert "### Branch update requests" in summary
     assert "Requested `update-branch` for PR #8 with `workflow GITHUB_TOKEN`" in summary
@@ -1395,9 +1446,15 @@ def test_inspect_pr_blocks_and_waits_for_policy_states(monkeypatch):
     assert inspect(make_pr(baseRefName="develop")).reason == "base branch is develop; expected main"
     external_head = inspect(make_pr(headRepository={"nameWithOwner": "fork/repo"}, isCrossRepository=True))
     assert external_head.action == "security_dispatch"
-    conflict = inspect(make_pr(mergeStateStatus="DIRTY"))
+    conflict = inspect(
+        make_pr(
+            mergeStateStatus="DIRTY",
+            files={"nodes": [{"path": "scripts/ci/pr_review_merge_scheduler.py"}]},
+        )
+    )
     assert conflict.action == "block"
     assert "merge conflict: DIRTY" in conflict.reason
+    assert "changed files to inspect first: scripts/ci/pr_review_merge_scheduler.py" in conflict.reason
     assert "base=main, head=feature" in conflict.reason
     assert "gh pr checkout 1" in conflict.reason
     assert "git fetch origin main" in conflict.reason

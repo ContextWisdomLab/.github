@@ -18,6 +18,7 @@ def placeholder_values(environ: Mapping[str, str]) -> dict[str, str]:
         "${HEAD_SHA}": environ.get("HEAD_SHA", ""),
         "${RUN_ID}": environ.get("RUN_ID", ""),
         "${RUN_ATTEMPT}": environ.get("RUN_ATTEMPT", ""),
+        "${OPENCODE_REVIEW_INTRO}": environ.get("OPENCODE_REVIEW_INTRO", ""),
         "${model_candidate}": environ.get("PROMPT_MODEL_CANDIDATE", ""),
     }
 
@@ -30,6 +31,7 @@ def render_prompt(text: str, environ: Mapping[str, str]) -> str:
 
 
 def main(argv: list[str]) -> int:
+    """Run the prompt template renderer."""
     if len(argv) != 1:
         print("usage: render_opencode_prompt_template.py PROMPT_FILE", file=sys.stderr)
         return 2
