@@ -364,7 +364,7 @@ jobs:
               git -C "$OPENCODE_SOURCE_WORKDIR" diff --name-status --find-renames "$PR_MERGE_BASE" "$PR_HEAD_SHA" -- "$docs_dir" |
                 sed 's/^/- /'
               printf '\nCurrent-head tree under this docs directory, capped at 160 paths:\n\n'
-              tree_count="$(git -C "$OPENCODE_SOURCE_WORKDIR" ls-tree -r --name-only "$PR_HEAD_SHA" -- "$docs_dir" | wc -l | tr -d '[:space:]')"
+              tree_count="$(git ls-tree -r --name-only HEAD -- "$docs_dir" | wc -l | tr -d '[:space:]')"
               shown_count=0
               while IFS= read -r tree_path; do
                 printf -- '- %s%s%s\n' "\`" "$tree_path" "\`"
@@ -372,7 +372,7 @@ jobs:
                 if [ "$shown_count" -ge 160 ]; then
                   break
                 fi
-              done < <(git -C "$OPENCODE_SOURCE_WORKDIR" ls-tree -r --name-only "$PR_HEAD_SHA" -- "$docs_dir")
+              done < <(git ls-tree -r --name-only HEAD -- "$docs_dir")
               if [ "$tree_count" -gt "$shown_count" ]; then
                 printf -- '- [tree truncated after %s of %s paths]\n' "$shown_count" "$tree_count"
               fi
