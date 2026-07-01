@@ -22,3 +22,14 @@
 **Vulnerability:** Server-Side Request Forgery (SSRF) / Local File Inclusion
 **Learning:** Functions that fetch URLs provided via user inputs (e.g., `wait_for_url` fetching `--backend-ready-url` in CI scripts) can inadvertently read local files if they do not validate the scheme. Python's `urllib.request.urlopen` supports `file://` schemes, allowing attackers to access arbitrary file contents from the host machine or sandbox if they can control the URL parameter.
 **Prevention:** Always validate URL inputs to restrict allowed schemes. Check that URLs explicitly start with `http://` or `https://` before fetching them with standard libraries like `urllib`.
+
+## 2024-06-22 - [CRITICAL] Prevent Sensitive Token Leakage in Subprocess Calls
+
+**Vulnerability:**
+The CI script (`pr_review_merge_scheduler.py`) included the command arguments (`{' '.join(args)}`) in its `RuntimeError` message when a subprocess failed. This can potentially leak sensitive information like GitHub tokens or internal environment variables that are passed directly as command-line arguments into CI/CD logs.
+
+**Learning:**
+In an automated environment with complex bash and Python CI integration scripts, failing securely is paramount. Directly dumping command arguments into standard error strings can unknowingly expose credentials when commands fail in unexpected ways. Suppressing `stderr` is an anti-pattern as it hinders debugging, so it must be preserved.
+
+**Prevention:**
+Never include the exact command string/arguments (`args`) in standard exception messages from automated scripts if there is any chance they contain secrets. Provide the command name or a generic description along with the `stderr` to aid debugging without exposing secrets.

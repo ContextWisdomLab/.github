@@ -823,7 +823,7 @@ jobs:
     needs: [coverage-evidence]
     if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target')
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 360
     permissions:
       actions: write
       checks: read
@@ -1003,7 +1003,7 @@ jobs:
           npx -y "$CODEGRAPH_PACKAGE" status
 
       - name: Prepare bounded OpenCode review evidence
-        timeout-minutes: 40
+        timeout-minutes: 300
         env:
           GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || steps.review_read_app_token.outputs.token || github.token }}
           GH_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
@@ -2239,7 +2239,7 @@ jobs:
         id: opencode_review_model_pool
         if: needs.coverage-evidence.result == 'success'
         continue-on-error: true
-        timeout-minutes: 20
+        timeout-minutes: 300
         env:
           STRIX_GITHUB_MODELS_TOKEN: ${{ secrets.STRIX_GITHUB_MODELS_TOKEN || github.token }}
           GITHUB_TOKEN: ${{ secrets.STRIX_GITHUB_MODELS_TOKEN || github.token }}
@@ -2248,12 +2248,12 @@ jobs:
           NPM_CONFIG_IGNORE_SCRIPTS: "true"
           NO_COLOR: "1"
           OPENCODE_MODEL_CANDIDATES: "github-models/openai/gpt-5-nano"
-          OPENCODE_MODEL_ATTEMPTS: "1"
-          OPENCODE_RUN_TIMEOUT_SECONDS: "240"
-          OPENCODE_EXPORT_TIMEOUT_SECONDS: "120"
-          OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "360"
+          OPENCODE_MODEL_ATTEMPTS: "4"
+          OPENCODE_RUN_TIMEOUT_SECONDS: "600"
+          OPENCODE_EXPORT_TIMEOUT_SECONDS: "180"
+          OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "3600"
           OPENCODE_BACKOFF_INITIAL_SECONDS: "30"
-          OPENCODE_BACKOFF_MAX_SECONDS: "30"
+          OPENCODE_BACKOFF_MAX_SECONDS: "300"
           OPENCODE_FIRST_ATTEMPT_AGENT: ci-review
           OPENCODE_AGENT: ci-review-fallback
           OPENCODE_EVIDENCE_FILE: ${{ runner.temp }}/opencode-review-evidence.md
@@ -2602,7 +2602,7 @@ jobs:
 
       - name: Approve PR if OpenCode review passed
         if: always()
-        timeout-minutes: 75
+        timeout-minutes: 360
         env:
           GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || steps.opencode_app_token.outputs.token || github.token }}
           CHECK_LOOKUP_GH_TOKEN: ${{ github.token }}
@@ -2629,8 +2629,8 @@ jobs:
           OPENCODE_MODEL_POOL_OUTPUT_FILE: ${{ runner.temp }}/opencode-review-model-pool.md
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
-          APPROVAL_CHECK_WAIT_ATTEMPTS: "81"
-          APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "30"
+          APPROVAL_CHECK_WAIT_ATTEMPTS: "120"
+          APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "60"
           CHECK_LOOKUP_RETRY_ATTEMPTS: "5"
           CHECK_LOOKUP_RETRY_SLEEP_SECONDS: "5"
         run: |
@@ -3896,7 +3896,7 @@ jobs:
             } >"$prompt_file"
 
             cd "$OPENCODE_REVIEW_WORKDIR"
-            if ! timeout --kill-after=30s "${OPENCODE_RUN_TIMEOUT_SECONDS:-240}s" opencode run "$(cat "$prompt_file")" \
+            if ! timeout --kill-after=30s "${OPENCODE_RUN_TIMEOUT_SECONDS:-600}s" opencode run "$(cat "$prompt_file")" \
               --pure \
               --agent ci-review-fallback \
               --model "$MODEL" \
@@ -4496,7 +4496,7 @@ jobs:
 
           wait_for_peer_github_checks() {
             local output_file="$1"
-            local attempts="${APPROVAL_CHECK_WAIT_ATTEMPTS:-10}"
+            local attempts="${APPROVAL_CHECK_WAIT_ATTEMPTS:-120}"
             local sleep_seconds="${APPROVAL_CHECK_WAIT_SLEEP_SECONDS:-15}"
             local attempt=1
 

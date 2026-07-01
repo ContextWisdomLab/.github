@@ -413,7 +413,7 @@ def run_with_env(args: Sequence[str], *, stdin: str | None = None, env: dict[str
             env=env,
         )
     except subprocess.CalledProcessError as exc:
-        scrubbed_args = scrub_sensitive_data(' '.join(argv))
+        scrubbed_args = scrub_sensitive_data(argv[0] if argv else 'unknown')
         scrubbed_stderr = scrub_sensitive_data(exc.stderr or "")
         raise RuntimeError(
             f"Command failed ({exc.returncode}): {scrubbed_args}\n{scrubbed_stderr}"
