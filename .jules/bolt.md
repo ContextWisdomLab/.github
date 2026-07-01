@@ -22,3 +22,6 @@
 ## 2026-06-25 - Avoid N+1 API blocking in PR checks
 **Learning:** In backend processing scripts, synchronous iterations calling an external service, such as fetching `restMergeableState` per PR, cause N+1 API bottlenecks and stall pipeline execution linearly. This matters for PR schedulers handling multiple PRs.
 **Action:** Use `concurrent.futures.ThreadPoolExecutor` for independent network calls in a loop when there are multiple items, keep empty and single-item inputs on the cheaper serial path, and bound `max_workers` to avoid API rate limits.
+## 2024-05-19 - Pre-compile Regex Patterns in Loop-called Functions
+**Learning:** In `scripts/ci/pr_review_merge_scheduler.py`, the `scrub_sensitive_data` function was repeatedly compiling multiple regex patterns via `re.sub` for every log line or text scrubbed. This incurs measurable overhead due to cache lookups and object recreation in tightly looped string processing.
+**Action:** When using multiple regex replacements inside functions that are called frequently or process large amounts of text, define and pre-compile the regex objects at the module level (e.g., `SENSITIVE_DATA_SCRUB_PATTERNS`) and iterate over them using `pattern.sub()`.

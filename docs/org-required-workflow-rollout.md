@@ -1,6 +1,6 @@
 # ContextualWisdomLab central required workflow rollout
 
-Updated: 2026-06-30 08:33 KST
+Updated: 2026-07-01 10:27 KST
 
 ## Decision
 
@@ -17,10 +17,10 @@ Use an organization repository ruleset instead of copying workflow files into ea
   - `.github/workflows/opencode-review.yml`
   - `.github/workflows/pr-review-merge-scheduler.yml`
 - Required workflow ref: `refs/heads/main`
-- Last verified workflow implementation base commit: `cd8cbf904a1ad33342273007b0b749d3ce21b351` (`#134`)
+- Last verified workflow implementation base commit: `dbd33b3a0384de0129aa082a210383188d012415` (`#249`)
 - Required workflow trigger support: `pull_request_target`, `push`, `workflow_run`
 
-`.github` PRs `#136`, `#137`, `#138`, `#139`, and `#140` are now in `main`. The required-workflow
+`.github` PRs through `#249` are now in `main`. The required-workflow
 ruleset points at `.github@main`; if live organization ruleset inspection
 reports another ref, treat that as operations drift and restore ruleset
 `18156473` to the current `main` head.
@@ -65,33 +65,34 @@ Do not centralize the scheduler by running a `.github` scheduled job against oth
 
 ## Scope
 
-The active ruleset no longer maintains a repository-name allowlist. Live ruleset inspection on 2026-06-30 08:33 KST reports `repository_name.include=["~ALL"]`, so all current and future organization repositories inherit the three central required workflows on their default branch unless a later ruleset exclusion is added. The table below is an inventory snapshot and rollout ledger, not the ruleset target list.
+The active ruleset no longer maintains a repository-name allowlist. Live ruleset inspection on 2026-07-01 06:30 KST reports `repository_name.include=["~ALL"]`, so all current and future organization repositories inherit the three central required workflows on their default branch unless a later ruleset exclusion is added. The table below is an inventory snapshot and rollout ledger, not the ruleset target list.
 
 | Repository | Visibility | Default branch | Flow | Open PRs | Local central-workflow copies on default branch | Rollout status |
 | --- | --- | --- | --- | ---: | --- | --- |
-| `ContextualWisdomLab/.github` | public | `main` | GitHub Flow | 53 | central source; keep | single source of truth; PR `#149` merged at `919b83f` |
-| `ContextualWisdomLab/ContextualWisdomLab.github.io` | public | `main` | GitHub Flow | 15 | none | migrated; re-verify required-workflow checks on current open PRs |
-| `ContextualWisdomLab/aFIPC` | private | `master` | GitHub Flow | 39 | none | ruleset target now includes this repo; old PRs may need a new event to show required workflow checks |
-| `ContextualWisdomLab/appguardrail` | public | `develop` | Git Flow | 1 | none | migrated; re-verify before final closure |
-| `ContextualWisdomLab/bandscope` | public | `develop` | Git Flow | 75 | none | no local central copies observed; verify inherited checks on active PRs |
-| `ContextualWisdomLab/clearfolio` | public | `main` | GitHub Flow | 40 | none | migrated; re-verify before final closure |
-| `ContextualWisdomLab/codec-carver` | public | `main` | GitHub Flow | 31 | none | local workflows already gone; quality uplift still needs 100% test/docstring evidence before closure |
-| `ContextualWisdomLab/contextual-orchestrator` | public | `main` | GitHub Flow | 1 | none | no local central copies observed; verify inherited checks on active PR |
-| `ContextualWisdomLab/fast-mlsirm` | public | `main` | GitHub Flow | 0 | none | migrated; no open PR evidence to verify |
-| `ContextualWisdomLab/hyosung-itx-slogan-brief` | public | `main` | GitHub Flow | 0 | none | migrated; no open PR evidence to verify |
-| `ContextualWisdomLab/linux-cluster-ops` | private | `develop` | Git Flow | 65 | none | ruleset target now includes this repo; verify inherited checks on active PRs |
-| `ContextualWisdomLab/naruon` | public | `develop` | Git Flow | 95 | none | default branch has no repo-local OpenCode, Strix, or scheduler copies; application/security workflows remain repository-owned |
-| `ContextualWisdomLab/newsdom-api` | public | `develop` | Git Flow | 29 | none | local workflows already gone; verify inherited checks on active PRs |
-| `ContextualWisdomLab/pg-erd-cloud` | public | `main` | GitHub Flow | 111 | `pr-review-autofix.yml` only | repo-local autofix worker remains separate from the central required OpenCode, Strix, and merge scheduler workflows |
-| `ContextualWisdomLab/scopeweave` | public | `develop` | Git Flow | 61 | none | local workflows already gone; verify inherited checks on active PRs |
-| `ContextualWisdomLab/semantic-data-portal` | public | `main` | GitHub Flow | 1 | none | PR `#3` merged; default branch has no local workflow directory |
-| `ContextualWisdomLab/xtrmLLMBatchPython` | private | `develop` | Git Flow | 68 | none | ruleset target now includes this repo; verify inherited checks on active PRs |
+| `ContextualWisdomLab/.github` | public | `main` | GitHub Flow | 23 | central source; keep | single source of truth; PRs through `#249` merged |
+| `ContextualWisdomLab/appguardrail` | public | `develop` | Git Flow | 7 | none | migrated; re-verify inherited checks before final closure |
+| `ContextualWisdomLab/bandscope` | public | `develop` | Git Flow | 78 | none | no local central copies observed; verify inherited checks on active PRs |
+| `ContextualWisdomLab/clearfolio` | public | `main` | GitHub Flow | 50 | none | migrated; re-verify inherited checks before final closure |
+| `ContextualWisdomLab/codec-carver` | public | `main` | GitHub Flow | 38 | none | local workflows already gone; quality uplift still needs 100% test/docstring evidence before closure |
+| `ContextualWisdomLab/contextual-orchestrator` | public | `main` | GitHub Flow | 0 | none | default branch has no local central copies; no open PR evidence to verify |
+| `ContextualWisdomLab/ContextualWisdomLab.github.io` | public | `main` | GitHub Flow | 19 | none | migrated; re-verify inherited checks on current open PRs |
+| `ContextualWisdomLab/fast-mlsirm` | public | `main` | GitHub Flow | 11 | none | migrated; re-verify inherited checks on current open PRs |
+| `ContextualWisdomLab/hyosung-itx-slogan-brief` | public | `main` | GitHub Flow | 1 | none | migrated; re-verify inherited checks on current open PR |
+| `ContextualWisdomLab/naruon` | public | `develop` | Git Flow | 47 | none | default branch has no repo-local OpenCode, Strix, or scheduler copies; application/security workflows remain repository-owned |
+| `ContextualWisdomLab/newsdom-api` | public | `develop` | Git Flow | 1 | none | local workflows already gone; re-verify inherited checks on current open PR |
+| `ContextualWisdomLab/pg-erd-cloud` | public | `main` | GitHub Flow | 85 | none | repo-local autofix worker removed by PR `#393`; default branch now keeps only repository-owned application and security workflows |
+| `ContextualWisdomLab/scopeweave` | public | `develop` | Git Flow | 0 | none | local workflows already gone; no open PR evidence to verify |
+| `ContextualWisdomLab/semantic-data-portal` | public | `main` | GitHub Flow | 2 | none | PR `#3` merged; default branch has no local central copies |
+| `ContextualWisdomLab/aFIPC` | private | `master` | GitHub Flow | 17 | none | ruleset target includes this repo; verify inherited checks on active PRs |
+| `ContextualWisdomLab/linux-cluster-ops` | private | `develop` | Git Flow | 71 | none | ruleset target includes this repo; verify inherited checks on active PRs |
+| `ContextualWisdomLab/noema` | private | `main` | GitHub Flow | 1 | none | ruleset target includes this repo; verify inherited checks on active PR |
+| `ContextualWisdomLab/xtrmLLMBatchPython` | private | `develop` | Git Flow | 28 | none | ruleset target includes this repo; verify inherited checks on active PRs |
 
 ## Current policy
 
 1. Security evidence, review evidence, and mechanical merge/update automation are centralized through the organization `workflows` ruleset rule.
 2. The central required workflows come from `.github`; repositories should not receive copied Strix, OpenCode, or scheduler workflow files only to satisfy this rollout.
-3. GitHub Flow repositories are those whose default branch is `main`.
+3. GitHub Flow repositories are those whose default branch is `main` or `master`.
 4. Git Flow repositories are those whose default branch is `develop`.
 5. OpenCode remains responsible for review judgment and structured decisions.
 6. GitHub Actions remains responsible for mechanical branch updates and merges.
@@ -102,6 +103,28 @@ The active ruleset no longer maintains a repository-name allowlist. Live ruleset
 ## Evidence from this rollout
 
 - On 2026-06-30 08:33 KST, organization ruleset `18156473` was changed from an explicit repository-name list to `repository_name.include=["~ALL"]` while keeping `ref_name.include=["~DEFAULT_BRANCH"]` and the same three central required workflow paths from `.github@refs/heads/main`.
+- On 2026-07-01 02:52 KST, ruleset `18156473` still reported `enforcement=active`, `repository_name.include=["~ALL"]`, `ref_name.include=["~DEFAULT_BRANCH"]`, and the three required workflow paths from `ContextualWisdomLab/.github@refs/heads/main`.
+- On 2026-07-01 06:30 KST, organization ruleset `18156473` still reported `enforcement=active`, `repository_name.include=["~ALL"]`, `ref_name.include=["~DEFAULT_BRANCH"]`, and the three required workflow paths from `ContextualWisdomLab/.github@refs/heads/main`.
+- `.github` PR `#225` raised high reasoning effort for all reasoning-capable OpenCode review model definitions and merged at `50c6ef82f52af3eeb0e58c174902fc9855c36682`.
+- `.github` PR `#226` stopped the merge scheduler from treating old deterministic fallback approval bodies as current-head approval evidence and merged at `57a1fa580731a0f76b31dcf29a597c5715dba2fd`.
+- `.github` PR `#230` added changed-file candidates to merge-conflict guidance so `DIRTY` or `CONFLICTING` PRs name the first files to inspect instead of giving only generic conflict instructions. It merged at `0cab5c8d46e88c1a3f68ef3f71b5d44d971cd2ef`.
+- `.github` PR `#232` removed the workflow-only deterministic approval fallback introduced by PR `#231`; model-pool exhaustion now stays on the fail-closed `REQUEST_CHANGES` path, and reasoning-capable OpenCode model candidates must have `reasoningEffort: high` before execution. It merged at `f545a9917933f8f81a76ea0044cbce0aae1ac5bd`.
+- `.github` PR `#233` blocks false trivial approval reasons such as `Typo fix in documentation string` when current-head changed files include workflow, script/source, or test surfaces. It merged at `4ff660c8396b78a1b82aef8c316b26527864d450`.
+- `.github` PR `#234` made approval-summary repair parse bullet-form changed-file evidence from bounded review logs, so changed-file evidence is not lost when the evidence section is rendered as a Markdown list. It merged at `da3a4a5788e7019229d66247c360b258b1a5b1f7`.
+- `.github` PR `#235` changed the post-approval OpenCode merge-scheduler follow-up to prefer the workflow `github.token` for same-repository mechanical merge/update mutations, keeping secret/app fallbacks for cross-repository manual dispatch. It merged at `482b05c6c11d9da9895246406aca1c3bd8f6a691`.
+- `.github` PR `#239` centralized the OpenCode reasoning-effort guard into `scripts/ci/assert_opencode_reasoning_effort.py`, reused it for the review model pool and failed-check diagnosis path, and merged at `2aa1fa36255a558bafca05567125ef7e44571976` after required OpenCode, Strix, Noema, coverage, and scheduler checks passed.
+- `.github` PR `#242` added REST fallbacks for transient scheduler GraphQL read failures in open-PR and single-PR lookup paths, then merged at `0d2c6d9e7ae1bad947e7ee3629e2a412ac2ce248`.
+- `.github` PR `#244` added the central `PR Review Autofix` worker and changed the fix scheduler to dispatch the central `.github` autofix worker by default while preserving explicit target-repository overrides. It merged at `4d2dd64028231b1154642bfe23b822fc3403e217`.
+- `.github` PR `#246` hardened the OpenCode model pool after `pg-erd-cloud` PR `#393` exposed model exhaustion: full review policy is kept on disk behind a compact launcher prompt, context-window overflow skips same-model retries, additional cataloged tool-calling models are included, reasoning-capable candidates keep `reasoningEffort: high`, and the model pool now has a five-hour total retry budget. It merged at `f5f00b782ae4f7806f0e3197bf9b49c9c5a2cb91`.
+- `.github` PR `#247` was closed without merge because its reviewed-merge-update fallback would have approved a current head from previous-parent approval evidence after model exhaustion. That path conflicts with the current fail-closed policy: model timeout, model-pool exhaustion, or missing usable control output must lead to retry, alternate model execution, or a source-backed request for changes, not deterministic approval.
+- `.github` PR `#249` guarded the central PR Review Fix Scheduler so `CHANGES_REQUESTED` review states dispatch the central autofix worker only when the latest OpenCode review is on the current head, the merge state is `CLEAN` or `HAS_HOOKS`, and the review body does not indicate process-only blockers such as merge conflict, model-pool exhaustion, unresolved human review threads, failed checks, `coverage-evidence`, or failed Strix evidence. It merged at `dbd33b3a0384de0129aa082a210383188d012415` after current-head `coverage-evidence`, `strix`, `opencode-review`, `noema-review`, and `scan-pr-queue` all completed successfully.
+- `.github` PR `#255` removed the remaining deterministic low-risk approval fallback from the OpenCode approval gate and changed `coverage-evidence` blocker handling to publish a `REQUEST_CHANGES` review event, producing the PR review state `CHANGES_REQUESTED`, instead of leaving only a failed check/log. It merged at `e2beae72b87a8817cd57f9f51bab3947353baa61`; the first current-head OpenCode run reached an `APPROVE` gate result but hit the OpenCode GitHub App installation rate limit while publishing the review, then a rerun published approval and native auto-merge completed.
+- After PR `#255` merged, `ContextualWisdomLab/bandscope` PRs `#493`, `#494`, `#495`, and `#500` were rechecked for branch freshness. Merge simulation against `develop` found real conflicts rather than update-branch candidates: `#493` conflicts in `apps/desktop/src/App.tsx` plus the design-system docs, while `#494`, `#495`, and `#500` conflict in `docs/design-system/README.md`, `docs/design-system/component-contract.md`, and `docs/design-system/figma-to-code-workflow.md`. Each PR received a corrected conflict-resolution comment with the exact file list and merge/rebase repair commands.
+- `ContextualWisdomLab/pg-erd-cloud` PR `#393` removed the repo-local `pr-review-autofix.yml` worker after the central autofix worker merged.
+  The first OpenCode run on head `9d8eed5be47670b1b46f413295d9a6044d7327b2` exhausted the older model pool and requested changes.
+  After `.github` PR `#246` merged, central OpenCode run `28485070313` approved the same head and the PR merged at `1e0d6a3dda5ea9afcd74dcd8380689672e1c8ef1` on 2026-07-01 00:33:50Z.
+  Live default-branch content lookup returned 404 for `.github/workflows/pr-review-autofix.yml` after merge.
+- Live non-fork inventory on 2026-07-01 06:30 KST found inherited ruleset `18156473` on every listed repository and no default-branch copies of `opencode-review.yml`, `strix.yml`, or `pr-review-merge-scheduler.yml` outside `.github`.
 - `.github` scheduler default merge mode is now `direct_or_auto`: approved same-repository `CLEAN` PRs request immediate guarded merge, approved non-clean same-repository PRs can queue native auto-merge, and fork or external-head PRs are left for maintainer merge.
 - OpenCode approval runs the trusted central merge scheduler script directly with `pr_number` and `max_prs=1`, so the just-reviewed PR is inspected immediately even when organization required workflows are not repo-local `workflow_dispatch` targets.
 - `.github` PR `#74` changed OpenCode review model order to DeepSeek R1 first and added a catalog fallback pool.
@@ -126,7 +149,7 @@ The active ruleset no longer maintains a repository-name allowlist. Live ruleset
 - `.github` PR `#100` merged at 2026-06-29 05:45 KST with merge commit `81408f3dbe0a3c43dc4b76133f72a5e314df8a10`. A follow-up admin check should verify organization ruleset `18156473` is no longer pinned to `refs/heads/codex/rerun-required-opencode-job`.
 - On 2026-06-29 16:33 KST, `ContextualWisdomLab/aFIPC` PR `#78` proved a target coverage gap: PR `#78` lacks inherited OpenCode, Strix, and scheduler required-workflow checks. The PR had local `check`, `quality`, and `secret-and-workflow-audit` check runs, and repository ruleset `PR` (`12815994`) required only those three local checks with zero required approvals.
 - `.github` PR `#136` changed approved stale PR handling so `BEHIND` branches are updated before failed-check or `ACTION_REQUIRED` decisions disable auto-merge.
-- `.github` PR `#137` made the central `PR Review Fix Scheduler` target-repository aware through `workflow_call`, `workflow_dispatch`, schedule, and `.github` repository variables. `.github` variables currently target `ContextualWisdomLab/pg-erd-cloud` on `main`.
+- `.github` PR `#137` made the central `PR Review Fix Scheduler` target-repository aware through `workflow_call`, `workflow_dispatch`, schedule, and `.github` repository variables. `.github` variables currently target `ContextualWisdomLab/pg-erd-cloud` on `main`. The follow-up central autofix worker makes `ContextualWisdomLab/.github` the default `autofix_repository`, so target repositories no longer need to copy a full `pr-review-autofix.yml` worker to participate.
 - `.github` PR `#138` added compare-API branch freshness evidence so approved PRs with auto-merge enabled can still receive `update-branch` when GitHub reports `BLOCKED` but the base branch is ahead. Local verification passed `pytest -q`, scheduler self-test, `py_compile`, 100% coverage, 100% docstring coverage, `actionlint`, `bash -n`, and `git diff --check`.
 - `.github` PR `#140` extended `update-branch` handling to PRs where auto-merge is already enabled even if the scheduler cannot find a current-head OpenCode approval node, so queued auto-merge PRs with failed checks can still be refreshed when compare evidence shows the base branch is ahead. Local verification passed `pytest -q`, `coverage report` at 100%, `interrogate` at 100%, `py_compile`, `bash -n`, and `git diff --check`.
 - `.github` PR `#145` treats compare API `status: behind` as branch-staleness evidence even when `behind_by` is missing or zero, so an auto-merge-enabled PR with failed checks and a visible GitHub "Update branch" action requests `update_branch` before disabling auto-merge. It merged at 2026-06-29 23:14 KST with merge commit `1ec0f3dcc7250fdf4a5a3ec6c26feaa98cce4f48`.
@@ -145,7 +168,7 @@ The active ruleset no longer maintains a repository-name allowlist. Live ruleset
 
 - `naruon`: separates PR Governance, OpenCode review, Strix evidence, and application CI into explicit checks.
 - `.github`: centralizes reusable workflow logic and review/merge scheduler code.
-- `pg-erd-cloud`: has separate autofix/fix scheduler workflows, useful as a reference for repair automation but not as a merge authority.
+- `pg-erd-cloud`: its previous repo-local autofix worker was folded into the central `PR Review Autofix` worker and removed from the repository by PR `#393`; keep only repository-specific application and security checks locally.
 - `ContextualWisdomLab.github.io`: thin caller pattern is acceptable for repository-local workflows only when GitHub does not offer an organization-level control. It should not be the default rollout mechanism.
 
 ## Risks and follow-up
@@ -158,7 +181,10 @@ The active ruleset no longer maintains a repository-name allowlist. Live ruleset
 - Bounded OpenCode evidence includes `Review execution contracts`, which inventories runtime matrices, package manifests, test, coverage, docstring, E2E, lint, security, Docker, and unpackaged-source gaps before the model chooses verification commands.
 - Generated OpenCode review DAGs must use quoted Mermaid labels such as `A["text"]`; unquoted labels with spaces, punctuation, parentheses, or file counts can fail to render.
 - OpenCode approval summaries must not contradict exact changed-file evidence by saying no source, test, or executable files changed when workflow, script, source, or test files are present.
-- Do not copy central Strix, OpenCode, or merge scheduler workflows into repositories. Repository-local application CI, security CI, or targeted autofix workers may remain when they are not substitutes for the required central workflows.
-- `pg-erd-cloud` still has a repository-local `pr-review-autofix.yml` worker; keep it out of the central required-workflow contract unless the autofix path is also moved to organization-level execution.
+- OpenCode approval reasons must not trivialize material workflow, script/source, or test changes as docs-only, typo-only, or string-only changes. The normalizer now rejects those approvals before publication.
+- Same-repository post-approval merge/update follow-up should use the workflow `github.token` first so the mechanical actor is `github-actions[bot]`; cross-repository manual dispatch may still fall back to configured secrets or the OpenCode app token when the workflow token cannot mutate the target repository.
+- Do not copy central Strix, OpenCode, merge scheduler, fix scheduler, or autofix worker workflows into repositories. Repository-local application CI and security CI may remain when they are not substitutes for the central workflows.
+- The central autofix worker is for source-actionable current-head review findings. It must not treat model-pool exhaustion, missing approval evidence, unresolved human threads, failed checks, `coverage-evidence`, Strix failures, `DIRTY`, or `CONFLICTING` merge states as code-autofix requests; those states need retry, failed-check explanation, branch update, or conflict guidance instead.
+- `pg-erd-cloud` no longer has a repository-local `pr-review-autofix.yml` worker on its default branch. Live default-branch workflows after PR `#393` are `ci.yml`, `codeql-backfill.yml`, `codeql.yml`, `dependency-review.yml`, and `scorecard.yml`.
 - Some repositories use classic branch protection while others use rulesets. Normalize branch protection into rulesets without removing repository-specific required application checks.
 - Existing PRs may not show newly inherited required workflows until a new PR event or branch update occurs, even though the org ruleset now uses the all-repository condition.

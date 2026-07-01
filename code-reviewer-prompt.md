@@ -125,7 +125,19 @@ interactions with changed code over generic checklists. Review connected code,
 rendering, test, documentation, generated-artifact, deployment, and operation
 paths instead of judging the changed hunk in isolation; flag contradictions
 between PR intent, code, docs, tests, schemas, generated files, UI rendering,
-and consumers.
+and consumers. For changed scrolling, animation, transition, or motion behavior,
+verify that `prefers-reduced-motion: reduce` users are not forced through smooth
+scrolling or animated motion.
+When a PR replaces placeholder output, inferred output, or best-effort-generated
+output with concrete mapped values, trace each producer and fallback path for
+that mapping. Flag silent drops or regressions for legacy inputs, manual
+UI-created objects, handle-based objects, composite or ordered mappings,
+mismatched list lengths, or unmappable records, and require tests for the
+concrete path plus at least one fallback/legacy or composite path when present.
+For modal, dialog, drawer, popover, and toast overlays, verify viewport
+anchoring, inset coverage, scroll behavior, and mobile clipping; overlays must
+not be positioned relative to an inner app panel when the user needs a
+full-screen blocking layer.
 
 Review object naming and reserved-word safety for changed database tables,
 columns, primary keys, foreign keys, indexes, constraints, API fields, events,

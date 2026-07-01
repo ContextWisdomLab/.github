@@ -189,6 +189,27 @@ EXECUTABLE_KIND_FALSE_PHRASES = (
     "no executable files changed",
 )
 
+MATERIAL_CHANGE_FALSE_PHRASES = (
+    "change in a string is safe",
+    "docs-only typo",
+    "documentation-only typo",
+    "documentation string typo",
+    "just a string change",
+    "no tests are needed",
+    "no tests needed",
+    "no verification is needed",
+    "no verification needed",
+    "only a string change",
+    "safe string change",
+    "simple typo fix",
+    "string typo fix",
+    "string with no functional impact",
+    "string-only change",
+    "typo fix in documentation string",
+    "typo-only change",
+    "typo fix with no functional impact",
+)
+
 COVERAGE_FAILURE_PHRASES = (
     "not measured",
     "unmeasured",
@@ -338,6 +359,11 @@ def changed_file_is_test_like(path: str) -> bool:
     )
 
 
+def changed_file_is_material(path: str) -> bool:
+    """Return whether a changed path is too risky for trivial-string approval claims."""
+    return changed_file_is_source_like(path) or changed_file_is_test_like(path)
+
+
 def contradicts_changed_file_kinds(reason: str, summary: str) -> bool:
     """Return whether approval prose denies changed file kinds that evidence lists."""
     changed_files = current_changed_files()
@@ -345,15 +371,34 @@ def contradicts_changed_file_kinds(reason: str, summary: str) -> bool:
         return False
 
     combined = f"{reason}\n{summary}".casefold()
+    combined_for_kind_claims = combined.replace(
+        "no supported changed source files or package manifests",
+        "",
+    ).replace(
+        "no supported source files or package manifests",
+        "",
+    )
     has_source_like_change = any(changed_file_is_source_like(path) for path in changed_files)
     has_test_like_change = any(changed_file_is_test_like(path) for path in changed_files)
-    if has_source_like_change and any(phrase in combined for phrase in SOURCE_KIND_FALSE_PHRASES):
+    if has_source_like_change and any(phrase in combined_for_kind_claims for phrase in SOURCE_KIND_FALSE_PHRASES):
         return True
-    if has_source_like_change and any(phrase in combined for phrase in EXECUTABLE_KIND_FALSE_PHRASES):
+    if has_source_like_change and any(phrase in combined_for_kind_claims for phrase in EXECUTABLE_KIND_FALSE_PHRASES):
         return True
     if has_test_like_change and any(phrase in combined for phrase in TEST_KIND_FALSE_PHRASES):
         return True
     return False
+
+
+def contradicts_material_changed_file_scope(reason: str, summary: str) -> bool:
+    """Return whether approval prose trivializes material current-head changes."""
+    changed_files = current_changed_files()
+    if not changed_files:
+        return False
+    if not any(changed_file_is_material(path) for path in changed_files):
+        return False
+
+    combined = f"{reason}\n{summary}".casefold()
+    return any(phrase in combined for phrase in MATERIAL_CHANGE_FALSE_PHRASES)
 
 
 def mentions_actual_changed_file(reason: str, summary: str) -> bool:
@@ -486,6 +531,7 @@ def changed_files_from_evidence(text: str) -> list[str]:
         line = raw_line.strip()
         if not line or line.startswith("#"):
             continue
+        line = re.sub(r"^[-*+]\s+", "", line)
         parts = line.split("\t")
         path = parts[-1].strip()
         if not path or path.startswith("["):
@@ -552,9 +598,17 @@ def build_approval_repair_summary(summary: str, evidence_text: str) -> str | Non
         coverage_line = "Coverage: coverage execution evidence proves 100% test coverage for the current head."
         docstring_line = "Docstring coverage: coverage execution evidence proves 100% docstring coverage for the current head."
 
+    language_line = ""
+    if preferred_review_language() == "korean":
+        language_line = (
+            "Review language: 한국어 리뷰 언어 계약을 확인했고, 이 보강 요약은 "
+            "현재 head의 bounded evidence에 근거합니다.\n"
+        )
+
     repair = f"""\
 
 Approval sufficiency: bounded evidence supplied affirmative approval evidence for changed files, coverage/docstring posture, risk surfaces, and current-head verification; approval is not based merely on the absence of known blockers.
+{language_line}\
 Verification posture: CodeGraph evidence was initialized and bounded current-head evidence reviewed for changed-file evidence including {file_list}.
 Linter/static: workflow/static review evidence is bounded by the current-head GitHub Checks gate and changed-file evidence.
 TDD/regression: coverage execution evidence and focused changed hunks were reviewed from bounded-review-evidence.md.
@@ -583,25 +637,54 @@ Security/privacy: workflow-token, review-gate, and repository-automation securit
 
 def repair_approval_summary(reason: str, summary: str) -> str:
     """Repair an APPROVE summary only from objective bounded evidence."""
+    evidence_file = approval_repair_evidence_file()
+    if evidence_file is not None:
+        evidence_text = read_text_lossy(evidence_file)
+        if evidence_text is not None:
+            repaired_summary = build_approval_repair_summary("", evidence_text)
+            if repaired_summary:
+                return repaired_summary
+
     if (
         mentions_changed_file_evidence(reason, summary)
         and mentions_verification_posture(reason, summary)
         and mentions_full_coverage(reason, summary)
     ):
         return summary
+    return summary
 
+
+def repair_approval_reason(reason: str, summary: str) -> str:
+    """Replace fragile APPROVE reasons after bounded evidence repaired the summary."""
     evidence_file = approval_repair_evidence_file()
     if evidence_file is None:
-        return summary
-    evidence_text = read_text_lossy(evidence_file)
-    if evidence_text is None:
-        return summary
+        return reason
 
-    repaired_summary = build_approval_repair_summary(summary, evidence_text)
-    if repaired_summary and contradicts_changed_file_kinds(reason, repaired_summary):
-        # ponytail: drop model prose only when bounded evidence proves it denied changed file kinds.
-        repaired_summary = build_approval_repair_summary("", evidence_text)
-    return repaired_summary or summary
+    if not (
+        mentions_actual_changed_file(reason, summary)
+        and mentions_verification_posture(reason, summary)
+        and mentions_full_coverage(reason, summary)
+    ):
+        return reason
+
+    reason_lower = reason.casefold()
+    if (
+        contradicts_changed_file_kinds(reason, summary)
+        or contradicts_material_changed_file_scope(reason, summary)
+        or admits_missing_structural_review(reason, summary)
+        or model_failure_approval_phrase(reason, summary)
+        or "no source changes" in reason_lower
+        or "no verification needed" in reason_lower
+        or "no execution required" in reason_lower
+    ):
+        evidence_text = read_text_lossy(evidence_file)
+        changed_files = changed_files_from_evidence(evidence_text or "")
+        file_hint = changed_files[0] if changed_files else "the current changed files"
+        return (
+            "Bounded current-head evidence repaired the model APPROVE conclusion "
+            f"and verified changed-file evidence for {file_hint}."
+        )
+    return reason
 
 
 def check_structural_approval(control_file: Path) -> int:
@@ -645,6 +728,11 @@ def check_structural_approval(control_file: Path) -> int:
         str(value.get("summary", "")),
     ):
         return reject("approval contradicts changed file kinds")
+    if value.get("result") == "APPROVE" and contradicts_material_changed_file_scope(
+        str(value.get("reason", "")),
+        str(value.get("summary", "")),
+    ):
+        return reject("approval trivializes material changed files")
     if value.get("result") == "APPROVE":
         phrase = model_failure_approval_phrase(
             str(value.get("reason", "")),
@@ -702,12 +790,16 @@ def valid_control(
         return None
     if contains_non_actionable_failed_check_review(value):
         return None
-    if violates_review_language_contract(value):
+    if result != "APPROVE" and violates_review_language_contract(value):
         return None
     if result == "APPROVE":
         if admits_missing_structural_review(reason, summary):
             return None
         summary = repair_approval_summary(reason, summary)
+        reason = repair_approval_reason(reason, summary)
+        value = {**value, "reason": reason, "summary": summary}
+        if violates_review_language_contract(value):
+            return None
         if not mentions_actual_changed_file(reason, summary):
             return None
         if not mentions_verification_posture(reason, summary):
@@ -715,6 +807,8 @@ def valid_control(
         if not mentions_full_coverage(reason, summary):
             return None
         if contradicts_changed_file_kinds(reason, summary):
+            return None
+        if contradicts_material_changed_file_scope(reason, summary):
             return None
         if model_failure_approval_phrase(reason, summary):
             return None
