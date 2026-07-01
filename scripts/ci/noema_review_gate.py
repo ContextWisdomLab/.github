@@ -9,7 +9,6 @@ import os
 import re
 import subprocess
 import sys
-import urllib.parse
 import urllib.request
 from collections.abc import Sequence
 from typing import Any
@@ -269,8 +268,7 @@ def call_llm(repo: str, number: int, pr: dict[str, Any], diff: str, truncated: b
         print("Noema LLM review unavailable: NOEMA_LLM_API_URL or NOEMA_LLM_API_KEY is not configured.")
         return None
     if not api_url.lower().startswith(("http://", "https://")):
-        scheme = urllib.parse.urlparse(api_url).scheme or "(no scheme)"
-        raise ValueError(f"Invalid NOEMA_LLM_API_URL scheme: {scheme}")
+        raise ValueError("Invalid NOEMA_LLM_API_URL scheme. URL must start with http:// or https://")
 
     prompt = {
         "role": "user",
