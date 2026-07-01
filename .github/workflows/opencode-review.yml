@@ -1168,7 +1168,7 @@ jobs:
               "- mergeable: `" + ((.mergeable // "unknown") | tostring) + "`",
               if ($state == "DIRTY" or $state == "CONFLICTING") then
                 "- Review direction: PR has merge conflicts. OpenCode must explain how to merge or rebase the latest base branch into the PR branch, resolve conflict markers, rerun focused checks, and push the same branch, including a compact command block with gh pr checkout, git fetch, merge or rebase, git status --short, and the normal or --force-with-lease push path."
-              elif $state == "BLOCKED" then
+              elif ($state == "BLOCKED") then
                 "- Review direction: `BLOCKED` is a branch policy, review, or check state, not merge conflict evidence. Do not request conflict repair unless mergeStateStatus is `DIRTY` or `CONFLICTING`."
               else
                 "- Review direction: do not treat mergeStateStatus `" + $state + "` as a merge conflict unless it is `DIRTY` or `CONFLICTING`."
@@ -1285,7 +1285,7 @@ jobs:
                     (.comments[-1] |
                       "- Latest reviewer comment: @\(.author) at \(.createdAt)",
                       "- Comment URL: \(.url)",
-                      "- Comment excerpt: \((.body | gsub("\r"; "") | gsub("`"; "'") | gsub("<"; "&lt;") | gsub(">"; "&gt;") | split("\n") | map(select(length > 0)) | .[0:8] | join(" / ") | .[0:600]))"
+                      "- Comment excerpt: \((.body | gsub("\r"; "") | gsub("`"; "\u0027") | gsub("<"; "&lt;") | gsub(">"; "&gt;") | split("\n") | map(select(length > 0)) | .[0:8] | join(" / ") | .[0:600]))"
                     ),
                     ""
                   )
@@ -3016,7 +3016,7 @@ jobs:
                     (.comments[-1] |
                       "- Latest reviewer comment: @\(.author) at \(.createdAt)",
                       "- Comment URL: \(.url)",
-                      "- Comment excerpt: \((.body | gsub("\r"; "") | gsub("`"; "'") | gsub("<"; "&lt;") | gsub(">"; "&gt;") | split("\n") | map(select(length > 0)) | .[0:8] | join(" / ") | .[0:600]))"
+                      "- Comment excerpt: \((.body | gsub("\r"; "") | gsub("`"; "\u0027") | gsub("<"; "&lt;") | gsub(">"; "&gt;") | split("\n") | map(select(length > 0)) | .[0:8] | join(" / ") | .[0:600]))"
                     ),
                     ""
                   )
