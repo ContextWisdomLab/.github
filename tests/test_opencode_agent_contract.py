@@ -290,3 +290,13 @@ def test_opencode_runs_merge_scheduler_after_review_without_repo_local_dispatch(
     assert "--enable-auto-merge" in workflow
     assert "--no-update-branches" in workflow
     assert "Merge scheduler follow-up skipped after approval because no mutation credential was available" in workflow
+
+
+def test_opencode_review_thread_jq_filters_preserve_bash_single_quotes():
+    """Guard jq filters embedded in single-quoted shell strings."""
+    workflow = Path(".github/workflows/opencode-review.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'gsub("`"; "\'")' not in workflow
+    assert workflow.count('gsub("`"; "&apos;")') == 2
