@@ -2627,6 +2627,16 @@ jobs:
           APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "30"
           CHECK_LOOKUP_RETRY_ATTEMPTS: "5"
           CHECK_LOOKUP_RETRY_SLEEP_SECONDS: "5"
+          OPENCODE_MODEL_CANDIDATES: "github-models/openai/gpt-5-nano"
+          OPENCODE_MODEL_ATTEMPTS: "1"
+          OPENCODE_RUN_TIMEOUT_SECONDS: "240"
+          OPENCODE_EXPORT_TIMEOUT_SECONDS: "120"
+          OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "360"
+          OPENCODE_BACKOFF_INITIAL_SECONDS: "30"
+          OPENCODE_BACKOFF_MAX_SECONDS: "30"
+          OPENCODE_FIRST_ATTEMPT_AGENT: ci-review
+          OPENCODE_AGENT: ci-review-fallback
+          OPENCODE_EXHAUSTED_REKICK_ATTEMPTS: "1"
         run: |
           set -euo pipefail
           echo "::group::OpenCode Review Approval Gate"
@@ -4765,6 +4775,35 @@ jobs:
             scripts/ci/collect_failed_check_evidence.sh "$evidence_file"
           }
 
+          rekick_model_pool_on_exhaustion() {
+            local max_rekicks="${OPENCODE_EXHAUSTED_REKICK_ATTEMPTS:-0}"
+            local rekick_attempt=1
+            local rekick_output outcome model
+
+            while [ "${OPENCODE_MODEL_POOL_OUTCOME:-}" = "exhausted" ] && [ "$rekick_attempt" -le "$max_rekicks" ]; do
+              printf 'OpenCode model pool exhausted; re-kicking model pool (%s/%s).\n' "$rekick_attempt" "$max_rekicks"
+              rekick_output="$(mktemp)"
+              if GITHUB_OUTPUT="$rekick_output" OPENCODE_OUTPUT_FILE="$OPENCODE_MODEL_POOL_OUTPUT_FILE" \
+                bash "$GITHUB_WORKSPACE/scripts/ci/run_opencode_review_model_pool.sh"; then
+                :
+              fi
+              outcome="$(awk -F= '/^review_status=/{v=$2} END{print v}' "$rekick_output")"
+              model="$(awk -F= '/^review_model=/{v=$2} END{print v}' "$rekick_output")"
+              rm -f "$rekick_output"
+
+              if [ -z "$outcome" ]; then
+                outcome="exhausted"
+              fi
+              OPENCODE_MODEL_POOL_OUTCOME="$outcome"
+              OPENCODE_MODEL_POOL_MODEL="$model"
+              if [ "$outcome" = "success" ]; then
+                printf 'OpenCode model pool re-kick recovered with model: %s\n' "${model:-unknown}"
+                break
+              fi
+              rekick_attempt=$((rekick_attempt + 1))
+            done
+          }
+
           live_head_sha="$(gh api -X GET "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
           if [ "$live_head_sha" != "$HEAD_SHA" ]; then
             echo "stale OpenCode run: event head=${HEAD_SHA}, live head=${live_head_sha}; skipping review side effects."
@@ -4776,6 +4815,7 @@ jobs:
             request_changes_for_coverage_evidence_failure
           fi
 
+          rekick_model_pool_on_exhaustion
           opencode_review_outcome="${OPENCODE_MODEL_POOL_OUTCOME:-unknown}"
 
           if [ "$opencode_review_outcome" != "success" ]; then
