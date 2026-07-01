@@ -6,7 +6,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-import yaml
 
 
 def test_code_reviewer_subagent_contract_is_configured():
@@ -231,17 +230,23 @@ def test_opencode_approval_gate_shell_is_parseable():
     if bash is None:
         pytest.skip("bash is unavailable")
 
-    workflow = yaml.safe_load(Path(".github/workflows/opencode-review.yml").read_text(encoding="utf-8"))
-    approval_step = next(
-        step
-        for job in workflow["jobs"].values()
-        for step in job.get("steps", [])
-        if step.get("name") == "Approve PR if OpenCode review passed"
+    workflow_lines = Path(".github/workflows/opencode-review.yml").read_text(encoding="utf-8").splitlines()
+    name_index = workflow_lines.index("      - name: Approve PR if OpenCode review passed")
+    run_index = next(
+        index
+        for index in range(name_index + 1, len(workflow_lines))
+        if workflow_lines[index] == "        run: |"
     )
+    script_lines = []
+    for line in workflow_lines[run_index + 1 :]:
+        if line and not line.startswith("          "):
+            break
+        script_lines.append(line[10:] if line.startswith("          ") else "")
+    script = "\n".join(script_lines) + "\n"
 
     result = subprocess.run(
         [bash, "-n"],
-        input=approval_step["run"],
+        input=script,
         text=True,
         capture_output=True,
         check=False,
