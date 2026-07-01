@@ -925,16 +925,12 @@ def main(argv: list[str]) -> int:
         if control is None:
             continue
 
-<<<<<<< HEAD
         normalized_json = json.dumps(control, separators=(",", ":"), ensure_ascii=False)
         normalized_json = (
             normalized_json.replace("<", "\\u003c")
             .replace(">", "\\u003e")
             .replace("&", "\\u0026")
         )
-=======
-        normalized_json = json.dumps(control, separators=(",", ":"), ensure_ascii=False).replace("<", r"\u003c").replace(">", r"\u003e").replace("&", r"\u0026")
->>>>>>> origin/main
         output_file.write_text(
             "\n".join(
                 [

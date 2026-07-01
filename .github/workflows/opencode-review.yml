@@ -4785,7 +4785,6 @@ jobs:
             scripts/ci/collect_failed_check_evidence.sh "$evidence_file"
           }
 
-<<<<<<< HEAD
           approve_low_risk_changed_files_after_model_failure() {
             local body_file="$1"
             local changed_files_file
@@ -4973,8 +4972,7 @@ jobs:
             return 0
           }
 
-=======
->>>>>>> origin/main
+
           live_head_sha="$(gh api -X GET "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
           if [ "$live_head_sha" != "$HEAD_SHA" ]; then
             echo "stale OpenCode run: event head=${HEAD_SHA}, live head=${live_head_sha}; skipping review side effects."
