@@ -1,10 +1,9 @@
-"""Module docstring."""
+"""Test for PR review merge scheduler."""
 import pytest
 import argparse
 import json
 import subprocess
 from unittest.mock import patch, MagicMock
-import os
 
 import pr_review_merge_scheduler as scheduler
 
@@ -207,18 +206,17 @@ def test_main():
 
         assert scheduler.main(["--repo", "r", "--base-branch", "b", "--project-flow", "f"]) == 0
 
-        # Clear environment variables to test required argument validation
-        env_vars = {"GITHUB_REPOSITORY": "", "DEFAULT_BRANCH": "", "PROJECT_FLOW": ""}
-        with patch.dict(os.environ, env_vars, clear=False):
-            with pytest.raises(SystemExit):
-                scheduler.main(["--base-branch", "b", "--project-flow", "f"])
-            with pytest.raises(SystemExit):
-                scheduler.main(["--repo", "r", "--project-flow", "f"])
-            with pytest.raises(SystemExit):
-                scheduler.main(["--repo", "r", "--base-branch", "b"])
+        with pytest.raises(SystemExit) as se:
+            scheduler.main(["--base-branch", "b", "--project-flow", "f"])
+        with pytest.raises(SystemExit) as se:
+            scheduler.main(["--repo", "r", "--project-flow", "f"])
+        with pytest.raises(SystemExit) as se:
+            scheduler.main(["--repo", "r", "--base-branch", "b"])
 
-    # Test self-test outside of patch block so real inspect_pr runs
-    assert scheduler.main(["--self-test"]) == 0
+
+        assert scheduler.main(['--self-test']) == 0
+
+
 
 def test_get_current_head_opencode_review_state():
     """Docstring."""
@@ -237,6 +235,7 @@ def test_get_current_head_opencode_review_state_not_actionable():
 
     pr["reviews"]["nodes"].append({"state": "DISMISSED", "author": {"login": "opencode-agent"}, "commit": {"oid": "abc"}})
     assert scheduler.get_current_head_opencode_review_state(pr) is None
+
 
 def test_opencode_in_progress_continue():
     """Docstring."""
