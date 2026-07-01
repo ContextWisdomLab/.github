@@ -4054,11 +4054,19 @@ jobs:
                 ;;
             esac
 
-            gh api -X GET "repos/${GH_REPOSITORY}/commits/${HEAD_SHA}/check-runs" \
+            local check_runs_pages_file
+            check_runs_pages_file="$(mktemp)" || return 1
+            if ! gh api -X GET "repos/${GH_REPOSITORY}/commits/${HEAD_SHA}/check-runs" \
               -f per_page=100 \
-              --paginate \
-              --slurp \
-              --jq "$jq_filter" >"$output_file"
+              --paginate >"$check_runs_pages_file"; then
+              rm -f "$check_runs_pages_file"
+              return 1
+            fi
+            if ! jq -s "$jq_filter" "$check_runs_pages_file" >"$output_file"; then
+              rm -f "$check_runs_pages_file"
+              return 1
+            fi
+            rm -f "$check_runs_pages_file"
           }
 
           current_head_manual_strix_success_status() {
