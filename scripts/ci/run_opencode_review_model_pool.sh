@@ -40,16 +40,32 @@ write_prompt() {
 	local model_candidate="$1"
 	local prompt_file="$2"
 	local intro
+	local contract_file
 
 	if [ -n "${OPENCODE_REVIEW_INTRO:-}" ]; then
 		intro="$OPENCODE_REVIEW_INTRO"
 	else
 		intro="Review PR #\${PR_NUMBER} in \${OPENCODE_SOURCE_WORKDIR} with \${model_candidate}."
 	fi
-	cp "$GITHUB_WORKSPACE/scripts/ci/opencode_review_prompt_template.md" "$prompt_file"
+	contract_file="$OPENCODE_REVIEW_WORKDIR/opencode-review-contract-${model_candidate//\//-}.md"
+	cp "$GITHUB_WORKSPACE/scripts/ci/opencode_review_prompt_template.md" "$contract_file"
 	OPENCODE_REVIEW_INTRO="$intro" \
 		PROMPT_MODEL_CANDIDATE="$model_candidate" \
-		python3 "$GITHUB_WORKSPACE/scripts/ci/render_opencode_prompt_template.py" "$prompt_file"
+		python3 "$GITHUB_WORKSPACE/scripts/ci/render_opencode_prompt_template.py" "$contract_file"
+
+	{
+		printf '%s\n\n' "$intro"
+		printf 'Read and follow the complete review contract in `%s` before producing the final review.\n' "$contract_file"
+		printf 'Read bounded review evidence from `%s` and source files from `%s`.\n' "$OPENCODE_EVIDENCE_FILE" "$OPENCODE_SOURCE_WORKDIR"
+		printf 'Use the trusted review workspace `%s` for scripts, prompts, policy files, CodeGraph config, and validation helpers.\n\n' "$OPENCODE_REVIEW_WORKDIR"
+		printf 'Do not treat this compact launcher as a reduced review policy. It exists only to avoid provider context-window overflow; the contract file remains authoritative.\n'
+		printf 'Mandatory first actions: read the review contract, read bounded-review-evidence.md/evidence paths, inspect changed files and focused related code, use the configured structural/search tools required by the contract, then run safe verification where applicable.\n'
+		printf 'Always return a final control block instead of a progress summary. Return only the final review body.\n\n'
+		printf 'Required control block shape:\n'
+		printf '```json\n'
+		printf '{"head_sha":"%s","run_id":"%s","run_attempt":"%s","result":"APPROVE or REQUEST_CHANGES","reason":"short reason","summary":"short review summary with concrete evidence and all required labels","findings":[]}\n' "$HEAD_SHA" "$RUN_ID" "$RUN_ATTEMPT"
+		printf '```\n'
+	} >"$prompt_file"
 }
 
 assert_reasoning_effort_for_candidate() {
@@ -58,6 +74,13 @@ assert_reasoning_effort_for_candidate() {
 	python3 "$GITHUB_WORKSPACE/scripts/ci/assert_opencode_reasoning_effort.py" \
 		--config opencode.jsonc \
 		"$model_candidate"
+}
+
+is_context_overflow_failure() {
+	local opencode_json_file="$1"
+
+	[ -s "$opencode_json_file" ] || return 1
+	grep -Eiq 'ContextOverflowError|tokens_limit_reached|Request body too large|context window' "$opencode_json_file"
 }
 
 run_one_model_attempt() {
@@ -86,6 +109,10 @@ run_one_model_attempt() {
 	set -e
 	if [ "$opencode_status" -ne 0 ]; then
 		printf 'OpenCode %s attempt %s/%s failed with exit %s.\n' "$model_candidate" "$attempt" "$attempts" "$opencode_status"
+		if is_context_overflow_failure "$opencode_json_file"; then
+			printf 'OpenCode %s attempt %s/%s exceeded the provider context window; skipping remaining attempts for this model.\n' "$model_candidate" "$attempt" "$attempts"
+			return 2
+		fi
 		return 1
 	fi
 
@@ -93,6 +120,10 @@ run_one_model_attempt() {
 	if [ -z "$session_id" ] || [ "$session_id" = "null" ]; then
 		printf 'OpenCode %s attempt %s/%s JSON output did not include a session id.\n' "$model_candidate" "$attempt" "$attempts"
 		cat "$opencode_json_file"
+		if is_context_overflow_failure "$opencode_json_file"; then
+			printf 'OpenCode %s attempt %s/%s exceeded the provider context window; skipping remaining attempts for this model.\n' "$model_candidate" "$attempt" "$attempts"
+			return 2
+		fi
 		return 1
 	fi
 	if ! timeout --kill-after=15s "${export_timeout_seconds}s" opencode export "$session_id" --pure >"$opencode_export_file"; then
@@ -115,11 +146,11 @@ run_one_model_attempt() {
 
 main() {
 	local attempts deadline now remaining model_candidate attempt safe_model prompt_file candidate_output_file
-	local opencode_json_file opencode_export_file agent retry_sleep original_run_timeout
+	local opencode_json_file opencode_export_file agent retry_sleep original_run_timeout run_status
 
 	attempts="${OPENCODE_MODEL_ATTEMPTS:-3}"
-	original_run_timeout="${OPENCODE_RUN_TIMEOUT_SECONDS:-180}"
-	deadline=$((SECONDS + ${OPENCODE_TOTAL_RETRY_BUDGET_SECONDS:-2400}))
+	original_run_timeout="${OPENCODE_RUN_TIMEOUT_SECONDS:-900}"
+	deadline=$((SECONDS + ${OPENCODE_TOTAL_RETRY_BUDGET_SECONDS:-18000}))
 	: >"$OPENCODE_OUTPUT_FILE"
 	cd "$OPENCODE_REVIEW_WORKDIR"
 
@@ -149,11 +180,17 @@ main() {
 			if [ "$attempt" -eq 1 ] && [ -n "${OPENCODE_FIRST_ATTEMPT_AGENT:-}" ]; then
 				agent="$OPENCODE_FIRST_ATTEMPT_AGENT"
 			fi
+			run_status=0
 			if run_one_model_attempt "$model_candidate" "$attempt" "$attempts" "$agent" "$prompt_file" "$candidate_output_file" "$opencode_json_file" "$opencode_export_file"; then
 				cp "$candidate_output_file" "$OPENCODE_OUTPUT_FILE"
 				record_review_model "$model_candidate"
 				record_review_status "success"
 				exit 0
+			else
+				run_status=$?
+			fi
+			if [ "$run_status" -eq 2 ]; then
+				break
 			fi
 			retry_sleep="$(backoff_sleep "$attempt")"
 			if [ $((SECONDS + retry_sleep)) -gt "$deadline" ]; then

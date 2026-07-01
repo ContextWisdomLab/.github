@@ -17,6 +17,8 @@ try:
         fetch_open_prs,
         fetch_pr,
         has_current_head_changes_requested,
+        is_opencode_review,
+        review_matches_current_head,
         run,
         unresolved_thread_count,
     )
@@ -25,6 +27,8 @@ except ModuleNotFoundError:
         fetch_open_prs,
         fetch_pr,
         has_current_head_changes_requested,
+        is_opencode_review,
+        review_matches_current_head,
         run,
         unresolved_thread_count,
     )
@@ -37,6 +41,20 @@ FIX_MARKER_RE = re.compile(
     r"head_sha=([0-9a-fA-F]{40}) epoch=([0-9]+) -->"
 )
 REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+NON_AUTOFIX_CHANGE_REQUEST_MARKERS = (
+    "merge conflict",
+    "mergestatestatus `dirty`",
+    "mergestatestatus dirty",
+    "model pool exhausted",
+    "could not establish approval sufficiency",
+    "unresolved human review thread",
+    "unresolved reviewer thread",
+    "unresolved reviewer or review-agent thread",
+    "failed check",
+    "failed-check",
+    "coverage-evidence",
+    "strix failed",
+)
 
 
 def run_json(args: list[str]) -> Any:
@@ -70,10 +88,33 @@ def same_repository_head(repo: str, pr: dict[str, Any]) -> bool:
     return ((pr.get("headRepository") or {}).get("nameWithOwner") or "") == repo
 
 
+def latest_current_head_opencode_review(pr: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the newest OpenCode review for the current head, if present."""
+    for review in reversed((pr.get("reviews") or {}).get("nodes") or []):
+        if is_opencode_review(review) and review_matches_current_head(review, pr):
+            return review
+    return None
+
+
+def change_request_is_autofixable(pr: dict[str, Any]) -> bool:
+    """Return whether the latest OpenCode request is safe for bot autofix."""
+    merge_state = str(pr.get("mergeStateStatus") or "").upper()
+    if merge_state and merge_state not in {"CLEAN", "HAS_HOOKS"}:
+        return False
+
+    review = latest_current_head_opencode_review(pr)
+    if review is None:
+        return False
+    body = str((review or {}).get("body") or "").lower()
+    if any(marker in body for marker in NON_AUTOFIX_CHANGE_REQUEST_MARKERS):
+        return False
+    return True
+
+
 def needs_autofix(pr: dict[str, Any]) -> tuple[bool, tuple[str, ...]]:
     """Return whether current-head evidence justifies an autofix attempt."""
     reasons: list[str] = []
-    if has_current_head_changes_requested(pr):
+    if has_current_head_changes_requested(pr) and change_request_is_autofixable(pr):
         reasons.append("current-head OpenCode requested changes")
     unresolved = unresolved_thread_count(pr)
     if unresolved:
@@ -260,11 +301,51 @@ def self_test() -> int:
     assert recent_fix_marker_exists(comments, head, 24 * 3600)
     assert not recent_fix_marker_exists(comments, "b" * 40, 24 * 3600)
     pr = {
-        "reviews": {"nodes": [{"state": "CHANGES_REQUESTED", "author": {"login": "opencode-agent"}, "commit": {"oid": head}}]},
+        "reviews": {
+            "nodes": [
+                {
+                    "state": "CHANGES_REQUESTED",
+                    "author": {"login": "opencode-agent"},
+                    "commit": {"oid": head},
+                    "body": "Actionable source-backed finding with a suggested diff.",
+                }
+            ]
+        },
         "reviewThreads": {"nodes": []},
         "headRefOid": head,
+        "mergeStateStatus": "CLEAN",
     }
     assert needs_autofix(pr) == (True, ("current-head OpenCode requested changes",))
+    dirty_pr = {**pr, "mergeStateStatus": "DIRTY"}
+    assert needs_autofix(dirty_pr) == (False, ())
+    model_exhausted_pr = {
+        **pr,
+        "reviews": {
+            "nodes": [
+                {
+                    "state": "CHANGES_REQUESTED",
+                    "author": {"login": "opencode-agent"},
+                    "commit": {"oid": head},
+                    "body": "OpenCode could not establish approval sufficiency because the model pool exhausted.",
+                }
+            ]
+        },
+    }
+    assert needs_autofix(model_exhausted_pr) == (False, ())
+    unresolved_thread_pr = {
+        **pr,
+        "reviews": {
+            "nodes": [
+                {
+                    "state": "CHANGES_REQUESTED",
+                    "author": {"login": "opencode-agent"},
+                    "commit": {"oid": head},
+                    "body": "OpenCode found unresolved reviewer or review-agent thread evidence before approval.",
+                }
+            ]
+        },
+    }
+    assert needs_autofix(unresolved_thread_pr) == (False, ())
     print("self-test passed")
     return 0
 
