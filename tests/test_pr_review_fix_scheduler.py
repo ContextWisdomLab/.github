@@ -19,6 +19,7 @@ def make_pr(**overrides):
         "headRefName": "feature",
         "headRefOid": "a" * 40,
         "headRepository": {"nameWithOwner": "owner/repo"},
+        "mergeStateStatus": "CLEAN",
         "reviews": {"nodes": []},
         "reviewThreads": {"nodes": []},
     }
@@ -44,7 +45,12 @@ def test_needs_autofix_uses_current_head_evidence():
         reviews={
             "nodes": [
                 {"state": "APPROVED", "author": {"login": "opencode-agent"}, "commit": {"oid": head}},
-                {"state": "CHANGES_REQUESTED", "author": {"login": "opencode-agent"}, "commit": {"oid": head}},
+                {
+                    "state": "CHANGES_REQUESTED",
+                    "author": {"login": "opencode-agent"},
+                    "commit": {"oid": head},
+                    "body": "Actionable source-backed finding with suggested diff.",
+                },
             ]
         },
         reviewThreads={"nodes": [{"id": "thread", "isResolved": False, "isOutdated": False}]},
@@ -54,6 +60,40 @@ def test_needs_autofix_uses_current_head_evidence():
         True,
         ("current-head OpenCode requested changes", "1 active unresolved review thread(s)"),
     )
+
+
+@pytest.mark.parametrize(
+    ("merge_state", "body"),
+    [
+        ("DIRTY", "Actionable source-backed finding with suggested diff."),
+        ("CONFLICTING", "Actionable source-backed finding with suggested diff."),
+        ("CLEAN", "OpenCode could not establish approval sufficiency because the model pool exhausted."),
+        ("CLEAN", "OpenCode found unresolved human review thread evidence before approval."),
+        ("CLEAN", "Failed-check evidence reports coverage-evidence failure."),
+    ],
+)
+def test_needs_autofix_suppresses_process_only_reviews(merge_state, body):
+    head = "a" * 40
+    pr = make_pr(
+        headRefOid=head,
+        mergeStateStatus=merge_state,
+        reviews={
+            "nodes": [
+                {
+                    "state": "CHANGES_REQUESTED",
+                    "author": {"login": "opencode-agent"},
+                    "commit": {"oid": head},
+                    "body": body,
+                },
+            ]
+        },
+    )
+
+    assert fix.needs_autofix(pr) == (False, ())
+
+
+def test_change_request_is_not_autofixable_without_review_evidence():
+    assert not fix.change_request_is_autofixable(make_pr())
 
 
 def test_process_queue_dispatches_same_repo_current_head(monkeypatch, capsys):
