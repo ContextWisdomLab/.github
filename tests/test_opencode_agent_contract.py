@@ -214,6 +214,8 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert 'OPENCODE_RUN_TIMEOUT_SECONDS: "240"' in workflow
     assert 'OPENCODE_EXPORT_TIMEOUT_SECONDS: "120"' in workflow
     assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "1200"' in workflow
+    assert 'jq -s "$jq_filter"' in workflow
+    assert '--slurp \\\n              --jq "$jq_filter"' not in workflow
     assert "${{ runner.temp }}/opencode-review-model-pool.md" in workflow
 
     strix_workflow = Path(".github/workflows/strix.yml").read_text(encoding="utf-8")
