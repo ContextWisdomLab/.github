@@ -161,7 +161,7 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "Supply-chain/license:" in workflow
     assert "Packaging:" in workflow
     assert 'gsub("`"; "\'")' not in workflow
-    assert 'gsub("`"; "\\\\u0027")' in workflow
+    assert 'gsub("`"; "&apos;")' in workflow
     assert '"code-reviewer"' in workflow
     assert workflow.count('"reasoningEffort": "high"') >= 10
     assert '"task": "allow"' in workflow
