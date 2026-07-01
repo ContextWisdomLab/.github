@@ -1,6 +1,12 @@
 import json
+import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
+import yaml
 
 
 def test_code_reviewer_subagent_contract_is_configured():
@@ -215,6 +221,33 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "DOM structure against CSS layout contracts" in prompt_template
     assert "formerly blank sections receive real data or deliberate empty states" in prompt_template
     assert "demo/visual-QA mode is isolated from production API behavior" in prompt_template
+
+
+def test_opencode_approval_gate_shell_is_parseable():
+    """Guard the large inline approval shell against YAML-valid syntax breaks."""
+    if os.name == "nt":
+        pytest.skip("bash syntax check runs in Linux CI")
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash is unavailable")
+
+    workflow = yaml.safe_load(Path(".github/workflows/opencode-review.yml").read_text(encoding="utf-8"))
+    approval_step = next(
+        step
+        for job in workflow["jobs"].values()
+        for step in job.get("steps", [])
+        if step.get("name") == "Approve PR if OpenCode review passed"
+    )
+
+    result = subprocess.run(
+        [bash, "-n"],
+        input=approval_step["run"],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
 
 
 def test_merge_scheduler_uses_escalating_mutation_credentials():
