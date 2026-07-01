@@ -255,6 +255,28 @@ def test_opencode_approval_gate_shell_is_parseable():
     assert result.returncode == 0, result.stderr
 
 
+def test_opencode_review_body_printf_blocks_close_on_separate_line():
+    """Guard approval-gate review body builders against runner bash parse failures."""
+    workflow = Path(".github/workflows/opencode-review.yml").read_text(encoding="utf-8")
+    risky_suffixes = (
+        'source finding.")"',
+        'has no blockers.")"',
+        '승인하지 않습니다.")"',
+        'Workflow attempt: ${RUN_ATTEMPT}")"',
+    )
+
+    for suffix in risky_suffixes:
+        assert suffix not in workflow
+
+
+def test_opencode_review_jq_blocks_do_not_embed_shell_single_quotes():
+    """Guard jq snippets wrapped in shell single quotes against bash parse failures."""
+    workflow = Path(".github/workflows/opencode-review.yml").read_text(encoding="utf-8")
+
+    assert 'gsub("`"; "\'")' not in workflow
+    assert 'gsub("`"; "")' in workflow
+
+
 def test_merge_scheduler_uses_escalating_mutation_credentials():
     """Guard immediate merge/update execution credentials for central scheduling."""
     workflow = Path(".github/workflows/pr-review-merge-scheduler.yml").read_text(
