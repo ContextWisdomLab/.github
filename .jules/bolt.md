@@ -10,7 +10,3 @@
 ## 2024-11-21 - Subprocess Memoization Optimization
 **Learning:** Shelling out to external commands like `git diff` inside a loop (or per-finding mapping) can severely bottleneck performance due to redundant child process overhead when evaluating multiple items tied to the same target resource (e.g. multiple findings in the same file).
 **Action:** When validating batch inputs (such as security findings) against shell commands grouped by path or target, use `@functools.cache` to memoize the subprocess execution function (`subprocess.run`), avoiding redundant executions on identical inputs.
-
-## 2026-06-25 - Avoid N+1 API blocking in PR checks
-**Learning:** In backend processing scripts, synchronous iterations calling an external service, such as fetching `restMergeableState` per PR, cause N+1 API bottlenecks and stall pipeline execution linearly. This matters for PR schedulers handling multiple PRs.
-**Action:** Use `concurrent.futures.ThreadPoolExecutor` for independent network calls in a loop, and bound `max_workers` to avoid API rate limits.

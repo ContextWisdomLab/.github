@@ -10,13 +10,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$({ CDPATH='' && cd -P -- "$(dirname -- "$0")" && pwd -P; })"
-DEFAULT_REPO_ROOT="$({ CDPATH='' && cd -P -- "$SCRIPT_DIR/../.." && pwd -P; })"
-RAW_REPO_ROOT="${STRIX_REPO_ROOT:-$DEFAULT_REPO_ROOT}"
-if [ -z "$RAW_REPO_ROOT" ] || [ ! -d "$RAW_REPO_ROOT" ] || [ -L "$RAW_REPO_ROOT" ]; then
-	echo "ERROR: STRIX_REPO_ROOT must reference a regular directory when provided." >&2
-	exit 2
-fi
-REPO_ROOT="$({ CDPATH='' && cd -P -- "$RAW_REPO_ROOT" && pwd -P; })"
+REPO_ROOT="$({ CDPATH='' && cd -P -- "$SCRIPT_DIR/../.." && pwd -P; })"
 RAW_TARGET_PATH="${STRIX_TARGET_PATH:-./}"
 TARGET_PATH=""
 PR_SCOPE_TARGET_SENTINEL="__PR_SCOPE__"
@@ -42,7 +36,6 @@ STRIX_TRANSIENT_RETRY_BACKOFF_SECONDS="${STRIX_TRANSIENT_RETRY_BACKOFF_SECONDS:-
 STRIX_FAIL_ON_MIN_SEVERITY="${STRIX_FAIL_ON_MIN_SEVERITY:-MEDIUM}"
 STRIX_FAIL_ON_PROVIDER_SIGNAL="${STRIX_FAIL_ON_PROVIDER_SIGNAL:-0}"
 RUN_START_EPOCH="$(date +%s)"
-TOTAL_TIMEOUT_EXCEEDED=0
 PREEXISTING_REPORT_DIRS=()
 REPO_NAME="${REPO_ROOT##*/}"
 # shellcheck source=scripts/ci/strix_model_utils.sh
@@ -2161,18 +2154,15 @@ run_strix_once() {
 	local child_model
 	local resolved_target_path
 	local timeout_seconds="$STRIX_PROCESS_TIMEOUT_SECONDS"
-	local total_budget_limited_timeout=0
 	if [ "$STRIX_TOTAL_TIMEOUT_SECONDS" -gt 0 ]; then
 		local remaining_budget
 		remaining_budget="$(remaining_total_budget)"
 		if [ "$remaining_budget" -le 0 ]; then
-			TOTAL_TIMEOUT_EXCEEDED=1
 			printf "Strix quick scan exceeded total timeout of %ss.\n" "$STRIX_TOTAL_TIMEOUT_SECONDS" | tee "$STRIX_LOG" >&2
 			return 1
 		fi
 		if [ "$timeout_seconds" -eq 0 ] || [ "$remaining_budget" -lt "$timeout_seconds" ]; then
 			timeout_seconds="$remaining_budget"
-			total_budget_limited_timeout=1
 		fi
 	fi
 	if ! llm_api_base_value="$(resolved_llm_api_base_for_model "$model")"; then
@@ -2300,7 +2290,6 @@ try:
         text=True,
         env=child_env,
         start_new_session=True,
-        shell=False,
     )
     output, _ = process.communicate(timeout=process_timeout)
     if output:
@@ -2337,10 +2326,6 @@ PY
 
 	if [ "$rc" -eq 124 ]; then
 		echo "Strix run timed out after ${timeout_seconds}s." | tee -a "$STRIX_LOG" >&2
-		if [ "$total_budget_limited_timeout" -eq 1 ]; then
-			TOTAL_TIMEOUT_EXCEEDED=1
-			printf "Strix quick scan exceeded total timeout of %ss.\n" "$STRIX_TOTAL_TIMEOUT_SECONDS" | tee -a "$STRIX_LOG" >&2
-		fi
 	fi
 
 	sanitize_known_strix_report_warnings "$ACTIVE_REPORTS_DIR" "${resolved_target_path%/}/strix_runs"
@@ -2443,16 +2428,12 @@ run_strix_with_transient_retry() {
 		if [ "$run_rc" -eq 2 ]; then
 			return 2
 		fi
-		if [ "$TOTAL_TIMEOUT_EXCEEDED" -eq 1 ]; then
-			return 1
-		fi
 
 		if [ "$attempt" -ge "$max_attempts" ]; then
 			return 1
 		fi
 
 		if [ "$STRIX_TOTAL_TIMEOUT_SECONDS" -gt 0 ] && [ "$(remaining_total_budget)" -le 0 ]; then
-			TOTAL_TIMEOUT_EXCEEDED=1
 			printf "Strix quick scan exceeded total timeout of %ss.\n" "$STRIX_TOTAL_TIMEOUT_SECONDS" | tee "$STRIX_LOG" >&2
 			return 1
 		fi
@@ -2613,15 +2594,6 @@ is_midstream_fallback_error() {
 # originated from an LLM provider rather than the target application.
 LLM_PROVIDER_ONLY_REGEX='(litellm|openai|anthropic|VertexAI|Vertex_ai|vertex\.ai|google\.cloud|GitHub Models|models\.github\.ai|github_models)'
 
-is_llm_token_limit_error() {
-	if grep -Eiq '(tokens_limit_reached|Request body too large|Max size:[[:space:]]*[0-9]+[[:space:]]+tokens|Error code:[[:space:]]*413|(^|[^0-9])413([^0-9]|$))' "$STRIX_LOG" &&
-		grep -Eiq "($LLM_PROVIDER_ONLY_REGEX|OpenAIException|openai\.APIStatusError)" "$STRIX_LOG"; then
-		return 0
-	fi
-
-	return 1
-}
-
 # Detect whether the strix log contains evidence of infrastructure-level
 # errors (timeout, rate-limit, transport failures) that indicate the scan
 # was interrupted or incomplete.  Used as a guard to prevent the
@@ -2636,10 +2608,6 @@ has_detected_infrastructure_error() {
 	fi
 
 	if is_rate_limit_error; then
-		return 0
-	fi
-
-	if is_llm_token_limit_error; then
 		return 0
 	fi
 
@@ -3324,10 +3292,6 @@ is_model_retryable_error() {
 		return 0
 	fi
 
-	if is_llm_token_limit_error; then
-		return 0
-	fi
-
 	if is_timeout_error; then
 		if provider_signal_fail_closed_enabled; then
 			return 1
@@ -3378,9 +3342,6 @@ run_current_target_scan() {
 	if [ "$primary_scan_rc" -eq 2 ]; then
 		return 2
 	fi
-	if [ "$TOTAL_TIMEOUT_EXCEEDED" -eq 1 ]; then
-		return 1
-	fi
 
 	local strict_primary_provider_fallback=0
 	if [ "$INFRA_ERROR_DETECTED" -eq 1 ] && provider_signal_fail_closed_enabled; then
@@ -3430,9 +3391,6 @@ run_current_target_scan() {
 				echo "Skipping fallback model '$candidate' — same as primary model." >&2
 			fi
 			continue
-		fi
-		if [ "$TOTAL_TIMEOUT_EXCEEDED" -eq 1 ]; then
-			return 1
 		fi
 
 		fallback_tried=1

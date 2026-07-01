@@ -193,18 +193,6 @@ emit_strix_vulnerability_evidence() {
 
 owner="${GH_REPOSITORY%%/*}"
 repo="${GH_REPOSITORY#*/}"
-pr_node_id="$(
-	gh api graphql \
-		-f owner="$owner" \
-		-f name="$repo" \
-		-F number="$PR_NUMBER" \
-		-f query='query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){id}}}' \
-		--jq '.data.repository.pullRequest.id // empty'
-)"
-if [ -z "$pr_node_id" ]; then
-	echo "failed to resolve pull request node id for ${GH_REPOSITORY}#${PR_NUMBER}" >&2
-	exit 1
-fi
 failed_contexts="$(mktemp)"
 workflow_run_contexts="$(mktemp)"
 active_failed_contexts="$(mktemp)"
@@ -263,9 +251,8 @@ gh api graphql \
 	-f owner="$owner" \
 	-f name="$repo" \
 	-F number="$PR_NUMBER" \
-	-f prId="$pr_node_id" \
 	-f query='
-		query($owner:String!,$name:String!,$number:Int!,$prId:ID!) {
+		query($owner:String!,$name:String!,$number:Int!) {
 			repository(owner:$owner,name:$name) {
 				pullRequest(number:$number) {
 					statusCheckRollup {
@@ -278,7 +265,6 @@ gh api graphql \
 									status
 									conclusion
 									detailsUrl
-									isRequired(pullRequestId: $prId)
 									checkSuite {
 										workflowRun {
 											databaseId
@@ -307,11 +293,8 @@ gh api graphql \
 				select((.status // "") == "COMPLETED")
 				| select((.conclusion // "" | ascii_upcase) as $c | ["FAILURE","TIMED_OUT","ACTION_REQUIRED","CANCELLED","STARTUP_FAILURE"] | index($c))
 				| select(((.conclusion // "" | ascii_downcase) == "cancelled" and (.name // "") == "metadata-only gate evaluation" and (.checkSuite.workflowRun.workflow.name // "") == "PR Governance") | not)
-				| select(((.conclusion // "" | ascii_downcase) == "cancelled" and ((.isRequired // false) | not) and (.checkSuite.workflowRun.workflow.name // "") == "CodeQL") | not)
-				| select(((.conclusion // "" | ascii_downcase) == "cancelled" and (.name // "") == "scan-pr-queue" and ((.checkSuite.workflowRun.workflow.name // "") == "PR Review Merge Scheduler" or (.checkSuite.workflowRun.workflow.name // "") == "Required PR Review Merge Scheduler")) | not)
 				| select((.name // "") != "opencode-review")
 				| select((.checkSuite.workflowRun.workflow.name // "") != "OpenCode Review")
-				| select((.checkSuite.workflowRun.workflow.name // "") != "Required OpenCode Review")
 				| select((.checkSuite.workflowRun.workflow.name // "") != "OpenCode PR Review")
 				| [
 					"check_run",
