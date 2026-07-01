@@ -51,11 +51,15 @@ then dispatches OpenCode for the same PR head when review evidence is missing or
 stale.
 This avoids running PR-head review, CodeGraph, coverage, or PoC code as an
 unbounded local workflow copy.
-Scheduled review-feedback autofix is different: GitHub required workflows do
-not provide the target repository's push-capable `GITHUB_TOKEN` to an
-organization-only scheduler. Repositories that allow bot autofix therefore keep
-a tiny caller/worker surface, but the queue decision logic lives in the central
-`PR Review Fix Scheduler` reusable workflow and script.
+Scheduled review-feedback autofix is also centralized. The
+`PR Review Fix Scheduler` dispatches the central `PR Review Autofix` worker in
+`ContextualWisdomLab/.github` and passes the target repository, PR number, base
+SHA, head ref, and head SHA as explicit inputs. The worker mutates only
+same-repository PR heads, rechecks the live head before checkout and before
+push, and commits as `github-actions[bot]` only when a conservative OpenCode
+autofix produces a validated diff. A repository-local autofix worker remains an
+explicit compatibility override through `--autofix-repository`; it is no longer
+the default contract.
 Strix keeps `cancel-in-progress: false` so old evidence is not cancelled by a
 force-push, but PR-scoped concurrency includes the head SHA so an obsolete scan
 does not serialize newer current-head evidence.

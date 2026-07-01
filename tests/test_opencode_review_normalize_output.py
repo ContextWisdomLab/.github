@@ -4,6 +4,7 @@ from scripts.ci import opencode_review_normalize_output as norm
 
 
 FULL_SUMMARY = """\
+Approval sufficiency: affirmative evidence supported approval beyond the absence of blockers.
 Verification posture: CodeGraph inspected scripts/ci/example.py on the current head.
 Linter/static: actionlint and bash -n passed.
 TDD/regression: pytest covered the changed behavior.
@@ -20,7 +21,11 @@ Compatibility/convention: compatibility and naming conventions were checked.
 Breaking-change/backcompat: no breaking change was found.
 Performance: performance risk was checked.
 Developer experience: developer workflow impact was checked.
-User experience: user-facing behavior impact was checked.
+User experience: user, operator, API, CLI, docs, status-check, and workflow-reader impact was checked.
+Visual/DOM: no web UI surface was present, so non-web interaction evidence was checked instead.
+Accessibility/i18n: accessibility and localization impact was checked.
+Supply-chain/license: supply-chain and license risk was checked.
+Packaging: package and build contracts were checked.
 Security/privacy: security impact was checked.
 """
 
@@ -125,6 +130,20 @@ def test_actual_changed_file_detection_prefers_current_head_file_list(tmp_path, 
     assert norm.mentions_actual_changed_file("scripts/ci/example.py", "")
 
 
+def test_preferred_review_language_handles_unreadable_and_unknown_evidence(tmp_path, monkeypatch):
+    evidence = tmp_path / "evidence.md"
+    evidence.write_text(
+        "## Review language evidence\nPreferred review language: `Spanish`\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_APPROVAL_REPAIR_EVIDENCE_FILE", str(evidence))
+
+    assert norm.preferred_review_language() is None
+
+    monkeypatch.setattr(norm, "read_text_lossy", lambda _path: None)
+    assert norm.preferred_review_language() is None
+
+
 def test_changed_file_kind_contradictions_are_rejected(tmp_path, monkeypatch):
     changed_files = tmp_path / "changed-files.txt"
     changed_files.write_text(
@@ -198,6 +217,96 @@ def test_changed_file_kind_contradictions_are_rejected(tmp_path, monkeypatch):
     assert not norm.contradicts_changed_file_kinds(approval["reason"], approval["summary"])
 
 
+def test_material_changed_file_scope_rejects_trivial_string_approval(tmp_path, monkeypatch):
+    changed_files = tmp_path / "changed-files.txt"
+    changed_files.write_text(
+        "\n".join(
+            [
+                ".github/workflows/strix.yml",
+                "scripts/ci/test_strix_quick_gate.sh",
+                "tests/test_opencode_agent_contract.py",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_CHANGED_FILES_FILE", str(changed_files))
+
+    summary = (
+        "Approval sufficiency: The change is a simple typo fix in a string with no functional impact. "
+        "Verification posture: No verification needed for a string typo fix. "
+        "Linter/static: The file was not checked by a linter but the change in a string is safe. "
+        "TDD/regression: No tests are needed for a string change.\n"
+        + FULL_SUMMARY.replace("scripts/ci/example.py", ".github/workflows/strix.yml")
+    )
+    approval = control(
+        reason="Typo fix with no functional impact",
+        summary=summary,
+    )
+
+    assert norm.changed_file_is_material(".github/workflows/strix.yml")
+    assert norm.changed_file_is_material("scripts/ci/test_strix_quick_gate.sh")
+    assert norm.changed_file_is_material("tests/test_opencode_agent_contract.py")
+    assert not norm.changed_file_is_material("README.md")
+    assert norm.contradicts_material_changed_file_scope(
+        approval["reason"],
+        approval["summary"],
+    )
+    assert norm.valid_control(
+        approval,
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    ) is None
+
+    path = tmp_path / "approval.json"
+    path.write_text(json.dumps(approval), encoding="utf-8")
+    assert norm.check_structural_approval(path) == 4
+
+    changed_files.write_text("README.md\n", encoding="utf-8")
+    assert not norm.contradicts_material_changed_file_scope(
+        approval["reason"],
+        approval["summary"],
+    )
+
+
+def test_material_changed_file_scope_rejects_false_documentation_typo_reason(tmp_path, monkeypatch):
+    changed_files = tmp_path / "changed-files.txt"
+    changed_files.write_text(
+        "\n".join(
+            [
+                ".github/workflows/opencode-review.yml",
+                "scripts/ci/run_opencode_review_model_pool.sh",
+                "tests/test_opencode_agent_contract.py",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_CHANGED_FILES_FILE", str(changed_files))
+
+    approval = control(
+        reason="Typo fix in documentation string",
+        summary=FULL_SUMMARY.replace(
+            "scripts/ci/example.py",
+            "scripts/ci/run_opencode_review_model_pool.sh",
+        ),
+    )
+
+    assert norm.contradicts_material_changed_file_scope(
+        approval["reason"],
+        approval["summary"],
+    )
+    assert norm.valid_control(
+        approval,
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    ) is None
+
+    path = tmp_path / "approval.json"
+    path.write_text(json.dumps(approval), encoding="utf-8")
+    assert norm.check_structural_approval(path) == 4
+
+
 def test_label_and_full_coverage_detection():
     combined = FULL_SUMMARY.casefold()
     assert "100%" in norm.label_section(combined, "coverage:")
@@ -261,6 +370,14 @@ def test_check_structural_approval_rejects_invalid_or_unsafe_approvals(tmp_path,
         control(reason="No source path", summary=FULL_SUMMARY.replace("scripts/ci/example.py", "source file")),
         control(summary="scripts/ci/example.py\nCoverage: coverage execution evidence proves 100%."),
         control(summary=FULL_SUMMARY.replace("100%", "99%", 1)),
+        control(
+            reason="scripts/ci/example.py checked.",
+            summary=(
+                FULL_SUMMARY
+                + "\nOpenCode model attempts did not emit a usable current-head control block, "
+                "so the approval gate used deterministic current-head evidence instead of model prose."
+            ),
+        ),
     ]
     for index, value in enumerate(cases):
         path = tmp_path / f"case-{index}.json"
@@ -324,6 +441,19 @@ def test_valid_control_filters_shape_head_and_review_contract():
     ) is None
     assert norm.valid_control(control(summary="scripts/ci/example.py"), **kwargs) is None
     assert norm.valid_control(control(summary=FULL_SUMMARY.replace("100%", "99%", 1)), **kwargs) is None
+    assert (
+        norm.valid_control(
+            control(
+                summary=(
+                    FULL_SUMMARY
+                    + "\nModel outcomes: primary=failed, fallback=failed, "
+                    "second_fallback=failed, catalog_fallback=failed."
+                )
+            ),
+            **kwargs,
+        )
+        is None
+    )
 
     request = control(result="REQUEST_CHANGES", findings=[finding()])
     assert norm.valid_control(dict(request, findings=["bad"]), **kwargs) is None
@@ -395,6 +525,7 @@ A\t.github/workflows/opencode-review.yml
     assert repaired is not None
     assert "scripts/ci/example.py" in repaired["summary"]
     assert "CodeGraph" in repaired["summary"]
+    assert "No blockers were found" not in repaired["summary"]
     assert norm.mentions_verification_posture(repaired["reason"], repaired["summary"])
     assert norm.mentions_full_coverage(repaired["reason"], repaired["summary"])
 
@@ -424,7 +555,77 @@ def test_valid_control_repairs_summary_from_invalid_utf8_evidence(tmp_path, monk
 
     assert repaired is not None
     assert "scripts/ci/opencode_review_normalize_output.py" in repaired["summary"]
+    assert "No blockers were found" not in repaired["summary"]
     assert norm.mentions_verification_posture(repaired["reason"], repaired["summary"])
+    assert norm.mentions_full_coverage(repaired["reason"], repaired["summary"])
+
+
+def test_valid_control_repairs_fragile_approval_reason_from_bounded_evidence(tmp_path, monkeypatch):
+    evidence = tmp_path / "bounded-review-evidence.md"
+    evidence.write_text(
+        """\
+# OpenCode bounded PR review evidence
+
+## Review language evidence
+
+- Preferred review language: `English`
+
+## Coverage execution evidence
+
+### Coverage measurement
+
+- Result: PASS
+- Reason: no supported changed source files or package manifests were found, so coverage measurement is not applicable for this head.
+
+## Coverage Decision
+
+- Result: PASS
+- Test coverage: not applicable (no supported changed source files or package manifests)
+- Docstring coverage: not applicable (no supported changed source files or package manifests)
+
+## Changed files
+
+M\t.github/workflows/r.yml
+
+## Changed file history evidence
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_EVIDENCE_FILE", str(evidence))
+    monkeypatch.delenv("OPENCODE_APPROVAL_REPAIR_EVIDENCE_FILE", raising=False)
+    changed_files = tmp_path / "changed-files.txt"
+    changed_files.write_text(".github/workflows/r.yml\n", encoding="utf-8")
+    monkeypatch.setenv("OPENCODE_CHANGED_FILES_FILE", str(changed_files))
+
+    repaired = norm.valid_control(
+        control(
+            reason="Dependency version bump with no source changes",
+            summary=(
+                "Approval sufficiency: Dependency version bump with no source changes. "
+                "Verification posture: No verification needed for workflow-only updates. "
+                "Linter/static: Not applicable. TDD/regression: Not applicable. "
+                "Coverage: Not applicable. Docstring coverage: Not applicable. "
+                "DAG: Not applicable. PoC/execution: Not applicable. "
+                "DDD/domain: Not applicable. CDD/context: Not applicable. "
+                "Similar issues: Not applicable. Claim/concept check: Not applicable. "
+                "Standards search: Not applicable. Compatibility/convention: Not applicable. "
+                "Breaking-change/backcompat: Not applicable. Performance: Not applicable. "
+                "Developer experience: Not applicable. User experience: Not applicable. "
+                "Visual/DOM: Not applicable. Accessibility/i18n: Not applicable. "
+                "Supply-chain/license: Not applicable. Packaging: Not applicable. "
+                "Security/privacy: Not applicable."
+            ),
+        ),
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    )
+
+    assert repaired is not None
+    assert ".github/workflows/r.yml" in repaired["reason"]
+    assert "no source changes" not in repaired["reason"].casefold()
+    assert "no verification needed" not in repaired["summary"].casefold()
+    assert norm.mentions_actual_changed_file(repaired["reason"], repaired["summary"])
     assert norm.mentions_full_coverage(repaired["reason"], repaired["summary"])
 
 
@@ -485,6 +686,7 @@ Security/privacy: Not applicable.
 
     assert repaired is not None
     assert "scripts/ci/opencode_review_normalize_output.py" in repaired["summary"]
+    assert "Not applicable." not in repaired["summary"]
     assert norm.mentions_full_coverage(repaired["reason"], repaired["summary"])
 
 
@@ -556,6 +758,60 @@ Security/privacy: Not applicable.
     assert not norm.contradicts_changed_file_kinds(repaired["reason"], repaired["summary"])
 
 
+def test_valid_control_repair_drops_material_trivialization(tmp_path, monkeypatch):
+    evidence = tmp_path / "bounded-review-evidence.md"
+    changed_files = tmp_path / "changed-files.txt"
+    evidence.write_text(
+        """\
+# OpenCode bounded PR review evidence
+
+## Coverage execution evidence
+
+# Coverage Evidence
+
+## Coverage Decision
+
+- Result: PASS
+- Test coverage: 100%
+- Docstring coverage: 100%
+
+## Changed files
+
+M\t.github/workflows/strix.yml
+M\tscripts/ci/test_strix_quick_gate.sh
+""",
+        encoding="utf-8",
+    )
+    changed_files.write_text(
+        ".github/workflows/strix.yml\nscripts/ci/test_strix_quick_gate.sh\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_APPROVAL_REPAIR_EVIDENCE_FILE", str(evidence))
+    monkeypatch.setenv("OPENCODE_CHANGED_FILES_FILE", str(changed_files))
+
+    repaired = norm.valid_control(
+        control(
+            reason="Current-head evidence was reviewed.",
+            summary=(
+                "The change is a simple typo fix in a string with no functional impact. "
+                "No tests are needed for a string change."
+            ),
+        ),
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    )
+
+    assert repaired is not None
+    assert ".github/workflows/strix.yml" in repaired["summary"]
+    assert "simple typo fix" not in repaired["summary"]
+    assert "no tests are needed" not in repaired["summary"].casefold()
+    assert not norm.contradicts_material_changed_file_scope(
+        repaired["reason"],
+        repaired["summary"],
+    )
+
+
 def test_valid_control_does_not_repair_unsafe_or_unproven_approval(tmp_path, monkeypatch):
     evidence = tmp_path / "bounded-review-evidence.md"
     evidence.write_text(
@@ -613,6 +869,18 @@ M\tREADME.md
         "scripts/ci/pr_review_merge_scheduler.py",
         "opencode.jsonc",
         "README.md",
+    ]
+    assert norm.changed_files_from_evidence(
+        """\
+## Changed files
+
+- .jules/sentinel.md
+- frontend/src/components/EmailDetail.test.tsx
+- [tree truncated after 5 paths]
+"""
+    ) == [
+        ".jules/sentinel.md",
+        "frontend/src/components/EmailDetail.test.tsx",
     ]
 
     summary = norm.build_approval_repair_summary(
@@ -678,6 +946,80 @@ M\tscripts/ci/example.py
 
     monkeypatch.setattr(norm.Path, "read_text", raise_for_evidence)
     assert norm.repair_approval_summary("reason", "summary") == "summary"
+
+
+def test_approval_language_contract_runs_after_evidence_repair(tmp_path, monkeypatch):
+    evidence = tmp_path / "bounded-review-evidence.md"
+    evidence.write_text(
+        """\
+## Review language evidence
+Preferred review language: `Korean`
+## Coverage execution evidence
+- Result: PASS
+- Test coverage: not applicable (no supported changed source files or package manifests)
+- Docstring coverage: not applicable (no supported changed source files or package manifests)
+## Changed files
+
+- .jules/sentinel.md
+- frontend/src/components/EmailDetail.test.tsx
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_APPROVAL_REPAIR_EVIDENCE_FILE", str(evidence))
+
+    reviewed = norm.valid_control(
+        control(
+            reason="Terminology alignment and test coverage improvements",
+            summary=(
+                "Approval sufficiency: Sufficient for terminology alignment. "
+                "Verification posture: Verified test changes. "
+                "Linter/static: No issues. TDD/regression: Tests updated. "
+                "Coverage: Not applicable. Docstring coverage: Not applicable. "
+                "DAG: Not applicable. PoC/execution: Tests pass. "
+                "DDD/domain: Aligned. CDD/context: Matched PR intent. "
+                "Similar issues: None. Claim/concept check: Verified. "
+                "Standards search: N/A. Compatibility/convention: Follows patterns. "
+                "Breaking-change/backcompat: None. Performance: No impact. "
+                "Developer experience: Improved tests. User experience: Consistent terminology. "
+                "Visual/DOM: No visual changes. Accessibility/i18n: Maintained. "
+                "Supply-chain/license: No changes. Packaging: No changes. Security/privacy: No impact."
+            ),
+        ),
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    )
+
+    assert reviewed is not None
+    assert "한국어 리뷰 언어 계약" in reviewed["summary"]
+    assert ".jules/sentinel.md" in reviewed["summary"]
+
+
+def test_request_changes_still_enforces_korean_language_contract(tmp_path, monkeypatch):
+    evidence = tmp_path / "bounded-review-evidence.md"
+    evidence.write_text(
+        """\
+## Review language evidence
+Preferred review language: `Korean`
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_APPROVAL_REPAIR_EVIDENCE_FILE", str(evidence))
+
+    assert (
+        norm.valid_control(
+            control(
+                result="REQUEST_CHANGES",
+                reason="Needs a fix",
+                summary="The review found a bug.",
+                findings=[finding()],
+            ),
+            expected_head_sha="head",
+            expected_run_id="run",
+            expected_run_attempt="attempt",
+        )
+        is None
+    )
 
 
 def test_iter_json_objects_extracts_raw_and_embedded_json():
@@ -778,6 +1120,39 @@ def test_main_normalizes_valid_output_and_reports_failures(tmp_path, capsys):
     )
     assert norm.main(["prog", "--check-structural-approval", str(generic_failed_check)]) == 4
     assert "non-actionable failed-check deflection" in capsys.readouterr().err
+
+
+def test_review_language_contract_rejects_english_only_korean_pr(tmp_path, monkeypatch, capsys):
+    evidence = tmp_path / "bounded-review-evidence.md"
+    evidence.write_text(
+        "## Review language evidence\n\n- Preferred review language: `Korean`\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OPENCODE_EVIDENCE_FILE", str(evidence))
+
+    assert norm.valid_control(
+        control(),
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    ) is None
+
+    korean_control = control(
+        reason="scripts/ci/example.py 검토 완료.",
+        summary=FULL_SUMMARY + "\n한국어 리뷰 문체를 유지했습니다.",
+    )
+    assert norm.valid_control(
+        korean_control,
+        expected_head_sha="head",
+        expected_run_id="run",
+        expected_run_attempt="attempt",
+    ) is not None
+
+    approval = tmp_path / "approval.json"
+    approval.write_text(json.dumps(control()), encoding="utf-8")
+    assert norm.main(["prog", "--check-structural-approval", str(approval)]) == 4
+    assert "preferred PR language" in capsys.readouterr().err
+
 
 def test_main_normalizes_and_escapes_html_markers(tmp_path):
     output = tmp_path / "opencode.txt"
