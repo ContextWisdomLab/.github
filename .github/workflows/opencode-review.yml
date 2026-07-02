@@ -2503,12 +2503,12 @@ jobs:
             if [ -z "$pr_json" ]; then
               return 0
             fi
-            merge_state="$(printf '%s' "$pr_json" | jq -r '.mergeStateStatus // ""')"
+            merge_state="$(printf '%s' "$pr_json" | jq -r '.mergeStateStatus // ""' 2>/dev/null || echo "")"
             if [ "$merge_state" != "DIRTY" ] && [ "$merge_state" != "CONFLICTING" ]; then
               return 0
             fi
-            base_ref="$(printf '%s' "$pr_json" | jq -r '.baseRefName // "base"')"
-            head_ref="$(printf '%s' "$pr_json" | jq -r '.headRefName // "head"')"
+            base_ref="$(printf '%s' "$pr_json" | jq -r '.baseRefName // "base"' 2>/dev/null || echo "base")"
+            head_ref="$(printf '%s' "$pr_json" | jq -r '.headRefName // "head"' 2>/dev/null || echo "head")"
             printf -v base_fetch_ref '%q' "$base_ref"
             printf -v base_origin_ref '%q' "origin/${base_ref}"
             printf -v head_push_ref '%q' "HEAD:${head_ref}"
@@ -2800,12 +2800,12 @@ jobs:
             if [ -z "$pr_json" ]; then
               return 0
             fi
-            merge_state="$(printf '%s' "$pr_json" | jq -r '.mergeStateStatus // ""')"
+            merge_state="$(printf '%s' "$pr_json" | jq -r '.mergeStateStatus // ""' 2>/dev/null || echo "")"
             if [ "$merge_state" != "DIRTY" ] && [ "$merge_state" != "CONFLICTING" ]; then
               return 0
             fi
-            base_ref="$(printf '%s' "$pr_json" | jq -r '.baseRefName // "base"')"
-            head_ref="$(printf '%s' "$pr_json" | jq -r '.headRefName // "head"')"
+            base_ref="$(printf '%s' "$pr_json" | jq -r '.baseRefName // "base"' 2>/dev/null || echo "base")"
+            head_ref="$(printf '%s' "$pr_json" | jq -r '.headRefName // "head"' 2>/dev/null || echo "head")"
             printf -v base_fetch_ref '%q' "$base_ref"
             printf -v base_origin_ref '%q' "origin/${base_ref}"
             printf -v head_push_ref '%q' "HEAD:${head_ref}"
@@ -2921,7 +2921,6 @@ jobs:
               rm -f "$gh_error_file" "$review_payload_file"
               update_review_overview "$event" "$body" || true
               printf '::warning::OpenCode could not publish the pull review for head %s, so the review state was not changed.\n' "$HEAD_SHA"
-              echo "::endgroup::"
               return 0
             fi
             rm -f "$gh_error_file" "$review_payload_file"
@@ -3228,7 +3227,7 @@ jobs:
               else
                 create_pull_review "REQUEST_CHANGES" "$body"
               fi
-              return $?
+              return 0
             fi
             rm -f "$gh_error_file"
             update_review_overview "$event" "$body"
@@ -3265,8 +3264,8 @@ jobs:
             local reason
             local findings
 
-            summary="$(jq -r '.summary // ""' "$control_json")"
-            reason="$(jq -r '.reason // ""' "$control_json")"
+            summary="$(jq -r '.summary // ""' "$control_json" 2>/dev/null || echo "")"
+            reason="$(jq -r '.reason // ""' "$control_json" 2>/dev/null || echo "")"
             findings="$(
               # shellcheck disable=SC2016
               jq -r '
@@ -4930,7 +4929,7 @@ jobs:
             gh api -X GET "repos/${GH_REPOSITORY}/issues/${PR_NUMBER}/comments" --paginate \
               --jq "[.[] | select((.user.login == \"github-actions[bot]\" or .user.login == \"opencode-agent[bot]\") and (.body | contains(\"${sentinel}\")))] | sort_by(.created_at) | last // {}"
           )"
-          comment_body="$(jq -r '.body // ""' <<<"$comment_json")"
+          comment_body="$(jq -r '.body // ""' <<<"$comment_json" 2>/dev/null || echo "")"
 
           tmp_body="$(mktemp)"
           control_json="$(mktemp)"
@@ -5090,8 +5089,8 @@ jobs:
                 echo "::endgroup::"
                 exit 0
               fi
-              summary="$(jq -r '.summary' "$control_json")"
-              reason="$(jq -r '.reason' "$control_json")"
+              summary="$(jq -r '.summary // ""' "$control_json" 2>/dev/null || echo "")"
+              reason="$(jq -r '.reason // ""' "$control_json" 2>/dev/null || echo "")"
               body="$(printf '%s\n' \
                 "## Pull request overview" \
                 "" \
