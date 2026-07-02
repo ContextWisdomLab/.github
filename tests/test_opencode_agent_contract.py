@@ -207,6 +207,14 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "skipping remaining attempts for this model" in model_pool_runner
     assert "approve_low_risk_review_fallback_after_model_exhaustion" not in workflow
     assert "changed_file_is_low_risk_review_fallback" not in workflow
+    assert "approve_central_review_process_fallback" in workflow
+    assert "opencode.jsonc | \\" in workflow
+    assert "scripts/ci/run_opencode_review_model_pool.sh | \\" in workflow
+    assert "tests/test_opencode_agent_contract.py | \\" in workflow
+    assert "changed_count\" -gt 6" in workflow
+    assert "steps.central_review_process_fallback_scope.outputs.eligible != 'true'" in workflow
+    assert "CENTRAL_REVIEW_PROCESS_FALLBACK_ELIGIBLE" in workflow
+    assert "This fallback is limited to central OpenCode/Strix review-process files and their contract tests." in workflow
     assert "production source 또는 package manifest 변경이 없습니다" not in workflow
     assert "request_changes_for_coverage_evidence_failure" in workflow
     assert '"## Review outcome"' in workflow

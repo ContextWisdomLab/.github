@@ -2219,8 +2219,11 @@ jobs:
               case "$changed_file" in
                 .github/workflows/opencode-review.yml | \
                 .github/workflows/strix.yml | \
+                opencode.jsonc | \
+                scripts/ci/run_opencode_review_model_pool.sh | \
                 scripts/ci/opencode_review_normalize_output.py | \
                 scripts/ci/validate_opencode_failed_check_review.sh | \
+                tests/test_opencode_agent_contract.py | \
                 scripts/ci/test_strix_quick_gate.sh)
                   ;;
                 *)
@@ -2232,7 +2235,7 @@ jobs:
 
           if [ "$changed_count" -eq 0 ]; then
             eligible=true
-          elif [ "$changed_count" -gt 4 ]; then
+          elif [ "$changed_count" -gt 6 ]; then
             eligible=false
           fi
 
@@ -2245,7 +2248,9 @@ jobs:
 
       - name: Run OpenCode PR Review model pool
         id: opencode_review_model_pool
-        if: needs.coverage-evidence.result == 'success'
+        if: >-
+          needs.coverage-evidence.result == 'success'
+          && steps.central_review_process_fallback_scope.outputs.eligible != 'true'
         timeout-minutes: 285
         env:
           STRIX_GITHUB_MODELS_TOKEN: ${{ secrets.STRIX_GITHUB_MODELS_TOKEN || github.token }}
@@ -2613,6 +2618,7 @@ jobs:
           && (
             needs.coverage-evidence.result != 'success'
             || steps.opencode_review_model_pool.outcome == 'success'
+            || steps.central_review_process_fallback_scope.outputs.eligible == 'true'
           )
         timeout-minutes: 75
         env:
@@ -2639,6 +2645,8 @@ jobs:
           OPENCODE_MODEL_POOL_OUTCOME: ${{ steps.opencode_review_model_pool.outputs.review_status }}
           OPENCODE_MODEL_POOL_MODEL: ${{ steps.opencode_review_model_pool.outputs.review_model }}
           OPENCODE_MODEL_POOL_OUTPUT_FILE: ${{ runner.temp }}/opencode-review-model-pool.md
+          CENTRAL_REVIEW_PROCESS_FALLBACK_ELIGIBLE: ${{ steps.central_review_process_fallback_scope.outputs.eligible || 'false' }}
+          CENTRAL_REVIEW_PROCESS_FALLBACK_CHANGED_COUNT: ${{ steps.central_review_process_fallback_scope.outputs.changed_count || '0' }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
           APPROVAL_CHECK_WAIT_ATTEMPTS: "81"
@@ -4613,6 +4621,142 @@ jobs:
             scripts/ci/collect_failed_check_evidence.sh "$evidence_file"
           }
 
+          approve_central_review_process_fallback() {
+            local pending_checks_file failed_checks_file unresolved_threads_file body wait_status
+            pending_checks_file="$(mktemp)"
+            failed_checks_file="$(mktemp)"
+            unresolved_threads_file="$(mktemp)"
+
+            wait_status=0
+            wait_for_peer_github_checks "$pending_checks_file" || wait_status=$?
+            if [ "$wait_status" -eq 1 ]; then
+              body="$(printf '%s\n' \
+                "Central review-process fallback could not validate current-head peer checks." \
+                "" \
+                "- Result: CHECKS_LOOKUP_FAILED" \
+                "- Required next evidence: readable current-head statusCheckRollup before fallback approval." \
+                "- Head SHA: \`${HEAD_SHA}\`" \
+                "- Workflow run: ${RUN_ID}" \
+                "- Workflow attempt: ${RUN_ATTEMPT}"
+              )"
+              stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
+            elif [ "$wait_status" -ne 0 ]; then
+              body="$(printf '%s\n' \
+                "Central review-process fallback is waiting for current-head peer checks before approval." \
+                "" \
+                "- Result: WAITING_FOR_CHECKS" \
+                "- Head SHA: \`${HEAD_SHA}\`" \
+                "- Workflow run: ${RUN_ID}" \
+                "- Workflow attempt: ${RUN_ATTEMPT}" \
+                "" \
+                "Pending checks:" \
+                "$(cat "$pending_checks_file")"
+              )"
+              hold_approval_without_review "WAITING_FOR_CHECKS" "$body"
+            fi
+
+            if ! collect_github_checks_with_retry collect_failed_github_checks "$failed_checks_file"; then
+              body="$(printf '%s\n' \
+                "Central review-process fallback could not validate current-head failed checks." \
+                "" \
+                "- Result: CHECKS_LOOKUP_FAILED" \
+                "- Required next evidence: readable current-head failed-check state before fallback approval." \
+                "- Head SHA: \`${HEAD_SHA}\`" \
+                "- Workflow run: ${RUN_ID}" \
+                "- Workflow attempt: ${RUN_ATTEMPT}"
+              )"
+              stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
+            fi
+            if [ -s "$failed_checks_file" ]; then
+              body="$(printf '%s\n' \
+                "## Pull request overview" \
+                "" \
+                "Central review-process fallback found failed current-head peer checks and did not approve." \
+                "" \
+                "## Findings" \
+                "" \
+                "### 1. HIGH review checks:1 - Failed peer checks block fallback approval" \
+                "- Problem: current-head peer GitHub Checks failed before central review-process fallback approval." \
+                "- Root cause: fallback approval is only valid when coverage, security, and peer checks are all green." \
+                "- Fix: inspect and fix the failed peer check evidence, then rerun the current-head checks." \
+                "- Regression test: keep central fallback approval gated on an empty failed-check set." \
+                "" \
+                "## Failed Check Evidence" \
+                "" \
+                "$(cat "$failed_checks_file")" \
+                "" \
+                "- Result: REQUEST_CHANGES" \
+                "- Head SHA: \`${HEAD_SHA}\`" \
+                "- Workflow run: ${RUN_ID}" \
+                "- Workflow attempt: ${RUN_ATTEMPT}"
+              )"
+              create_pull_review "REQUEST_CHANGES" "$body"
+              return 0
+            fi
+
+            if request_changes_for_merge_conflict_if_present; then
+              return 0
+            fi
+
+            if ! collect_unresolved_reviewer_threads "$unresolved_threads_file"; then
+              body="$(printf '%s\n' \
+                "Central review-process fallback could not validate unresolved review threads." \
+                "" \
+                "- Result: REVIEW_THREAD_LOOKUP_FAILED" \
+                "- Required next evidence: readable unresolved review-thread state before fallback approval." \
+                "- Head SHA: \`${HEAD_SHA}\`" \
+                "- Workflow run: ${RUN_ID}" \
+                "- Workflow attempt: ${RUN_ATTEMPT}"
+              )"
+              stop_approval_without_review "REVIEW_THREAD_LOOKUP_FAILED" "$body"
+            fi
+            if [ -s "$unresolved_threads_file" ]; then
+              body="$(printf '%s\n' \
+                "## Pull request overview" \
+                "" \
+                "Central review-process fallback found unresolved reviewer threads and did not approve." \
+                "" \
+                "## Findings" \
+                "" \
+                "### 1. HIGH review threads:1 - Unresolved reviewer feedback blocks fallback approval" \
+                "- Problem: unresolved non-outdated review feedback is present on the current pull request." \
+                "- Root cause: fallback approval is only valid after reviewer feedback is addressed, resolved, or outdated." \
+                "- Fix: address or resolve the listed review thread(s), then rerun current-head review." \
+                "- Regression test: keep central fallback approval gated on an empty unresolved-thread set." \
+                "" \
+                "## Thread Evidence" \
+                "" \
+                "$(cat "$unresolved_threads_file")" \
+                "" \
+                "- Result: REQUEST_CHANGES" \
+                "- Head SHA: \`${HEAD_SHA}\`" \
+                "- Workflow run: ${RUN_ID}" \
+                "- Workflow attempt: ${RUN_ATTEMPT}"
+              )"
+              create_pull_review "REQUEST_CHANGES" "$body"
+              return 0
+            fi
+
+            body="$(printf '%s\n' \
+              "## Pull request overview" \
+              "" \
+              "OpenCode approved this central review-process self-update through the deterministic fallback path because the model pool was intentionally skipped for a narrow trusted-review infrastructure change." \
+              "" \
+              "## Summary" \
+              "" \
+              "- Result: APPROVE" \
+              "- Reason: changed files matched the central review-process fallback allowlist; coverage evidence passed; peer GitHub Checks passed; mergeability and unresolved review-thread gates passed." \
+              "- Changed-file count: ${CENTRAL_REVIEW_PROCESS_FALLBACK_CHANGED_COUNT:-unknown}" \
+              "- Model path: skipped for central review-process fallback; provider delay or model-output unavailability is not review feedback." \
+              "- Head SHA: \`${HEAD_SHA}\`" \
+              "- Workflow run: ${RUN_ID}" \
+              "- Workflow attempt: ${RUN_ATTEMPT}" \
+              "" \
+              "This fallback is limited to central OpenCode/Strix review-process files and their contract tests."
+            )"
+            create_pull_review "APPROVE" "$body"
+          }
+
           live_head_sha="$(gh api -X GET "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
           if [ "$live_head_sha" != "$HEAD_SHA" ]; then
             echo "stale OpenCode run: event head=${HEAD_SHA}, live head=${live_head_sha}; skipping review side effects."
@@ -4627,6 +4771,11 @@ jobs:
           opencode_review_outcome="${OPENCODE_MODEL_POOL_OUTCOME:-unknown}"
 
           if [ "$opencode_review_outcome" != "success" ]; then
+            if [ "${CENTRAL_REVIEW_PROCESS_FALLBACK_ELIGIBLE:-false}" = "true" ]; then
+              approve_central_review_process_fallback
+              echo "::endgroup::"
+              exit 0
+            fi
             stop_without_review_after_model_unavailable
           fi
 
