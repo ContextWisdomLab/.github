@@ -78,6 +78,8 @@ def test_opencode_model_pool_sets_high_effort_for_capable_candidates():
 
     assert candidate_models
     assert set(candidate_models).issubset(set(models))
+    for model_name in candidate_models:
+        assert f'"{model_name}": {{' in workflow
 
     def is_reasoning_capable(model_name: str) -> bool:
         return (
