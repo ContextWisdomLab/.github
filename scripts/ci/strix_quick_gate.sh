@@ -1872,15 +1872,21 @@ vulnerability_record_intersects_changed_file() {
 	if [ "${diff_rc:-0}" -ne 0 ]; then
 		diff_output="$(git diff --unified=0 "$base_sha..$head_sha" -- "$changed_file" 2>/dev/null)" || return 0
 	fi
-	DIFF_OUTPUT="$diff_output" python3 - "$start_line" "$end_line" <<'PY'
+	local diff_output_file
+	diff_output_file="$(mktemp "${TMPDIR:-/tmp}/strix-diff.XXXXXX")" || return 0
+	printf '%s' "$diff_output" >"$diff_output_file"
+	python3 - "$diff_output_file" "$start_line" "$end_line" <<'PY'
 import os
 import re
 import sys
 
-target_start = int(sys.argv[1])
-target_end = int(sys.argv[2])
+diff_output_path = sys.argv[1]
+target_start = int(sys.argv[2])
+target_end = int(sys.argv[3])
 hunk_re = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
-for line in os.environ.get("DIFF_OUTPUT", "").splitlines():
+with open(diff_output_path, "r", encoding="utf-8") as handle:
+    diff_lines = handle.read().splitlines()
+for line in diff_lines:
     match = hunk_re.match(line)
     if not match:
         continue
@@ -1893,6 +1899,9 @@ for line in os.environ.get("DIFF_OUTPUT", "").splitlines():
         raise SystemExit(0)
 raise SystemExit(1)
 PY
+	local intersects_rc=$?
+	rm -f -- "$diff_output_file"
+	return "$intersects_rc"
 }
 
 extract_first_severity_rank() {
@@ -2584,6 +2593,11 @@ is_github_models_unavailable_model_error() {
 
 	if grep -Eiq '(PermissionDeniedError|Error code:[[:space:]]*403|(^|[^0-9])403([^0-9]|$))' "$STRIX_LOG" &&
 		grep -Eiq '(LLM CONNECTION FAILED|Could not establish connection to the language model)' "$STRIX_LOG" &&
+		grep -Eiq '(models\.github\.ai|GitHub Models|openai|OpenAIException)' "$STRIX_LOG"; then
+		return 0
+	fi
+
+	if grep -Eiq '(UnsupportedToolUse|tool use\. Using tool is not supported by this model|Using tool is not supported by this model)' "$STRIX_LOG" &&
 		grep -Eiq '(models\.github\.ai|GitHub Models|openai|OpenAIException)' "$STRIX_LOG"; then
 		return 0
 	fi
