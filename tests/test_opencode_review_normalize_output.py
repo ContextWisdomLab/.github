@@ -1082,7 +1082,17 @@ def test_main_normalizes_valid_output_and_reports_failures(tmp_path, capsys):
     output = tmp_path / "opencode.txt"
     output.write_text("prefix\n" + json.dumps(control()) + "\nsuffix", encoding="utf-8")
     assert norm.main(["prog", "head", "run", "attempt", str(output)]) == 0
-    assert "opencode-review-control-v1" in output.read_text(encoding="utf-8")
+    normalized_text = output.read_text(encoding="utf-8")
+    assert "opencode-review-control-v1" in normalized_text
+    assert "\\u003c" not in normalized_text
+
+    injection_output = tmp_path / "injection.txt"
+    injection_control = control()
+    injection_control["reason"] = "scripts/ci/example.py is source-backed. <script>alert(1)</script> & <!-- -->"
+    injection_output.write_text("prefix\n" + json.dumps(injection_control) + "\nsuffix", encoding="utf-8")
+    assert norm.main(["prog", "head", "run", "attempt", str(injection_output)]) == 0
+    normalized_injection_text = injection_output.read_text(encoding="utf-8")
+    assert "\\u003cscript\\u003ealert(1)\\u003c/script\\u003e \\u0026 \\u003c!-- --\\u003e" in normalized_injection_text
 
     invalid_utf8 = tmp_path / "invalid-utf8.txt"
     invalid_utf8.write_bytes(b"\xea invalid prefix\n" + json.dumps(control()).encode("utf-8"))
