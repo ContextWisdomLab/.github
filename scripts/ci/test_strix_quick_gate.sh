@@ -129,6 +129,7 @@ assert_strix_workflow_pr_trigger_hardened() {
 	assert_file_contains "$workflow_file" "TRUSTED_WORKSPACE=\$trusted_workspace" "strix workflow exports a trusted workspace path"
 	assert_file_contains "$workflow_file" "git -C \"\$TRUSTED_WORKSPACE\"" "strix workflow runs git only inside trusted workspace"
 	assert_file_contains "$workflow_file" 'working-directory: ${{ runner.temp }}/trusted-workspace' "strix workflow executes privileged steps from the trusted workspace"
+	assert_file_contains "$workflow_file" 'mkdir -p "$TRUSTED_WORKSPACE/scripts/ci"' "strix workflow creates the scheduler policy directory before materializing PR-head scheduler policy"
 	assert_file_contains "$workflow_file" "STRIX_REPO_ROOT:" "strix workflow passes target repository root to the central Strix gate"
 	assert_file_contains "$workflow_file" "bash \"\$TRUSTED_STRIX_REQUIRED_SMOKE\"" "strix workflow self-test executes bounded trusted smoke script"
 	assert_file_not_contains "$workflow_file" "bash \"\$TRUSTED_STRIX_GATE_TEST\"" "strix required path does not execute the full long-form gate harness"
