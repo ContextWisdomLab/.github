@@ -22,3 +22,7 @@
 **Vulnerability:** Server-Side Request Forgery (SSRF) / Local File Inclusion
 **Learning:** Functions that fetch URLs provided via user inputs (e.g., `wait_for_url` fetching `--backend-ready-url` in CI scripts) can inadvertently read local files if they do not validate the scheme. Python's `urllib.request.urlopen` supports `file://` schemes, allowing attackers to access arbitrary file contents from the host machine or sandbox if they can control the URL parameter.
 **Prevention:** Always validate URL inputs to restrict allowed schemes. Check that URLs explicitly start with `http://` or `https://` before fetching them with standard libraries like `urllib`.
+## 2026-06-30 - Prevent SSRF via Unvalidated URL Schemes in API Clients
+**Vulnerability:** Server-Side Request Forgery (SSRF) / Local File Inclusion
+**Learning:** API clients that load configuration from environment variables (e.g., `NOEMA_LLM_API_URL`) can be exploited if the environment is compromised or influenced by external input. `urllib.request.urlopen` supports `file://` schemes, which can allow arbitrary file reads if the URL scheme is not explicitly restricted.
+**Prevention:** Always validate URL schemes for API clients, even when sourced from environment variables. Ensure URLs explicitly start with `http://` or `https://` before making requests to prevent SSRF and local file inclusion.
