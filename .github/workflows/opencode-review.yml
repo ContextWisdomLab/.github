@@ -2920,9 +2920,9 @@ jobs:
               fi
               rm -f "$gh_error_file" "$review_payload_file"
               update_review_overview "$event" "$body" || true
-              printf '::error::OpenCode could not publish the pull review for head %s, so the review state was not changed.\n' "$HEAD_SHA"
+              printf '::warning::OpenCode could not publish the pull review for head %s, so the review state was not changed.\n' "$HEAD_SHA"
               echo "::endgroup::"
-              exit 1
+              return 0
             fi
             rm -f "$gh_error_file" "$review_payload_file"
             update_review_overview "$event" "$body"
@@ -3224,11 +3224,11 @@ jobs:
               warn_gh_publication_failure "pull review inline comments" "$gh_error_file"
               rm -f "$gh_error_file"
               if [ -s "$fallback_body_file" ]; then
-                update_review_overview "INLINE_COMMENT_PUBLISH_FAILED" "$(cat "$fallback_body_file")"
+                create_pull_review "REQUEST_CHANGES" "$(cat "$fallback_body_file")"
               else
-                update_review_overview "INLINE_COMMENT_PUBLISH_FAILED" "$body"
+                create_pull_review "REQUEST_CHANGES" "$body"
               fi
-              return 1
+              return $?
             fi
             rm -f "$gh_error_file"
             update_review_overview "$event" "$body"

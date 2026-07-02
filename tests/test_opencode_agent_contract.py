@@ -210,6 +210,7 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert '"## Review outcome"' in workflow
     assert '"## Check outcome"' not in workflow
     assert "publish REQUEST_CHANGES when coverage-evidence blocker states" in workflow
+    assert "INLINE_COMMENT_PUBLISH_FAILED" in workflow
     assert 'timeout-minutes: 75' in workflow
     assert re.search(r"Run OpenCode PR Review model pool[\s\S]{0,240}timeout-minutes: 20", workflow)
     assert 'APPROVAL_CHECK_WAIT_ATTEMPTS: "200"' in workflow
