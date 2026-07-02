@@ -1873,10 +1873,13 @@ vulnerability_record_intersects_changed_file() {
 		diff_output="$(git diff --unified=0 "$base_sha..$head_sha" -- "$changed_file" 2>/dev/null)" || return 0
 	fi
 	local diff_output_file
-	diff_output_file="$(mktemp "${TMPDIR:-/tmp}/strix-diff.XXXXXX")" || return 0
+	diff_output_file="$(mktemp "${TMPDIR:-/tmp}/strix-diff.XXXXXX")" || {
+		echo "ERROR: unable to create temporary diff file for changed-line evaluation." >&2
+		return 1
+	}
+	trap 'rm -f -- "$diff_output_file"' RETURN
 	printf '%s' "$diff_output" >"$diff_output_file"
 	python3 - "$diff_output_file" "$start_line" "$end_line" <<'PY'
-import os
 import re
 import sys
 
@@ -1885,23 +1888,21 @@ target_start = int(sys.argv[2])
 target_end = int(sys.argv[3])
 hunk_re = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 with open(diff_output_path, "r", encoding="utf-8") as handle:
-    diff_lines = handle.read().splitlines()
-for line in diff_lines:
-    match = hunk_re.match(line)
-    if not match:
-        continue
-    start = int(match.group(1))
-    count = int(match.group(2) or "1")
-    if count == 0:
-        continue
-    end = start + count - 1
-    if start <= target_end and target_start <= end:
-        raise SystemExit(0)
+    for raw_line in handle:
+        line = raw_line.rstrip("\n")
+        match = hunk_re.match(line)
+        if not match:
+            continue
+        start = int(match.group(1))
+        count = int(match.group(2) or "1")
+        if count == 0:
+            continue
+        end = start + count - 1
+        if start <= target_end and target_start <= end:
+            raise SystemExit(0)
 raise SystemExit(1)
 PY
-	local intersects_rc=$?
-	rm -f -- "$diff_output_file"
-	return "$intersects_rc"
+	return $?
 }
 
 extract_first_severity_rank() {
