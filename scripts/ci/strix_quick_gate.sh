@@ -2519,6 +2519,10 @@ is_rate_limit_error() {
 		return 0
 	fi
 
+	if grep -Fq 'Too many requests. For more on scraping GitHub' "$STRIX_LOG"; then
+		return 0
+	fi
+
 	# Bare HTTP 429 — require a provider marker so we don't misclassify
 	# target-application rate-limit responses as LLM provider errors.
 	if grep -Eq '(^|[^0-9])429([^0-9]|$)' "$STRIX_LOG" &&
