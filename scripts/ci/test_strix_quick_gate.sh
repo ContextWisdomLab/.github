@@ -7620,7 +7620,7 @@ run_gate_case "github-models-primary-unavailable-fallback-success" \
 	"openai/gpt-5" \
 	"" \
 	"0" \
-	"REGEX:Strix quick scan succeeded with fallback model 'o3' in [0-9]+s\\." \
+	"REGEX:Strix quick scan succeeded with fallback model 'openai/o3' in [0-9]+s\\." \
 	"2" \
 	"openai/gpt-5|openai/o3" \
 	"https://models.github.ai/inference|https://models.github.ai/inference" \
@@ -7650,7 +7650,7 @@ run_gate_case_allow_provider_signal "github-models-primary-denied-fallback-succe
 	"openai/gpt-5" \
 	"" \
 	"0" \
-	"REGEX:Strix quick scan succeeded with fallback model 'o3' in [0-9]+s\\." \
+	"REGEX:Strix quick scan succeeded with fallback model 'openai/o3' in [0-9]+s\\." \
 	"2" \
 	"openai/gpt-5|openai/o3" \
 	"https://models.github.ai/inference|https://models.github.ai/inference" \
@@ -7680,7 +7680,7 @@ run_gate_case "github-models-primary-ratelimit-fallback-success" \
 	"openai/gpt-5" \
 	"" \
 	"0" \
-	"REGEX:Strix quick scan succeeded with fallback model 'o3' in [0-9]+s\\." \
+	"REGEX:Strix quick scan succeeded with fallback model 'openai/o3' in [0-9]+s\\." \
 	"4" \
 	"openai/gpt-5|openai/gpt-5|openai/gpt-5|openai/o3" \
 	"https://models.github.ai/inference|https://models.github.ai/inference|https://models.github.ai/inference|https://models.github.ai/inference" \
@@ -7710,7 +7710,7 @@ run_gate_case "github-models-fallback-provider-signal-tries-next" \
 	"openai/gpt-5" \
 	"" \
 	"0" \
-	"REGEX:Strix quick scan succeeded with fallback model 'gpt-5-chat' in [0-9]+s\\." \
+	"REGEX:Strix quick scan succeeded with fallback model 'openai/gpt-5-chat' in [0-9]+s\\." \
 	"3" \
 	"openai/gpt-5|openai/o3|openai/gpt-5-chat" \
 	"https://models.github.ai/inference|https://models.github.ai/inference|https://models.github.ai/inference" \
