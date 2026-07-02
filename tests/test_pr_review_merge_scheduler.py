@@ -115,7 +115,18 @@ def test_run_split_repo_and_graphql(monkeypatch):
         sched.split_repo("/repo")
 
     assert sched.validate_git_ref("feature/safe.branch-1") == "feature/safe.branch-1"
-    for bad_ref in ("", "-bad", "feature/../main", "feature//main", "feature/main.", "feat;echo pwned"):
+    for bad_ref in (
+        "",
+        "-bad",
+        "HEAD",
+        "feature/../main",
+        "feature/.tmp/main",
+        "feature/./main",
+        "feature//main",
+        "feature/main.",
+        "feature/@{upstream}",
+        "feat;echo pwned",
+    ):
         with pytest.raises(ValueError):
             sched.validate_git_ref(bad_ref)
 
@@ -1042,6 +1053,8 @@ def test_run_command_failure_scrubs_secrets(monkeypatch):
 
 def test_actions_call_gh_with_expected_arguments(monkeypatch):
     calls = []
+    head_sha = "a" * 40
+    base_sha = "b" * 40
 
     def fake_run(args, stdin=None):
         calls.append(args)
@@ -1050,7 +1063,7 @@ def test_actions_call_gh_with_expected_arguments(monkeypatch):
         return ""
 
     monkeypatch.setattr(sched, "run", fake_run)
-    pr = make_pr(baseRefOid="b" * 40, headRefOid="a" * 40)
+    pr = make_pr(baseRefOid=base_sha, headRefOid=head_sha)
     sched.enable_auto_merge("owner/repo", pr, dry_run=True)
     sched.merge_pr("owner/repo", pr, dry_run=True)
     sched.disable_auto_merge("owner/repo", pr, dry_run=True)
@@ -1070,11 +1083,21 @@ def test_actions_call_gh_with_expected_arguments(monkeypatch):
     sched.dispatch_opencode_review("owner/repo", "OpenCode Review", pr, dry_run=False)
     assert calls[0][:4] == ["gh", "pr", "merge", "1"]
     assert "--squash" in calls[0]
-    assert calls[0][-2:] == ["--match-head-commit", "a" * 40]
-    assert calls[1] == ["gh", "pr", "merge", "1", "--repo", "owner/repo", "--squash", "--match-head-commit", "a" * 40]
+    assert calls[0][-2:] == ["--match-head-commit", head_sha]
+    assert calls[1] == [
+        "gh",
+        "pr",
+        "merge",
+        "1",
+        "--repo",
+        "owner/repo",
+        "--squash",
+        "--match-head-commit",
+        head_sha,
+    ]
     assert calls[2] == ["gh", "pr", "merge", "1", "--repo", "owner/repo", "--disable-auto"]
     assert calls[3][:4] == ["gh", "api", "-X", "PUT"]
-    assert calls[3][-1] == f"expected_head_sha={'a' * 40}"
+    assert calls[3][-1] == f"expected_head_sha={head_sha}"
     assert calls[4][:5] == ["gh", "workflow", "run", "Strix Security Scan", "--repo"]
     assert calls[5][:5] == ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs"]
     assert calls[6][:5] == ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs"]

@@ -476,11 +476,15 @@ def validate_git_ref(ref: str) -> str:
         not isinstance(ref, str)
         or not ref
         or not GIT_REF_RE.fullmatch(ref)
+        or ref == "HEAD"
         or ref.startswith("/")
         or ref.endswith(("/", "."))
+        or "@{" in ref
         or ".." in ref
         or "//" in ref
     ):
+        raise ValueError(f"invalid git ref: {ref!r}")
+    if any(part == "." or part.startswith(".") for part in ref.split("/")):
         raise ValueError(f"invalid git ref: {ref!r}")
     return ref
 
@@ -490,6 +494,15 @@ def validate_git_sha(sha: str) -> str:
     if not isinstance(sha, str) or not GIT_SHA_RE.fullmatch(sha):
         raise ValueError(f"invalid git sha: {sha!r}")
     return sha
+
+
+def validated_pr_dispatch_fields(pr: dict[str, Any]) -> tuple[str, str, str]:
+    """Return validated base ref, base SHA, and head SHA for workflow dispatch."""
+    return (
+        validate_git_ref(pr["baseRefName"]),
+        validate_git_sha(pr["baseRefOid"]),
+        validate_git_sha(pr["headRefOid"]),
+    )
 
 
 TRANSIENT_GITHUB_API_ERRORS = (
@@ -1378,9 +1391,7 @@ def dispatch_opencode_review(repo: str, workflow: str, pr: dict[str, Any], *, dr
         return
     if dry_run:
         return
-    base_ref = validate_git_ref(pr["baseRefName"])
-    base_sha = validate_git_sha(pr["baseRefOid"])
-    head_sha = validate_git_sha(pr["headRefOid"])
+    base_ref, base_sha, head_sha = validated_pr_dispatch_fields(pr)
     run_github_actions(
         [
             "gh",
@@ -1411,9 +1422,7 @@ def dispatch_strix_evidence(repo: str, workflow: str, pr: dict[str, Any], *, dry
         return
     if dry_run:
         return
-    base_ref = validate_git_ref(pr["baseRefName"])
-    base_sha = validate_git_sha(pr["baseRefOid"])
-    head_sha = validate_git_sha(pr["headRefOid"])
+    base_ref, base_sha, head_sha = validated_pr_dispatch_fields(pr)
     run_github_actions(
         [
             "gh",
