@@ -145,66 +145,94 @@ run_one_model_attempt() {
 }
 
 main() {
-	local attempts deadline now remaining model_candidate attempt safe_model prompt_file candidate_output_file
-	local opencode_json_file opencode_export_file agent retry_sleep original_run_timeout run_status
+	local attempts budget_seconds deadline now remaining model_candidate attempt safe_model prompt_file candidate_output_file
+	local opencode_json_file opencode_export_file agent retry_sleep original_run_timeout run_status cycle_sleep cycle
+	local -a model_candidates
 
 	attempts="${OPENCODE_MODEL_ATTEMPTS:-3}"
 	original_run_timeout="${OPENCODE_RUN_TIMEOUT_SECONDS:-900}"
-	deadline=$((SECONDS + ${OPENCODE_TOTAL_RETRY_BUDGET_SECONDS:-18000}))
+	budget_seconds="${OPENCODE_TOTAL_RETRY_BUDGET_SECONDS:-18000}"
+	deadline=0
+	if [ "$budget_seconds" -gt 0 ]; then
+		deadline=$((SECONDS + budget_seconds))
+	fi
 	: >"$OPENCODE_OUTPUT_FILE"
 	cd "$OPENCODE_REVIEW_WORKDIR"
+	read -r -a model_candidates <<<"${OPENCODE_MODEL_CANDIDATES:-}"
+	if [ "${#model_candidates[@]}" -eq 0 ]; then
+		printf 'OpenCode model pool has no configured model candidates.\n'
+		record_review_model ""
+		exit 1
+	fi
 
-	for model_candidate in $OPENCODE_MODEL_CANDIDATES; do
-		assert_reasoning_effort_for_candidate "$model_candidate"
-		safe_model="${model_candidate//\//-}"
-		prompt_file="${RUNNER_TEMP}/opencode-review-${safe_model}-prompt.md"
-		candidate_output_file="${RUNNER_TEMP}/opencode-review-${safe_model}.md"
-		opencode_json_file="${candidate_output_file}.jsonl"
-		opencode_export_file="${candidate_output_file}.session.json"
-		write_prompt "$model_candidate" "$prompt_file"
-		for attempt in $(seq 1 "$attempts"); do
-			now="$SECONDS"
-			if [ "$now" -ge "$deadline" ]; then
-				printf 'OpenCode model pool retry budget exhausted before %s attempt %s/%s.\n' "$model_candidate" "$attempt" "$attempts"
-				record_review_status "exhausted"
-				record_review_model ""
-				exit 0
-			fi
-			remaining=$((deadline - now))
-			OPENCODE_RUN_TIMEOUT_SECONDS="$original_run_timeout"
-			if [ "$OPENCODE_RUN_TIMEOUT_SECONDS" -gt "$remaining" ]; then
-				OPENCODE_RUN_TIMEOUT_SECONDS="$remaining"
-			fi
-			export OPENCODE_RUN_TIMEOUT_SECONDS
-			agent="${OPENCODE_AGENT:-ci-review-fallback}"
-			if [ "$attempt" -eq 1 ] && [ -n "${OPENCODE_FIRST_ATTEMPT_AGENT:-}" ]; then
-				agent="$OPENCODE_FIRST_ATTEMPT_AGENT"
-			fi
-			run_status=0
-			if run_one_model_attempt "$model_candidate" "$attempt" "$attempts" "$agent" "$prompt_file" "$candidate_output_file" "$opencode_json_file" "$opencode_export_file"; then
-				cp "$candidate_output_file" "$OPENCODE_OUTPUT_FILE"
-				record_review_model "$model_candidate"
-				record_review_status "success"
-				exit 0
-			else
-				run_status=$?
-			fi
-			if [ "$run_status" -eq 2 ]; then
-				break
-			fi
-			retry_sleep="$(backoff_sleep "$attempt")"
-			if [ $((SECONDS + retry_sleep)) -gt "$deadline" ]; then
-				retry_sleep=$((deadline - SECONDS))
-			fi
-			if [ "$retry_sleep" -gt 0 ]; then
-				printf 'Retrying OpenCode after exponential backoff of %ss.\n' "$retry_sleep"
-				sleep "$retry_sleep"
-			fi
+	cycle=1
+	while :; do
+		printf 'Starting OpenCode model pool cycle %s.\n' "$cycle"
+		for model_candidate in "${model_candidates[@]}"; do
+			assert_reasoning_effort_for_candidate "$model_candidate"
+			safe_model="${model_candidate//\//-}"
+			prompt_file="${RUNNER_TEMP}/opencode-review-${safe_model}-prompt.md"
+			candidate_output_file="${RUNNER_TEMP}/opencode-review-${safe_model}.md"
+			opencode_json_file="${candidate_output_file}.jsonl"
+			opencode_export_file="${candidate_output_file}.session.json"
+			write_prompt "$model_candidate" "$prompt_file"
+			for attempt in $(seq 1 "$attempts"); do
+				now="$SECONDS"
+				if [ "$deadline" -gt 0 ] && [ "$now" -ge "$deadline" ]; then
+					printf 'OpenCode model pool retry deadline elapsed before %s attempt %s/%s.\n' "$model_candidate" "$attempt" "$attempts"
+					record_review_model ""
+					exit 1
+				fi
+				remaining="$original_run_timeout"
+				if [ "$deadline" -gt 0 ]; then
+					remaining=$((deadline - now))
+				fi
+				OPENCODE_RUN_TIMEOUT_SECONDS="$original_run_timeout"
+				if [ "$deadline" -gt 0 ] && [ "$OPENCODE_RUN_TIMEOUT_SECONDS" -gt "$remaining" ]; then
+					OPENCODE_RUN_TIMEOUT_SECONDS="$remaining"
+				fi
+				export OPENCODE_RUN_TIMEOUT_SECONDS
+				agent="${OPENCODE_AGENT:-ci-review-fallback}"
+				if [ "$attempt" -eq 1 ] && [ -n "${OPENCODE_FIRST_ATTEMPT_AGENT:-}" ]; then
+					agent="$OPENCODE_FIRST_ATTEMPT_AGENT"
+				fi
+				run_status=0
+				if run_one_model_attempt "$model_candidate" "$attempt" "$attempts" "$agent" "$prompt_file" "$candidate_output_file" "$opencode_json_file" "$opencode_export_file"; then
+					cp "$candidate_output_file" "$OPENCODE_OUTPUT_FILE"
+					record_review_model "$model_candidate"
+					record_review_status "success"
+					exit 0
+				else
+					run_status=$?
+				fi
+				if [ "$run_status" -eq 2 ]; then
+					break
+				fi
+				retry_sleep="$(backoff_sleep "$attempt")"
+				if [ "$deadline" -gt 0 ] && [ $((SECONDS + retry_sleep)) -gt "$deadline" ]; then
+					retry_sleep=$((deadline - SECONDS))
+				fi
+				if [ "$retry_sleep" -gt 0 ]; then
+					printf 'Retrying OpenCode after exponential backoff of %ss.\n' "$retry_sleep"
+					sleep "$retry_sleep"
+				fi
+			done
 		done
-	done
 
-	record_review_status "exhausted"
-	record_review_model ""
+		printf 'OpenCode completed a full model-candidate cycle without a valid control conclusion; continuing until a model succeeds or the GitHub Actions job timeout is reached.\n'
+		cycle_sleep="${OPENCODE_POOL_CYCLE_SLEEP_SECONDS:-60}"
+		if [ "$deadline" -gt 0 ] && [ $((SECONDS + cycle_sleep)) -gt "$deadline" ]; then
+			cycle_sleep=$((deadline - SECONDS))
+			if [ "$cycle_sleep" -le 0 ]; then
+				printf 'OpenCode model pool retry deadline elapsed after cycle %s.\n' "$cycle"
+				record_review_model ""
+				exit 1
+			fi
+		fi
+		printf 'Restarting OpenCode model pool after %ss.\n' "$cycle_sleep"
+		sleep "$cycle_sleep"
+		cycle=$((cycle + 1))
+	done
 }
 
 main "$@"
