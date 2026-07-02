@@ -1609,10 +1609,12 @@ EOF
 assert_opencode_review_gate_rejects_non_source_backed_findings() {
 	local tmp_dir
 	local output_file
+	local stderr_file
 	local rc
 	local gate_result
 	tmp_dir="$(mktemp -d)"
 	output_file="$tmp_dir/opencode-output.md"
+	stderr_file="$tmp_dir/gate.err"
 
 	cat >"$output_file" <<'EOF'
 <!-- opencode-review-gate head_sha=abc123 run_id=42 run_attempt=1 -->
@@ -1625,13 +1627,14 @@ EOF
 	set +e
 	gate_result="$(
 		bash "$REPO_ROOT/scripts/ci/opencode_review_approve_gate.sh" \
-			"abc123" "42" "1" "$output_file"
+			"abc123" "42" "1" "$output_file" 2>"$stderr_file"
 	)"
 	rc=$?
 	set -e
 
 	assert_equals "4" "$rc" "opencode approval gate rejects non-source-backed findings"
 	assert_equals "NO_CONCLUSION" "$gate_result" "non-source-backed finding rejection gate result"
+	assert_file_contains "$stderr_file" "REQUEST_CHANGES finding is not source-backed by the current-head diff" "non-source-backed finding rejection explains the invalid model result"
 
 	rm -rf "$tmp_dir"
 }
