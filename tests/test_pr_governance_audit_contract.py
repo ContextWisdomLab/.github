@@ -16,8 +16,8 @@ def test_html4tree_public_fork_queue_requires_central_review_gate():
     assert "do not bypass the review gate" in audit
 
 
-def test_afipc_queue_has_central_required_workflow_evidence():
-    """Guard the closed aFIPC central required-workflow fixture."""
+def test_afipc_queue_requires_central_required_workflow_evidence():
+    """Guard the aFIPC central required-workflow coverage gap."""
     audit = Path("PR_GOVERNANCE_AUDIT.md").read_text(encoding="utf-8")
     rollout = Path("docs/org-required-workflow-rollout.md").read_text(
         encoding="utf-8"
@@ -26,24 +26,6 @@ def test_afipc_queue_has_central_required_workflow_evidence():
     assert "aFIPC" in audit
     assert "aFIPC" in rollout
     assert "PR #78" in audit
-    assert "PR `#78` is no longer a target-coverage gap" in rollout
-    assert "closed target-coverage fixture" in audit
-    assert "b1ddafced86302f461e95259699f1efde5ec87c9" in audit
-
-
-def test_new_public_nonfork_repos_are_classified_in_rollout_inventory():
-    """Guard newly discovered public non-fork repository classification."""
-    audit = Path("PR_GOVERNANCE_AUDIT.md").read_text(encoding="utf-8")
-    rollout = Path("docs/org-required-workflow-rollout.md").read_text(
-        encoding="utf-8"
-    )
-
-    for document in (audit, rollout):
-        assert "17 public non-fork repositories" in document
-        assert "kaefa" in document
-        assert "waf-ids-ai-soc" in document
-
-    assert "current PR #60 lacked central check runs" in rollout
-    assert "runtime proof gap" in audit
-    assert "PR #6 shows central required workflow runs" in rollout
-    assert "43b62b5f347d1532c81b5ae38d8e41b4494fd486" in audit
+    assert "PR `#78` lacks inherited OpenCode, Strix, and scheduler" in rollout
+    assert "zero approving reviews" in audit
+    assert "must not be merged until organization required-workflow evidence exists" in audit
