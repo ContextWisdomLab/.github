@@ -823,7 +823,7 @@ jobs:
     needs: [coverage-evidence]
     if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target')
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 360
     permissions:
       actions: write
       checks: read
@@ -2238,8 +2238,7 @@ jobs:
       - name: Run OpenCode PR Review model pool
         id: opencode_review_model_pool
         if: needs.coverage-evidence.result == 'success'
-        continue-on-error: true
-        timeout-minutes: 20
+        timeout-minutes: 330
         env:
           STRIX_GITHUB_MODELS_TOKEN: ${{ secrets.STRIX_GITHUB_MODELS_TOKEN || github.token }}
           GITHUB_TOKEN: ${{ secrets.STRIX_GITHUB_MODELS_TOKEN || github.token }}
@@ -2247,11 +2246,11 @@ jobs:
           SHARE: "false"
           NPM_CONFIG_IGNORE_SCRIPTS: "true"
           NO_COLOR: "1"
-          OPENCODE_MODEL_CANDIDATES: "github-models/openai/gpt-5-nano"
+          OPENCODE_MODEL_CANDIDATES: "github-models/openai/gpt-5-chat github-models/openai/gpt-5-mini github-models/openai/gpt-5-nano github-models/openai/o3 github-models/openai/o3-mini github-models/openai/o4-mini github-models/mistral-ai/mistral-medium-2505 github-models/meta/llama-4-maverick-17b-128e-instruct-fp8 github-models/meta/llama-4-scout-17b-16e-instruct"
           OPENCODE_MODEL_ATTEMPTS: "1"
-          OPENCODE_RUN_TIMEOUT_SECONDS: "240"
+          OPENCODE_RUN_TIMEOUT_SECONDS: "600"
           OPENCODE_EXPORT_TIMEOUT_SECONDS: "120"
-          OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "360"
+          OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "0"
           OPENCODE_BACKOFF_INITIAL_SECONDS: "30"
           OPENCODE_BACKOFF_MAX_SECONDS: "30"
           OPENCODE_FIRST_ATTEMPT_AGENT: ci-review
@@ -2601,7 +2600,12 @@ jobs:
           fi
 
       - name: Approve PR if OpenCode review passed
-        if: always()
+        if: >-
+          always()
+          && (
+            needs.coverage-evidence.result != 'success'
+            || steps.opencode_review_model_pool.outcome == 'success'
+          )
         timeout-minutes: 75
         env:
           GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || steps.opencode_app_token.outputs.token || github.token }}
@@ -4518,204 +4522,20 @@ jobs:
             return 2
           }
 
-          request_changes_after_model_exhaustion() {
-            local pending_file="$1"
-            local failed_file="$2"
-            local unresolved_threads_file="$3"
-            local reviewer_thread_body_file="$4"
-            local wait_status=0
-            local changed_files_summary body first_line_file first_path first_line
-            local payload_file inline_failure_body_file
-
-            wait_for_peer_github_checks "$pending_file" || wait_status=$?
-            if [ "$wait_status" -eq 1 ]; then
-              if app_token_limited_check_lookup; then
-                echo "GitHub Checks statusCheckRollup lookup is unavailable to the OpenCode app token before model-failure hold; branch protection remains authoritative for target-repository checks."
-                : >"$pending_file"
-                wait_status=0
-              else
-              body="$(printf '%s\n' \
-                "OpenCode could not validate model-failure hold because current-head checks were unavailable." \
-                "" \
-                "- Result: CHECKS_LOOKUP_FAILED" \
-                "- Reason: GitHub Checks statusCheckRollup could not be read after all model attempts failed." \
-                "- Required next evidence: readable current-head statusCheckRollup plus a rerun of the OpenCode approval gate." \
-                "- Head SHA: \`${HEAD_SHA}\`" \
-                "- Workflow run: ${RUN_ID}" \
-                "- Workflow attempt: ${RUN_ATTEMPT}" \
-                "" \
-                "No PR review was posted because check lookup failure is a review-tool state, not a source finding."
-              )"
-              stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
-              fi
-            elif [ "$wait_status" -eq 2 ]; then
-              build_pending_check_body "$pending_file" "$reviewer_thread_body_file"
-              stop_approval_without_review "WAITING_FOR_CHECKS" "$(cat "$reviewer_thread_body_file")"
-            fi
-
-            if ! collect_github_checks_with_retry collect_failed_github_checks "$failed_file"; then
-              if app_token_limited_check_lookup; then
-                echo "GitHub failed-check lookup is unavailable to the OpenCode app token before model-failure hold; branch protection remains authoritative for target-repository checks."
-                : >"$failed_file"
-              else
-              body="$(printf '%s\n' \
-                "OpenCode could not validate model-failure hold because current-head failed checks were unavailable." \
-                "" \
-                "- Result: CHECKS_LOOKUP_FAILED" \
-                "- Reason: GitHub Checks statusCheckRollup could not be read after peer checks completed." \
-                "- Required next evidence: readable current-head statusCheckRollup plus a rerun of the OpenCode approval gate." \
-                "- Head SHA: \`${HEAD_SHA}\`" \
-                "- Workflow run: ${RUN_ID}" \
-                "- Workflow attempt: ${RUN_ATTEMPT}" \
-                "" \
-                "No PR review was posted because check lookup failure is a review-tool state, not a source finding."
-              )"
-              stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
-              fi
-            fi
-            if [ -s "$failed_file" ]; then
-              local failed_check_evidence_file failed_check_review_body_file failed_check_review_payload_file failed_check_inline_failure_body_file
-              failed_check_evidence_file="$(mktemp)"
-              failed_check_review_body_file="$(mktemp)"
-              failed_check_review_payload_file="$(mktemp)"
-              failed_check_inline_failure_body_file="$(mktemp)"
-              if ! collect_failed_check_evidence_or_note "$failed_check_evidence_file"; then
-                printf "Failed GitHub Check evidence could not be collected for current head \`%s\`.\n" "$HEAD_SHA" >"$failed_check_evidence_file"
-              fi
-
-              if self_healed_strix_dependency_base_failure "$failed_check_evidence_file"; then
-                echo "Ignoring trusted-base Strix protobuf resolver failure because current head updates requirements-strix-ci-hashes.txt away from protobuf==7.35.1."
-                : >"$failed_file"
-                rm -f "$failed_check_evidence_file" "$failed_check_review_body_file" "$failed_check_review_payload_file" "$failed_check_inline_failure_body_file"
-              else
-              if leave_review_unchanged_for_self_modifying_strix_if_present "$failed_check_evidence_file"; then
-                return 1
-              fi
-
-              if comment_for_billing_lock_if_present "$failed_file" "$failed_check_evidence_file" "$failed_check_review_body_file"; then
-                return 0
-              fi
-
-              if run_failed_check_diagnosis "$failed_file" "$failed_check_evidence_file" "$failed_check_review_body_file" "$failed_check_review_payload_file" "$failed_check_inline_failure_body_file"; then
-                create_pull_review_with_payload "REQUEST_CHANGES" "$(cat "$failed_check_review_body_file")" "$failed_check_review_payload_file" "$failed_check_inline_failure_body_file"
-              elif build_failed_check_fallback_body "$failed_file" "$failed_check_evidence_file" "$failed_check_review_body_file"; then
-                create_pull_review "REQUEST_CHANGES" "$(cat "$failed_check_review_body_file")"
-              else
-                stop_failed_check_fallback_unavailable
-              fi
-              return 0
-              fi
-            fi
-
-            if request_changes_for_merge_conflict_if_present; then
-              return 0
-            fi
-
-            if ! collect_unresolved_reviewer_threads "$unresolved_threads_file"; then
-              build_reviewer_thread_lookup_failure_body "$reviewer_thread_body_file"
-              create_pull_review "REQUEST_CHANGES" "$(cat "$reviewer_thread_body_file")"
-              return 0
-            fi
-            if [ -s "$unresolved_threads_file" ]; then
-              build_unresolved_reviewer_threads_body "$unresolved_threads_file" "$reviewer_thread_body_file"
-              create_pull_review "REQUEST_CHANGES" "$(cat "$reviewer_thread_body_file")"
-              return 0
-            fi
-
-            if [ -s "${OPENCODE_CHANGED_FILES_FILE:-}" ]; then
-              changed_files_summary="$(
-                sed -n '1,8p' "$OPENCODE_CHANGED_FILES_FILE" |
-                  awk 'BEGIN { first=1 } { if (!first) printf ", "; printf "%s", $0; first=0 }'
-              )"
-            else
-              changed_files_summary="bounded current-head evidence"
-            fi
-            if [ -z "$changed_files_summary" ]; then
-              changed_files_summary="bounded current-head evidence"
-            fi
-
-            first_line_file="$(mktemp)"
-            if gh pr diff "$PR_NUMBER" --repo "$GH_REPOSITORY" --patch 2>/dev/null |
-              awk '
-                /^\+\+\+ b\// { path = substr($0, 7); next }
-                /^@@ / {
-                  if (match($0, /\+[0-9]+/)) {
-                    new_line = substr($0, RSTART + 1, RLENGTH - 1) - 1
-                    in_hunk = 1
-                  }
-                  next
-                }
-                in_hunk && /^\+/ && !/^\+\+\+/ {
-                  new_line++
-                  print path "\t" new_line
-                  exit
-                }
-                in_hunk && /^ / {
-                  new_line++
-                  next
-                }
-              ' >"$first_line_file" && [ -s "$first_line_file" ]; then
-              first_path="$(cut -f1 "$first_line_file" | head -n 1)"
-              first_line="$(cut -f2 "$first_line_file" | head -n 1)"
-            else
-              first_path=""
-              first_line=""
-            fi
-
+          stop_without_review_after_model_unavailable() {
+            local body
             body="$(printf '%s\n' \
-              "## Pull request overview" \
+              "OpenCode model pool did not produce a successful current-head control block before the model-pool step ended." \
               "" \
-              "OpenCode exhausted the configured model pool without a usable current-head review conclusion. This is not approval evidence, so the PR is blocked until a source-backed review can establish approval sufficiency or identify concrete fixes." \
-              "" \
-              "## Findings" \
-              "" \
-              "### 1. HIGH ${first_path:-review evidence}:1 - OpenCode could not establish approval sufficiency" \
-              "- Problem: every configured model path failed to produce a usable current-head control block." \
-              "- Root cause: model execution, timeout, export, normalization, or approval-gate validation did not complete after exponential retry across the configured model pool." \
-              "- Impact: approving from deterministic check state alone would miss PR-intent mismatches, missing files, edge-case bugs, robustness gaps, UX/DX regressions, security issues, and CodeGraph-backed base/head flow changes." \
-              "- Fix: rerun OpenCode after model availability recovers, or update the PR with the missing files, tests, docs, generated artifacts, and verification evidence needed for a source-backed review conclusion." \
-              "- Regression test: keep the approval gate posting REQUEST_CHANGES, not APPROVE or check-only failure, when no model produces a valid current-head review." \
-              "" \
-              "## Summary" \
-              "" \
-              "- Result: REQUEST_CHANGES" \
-              "- Reason: coverage-evidence passed and peer GitHub Checks completed without failures, but no model produced a valid review control block." \
-              "- Deterministic evidence checked but not used for approval: current-head changed-file evidence (${changed_files_summary}); coverage-evidence result ${COVERAGE_EVIDENCE_RESULT:-unknown}; peer checks from statusCheckRollup excluding this OpenCode check." \
-              "- Model outcome: model_pool=${OPENCODE_MODEL_POOL_OUTCOME:-unknown}; selected_model=${OPENCODE_MODEL_POOL_MODEL:-none}." \
+              "- Result: MODEL_OUTPUT_UNAVAILABLE" \
+              "- Required next evidence: the model pool must keep retrying until it emits APPROVE or source-backed REQUEST_CHANGES." \
               "- Head SHA: \`${HEAD_SHA}\`" \
               "- Workflow run: ${RUN_ID}" \
               "- Workflow attempt: ${RUN_ATTEMPT}" \
               "" \
-              "No PR approval was posted because model-output failure is not evidence that the PR has no blockers."
+              "No pull request review was posted because provider delay or model-output unavailability is not review feedback."
             )"
-            if [ -n "$first_path" ] && [ -n "$first_line" ]; then
-              payload_file="$(mktemp)"
-              inline_failure_body_file="$(mktemp)"
-              jq -n \
-                --arg body "$body" \
-                --arg commit_id "$HEAD_SHA" \
-                --arg path "$first_path" \
-                --argjson line "$first_line" \
-                '{
-                  event: "REQUEST_CHANGES",
-                  body: $body,
-                  commit_id: $commit_id,
-                  comments: [{
-                    path: $path,
-                    line: $line,
-                    side: "RIGHT",
-                    body: "### HIGH OpenCode could not establish approval sufficiency\n\n- Problem: the model pool exhausted without a valid current-head review control block, so this changed line cannot be approved from deterministic check state alone.\n- Impact: PR-intent mismatches, missing files, robustness bugs, UX/DX regressions, and CodeGraph-backed flow changes could be missed.\n- Fix: rerun OpenCode after model availability recovers, or add the missing source/test/docs/generated verification evidence needed for a source-backed approval.\n- Verification: rerun the OpenCode Review workflow and confirm it emits APPROVE or source-backed REQUEST_CHANGES for this head SHA."
-                  }]
-                }' >"$payload_file"
-              printf '%s\n' "$body" >"$inline_failure_body_file"
-              create_pull_review_with_payload "REQUEST_CHANGES" "$body" "$payload_file" "$inline_failure_body_file"
-              rm -f "$payload_file" "$inline_failure_body_file" "$first_line_file"
-            else
-              body="$(printf '%s\n\n%s\n' "$body" "Inline comment note: OpenCode could not find an added RIGHT-side diff line for this PR, so the model-exhaustion blocker is attached to the PR review body instead of a file line.")"
-              create_pull_review "REQUEST_CHANGES" "$body"
-              rm -f "$first_line_file"
-            fi
-            return 0
+            stop_approval_without_review "MODEL_OUTPUT_UNAVAILABLE" "$body"
           }
 
                     request_changes_for_merge_conflict_if_present() {
@@ -4799,102 +4619,7 @@ jobs:
           opencode_review_outcome="${OPENCODE_MODEL_POOL_OUTCOME:-unknown}"
 
           if [ "$opencode_review_outcome" != "success" ]; then
-            failed_checks_file="$(mktemp)"
-            failed_check_evidence_file="$(mktemp)"
-            failed_check_review_body_file="$(mktemp)"
-            failed_check_review_payload_file="$(mktemp)"
-            failed_check_inline_failure_body_file="$(mktemp)"
-            pending_checks_file=""
-            fallback_changed_files_file=""
-            fallback_approval_body_file=""
-            unresolved_reviewer_threads_file=""
-            reviewer_thread_review_body_file=""
-            # shellcheck disable=SC2329
-            cleanup_failed_outcome_files() {
-              rm -f "$failed_checks_file" "$failed_check_evidence_file" "$failed_check_review_body_file" "$failed_check_review_payload_file" "$failed_check_inline_failure_body_file" "$pending_checks_file" "$fallback_changed_files_file" "$fallback_approval_body_file" "$unresolved_reviewer_threads_file" "$reviewer_thread_review_body_file"
-            }
-            trap cleanup_failed_outcome_files EXIT
-            if collect_github_checks_with_retry collect_failed_github_checks "$failed_checks_file" && [ -s "$failed_checks_file" ]; then
-              if ! collect_failed_check_evidence_or_note "$failed_check_evidence_file"; then
-                printf "Failed GitHub Check evidence could not be collected for current head \`%s\`.\n" "$HEAD_SHA" >"$failed_check_evidence_file"
-              fi
-
-              if leave_review_unchanged_for_self_modifying_strix_if_present "$failed_check_evidence_file"; then
-                echo "::endgroup::"
-                exit 1
-              fi
-
-              if comment_for_billing_lock_if_present "$failed_checks_file" "$failed_check_evidence_file" "$failed_check_review_body_file"; then
-                echo "::endgroup::"
-                exit 0
-              fi
-
-              if run_failed_check_diagnosis "$failed_checks_file" "$failed_check_evidence_file" "$failed_check_review_body_file" "$failed_check_review_payload_file" "$failed_check_inline_failure_body_file"; then
-                create_pull_review_with_payload "REQUEST_CHANGES" "$(cat "$failed_check_review_body_file")" "$failed_check_review_payload_file" "$failed_check_inline_failure_body_file"
-              elif build_failed_check_fallback_body "$failed_checks_file" "$failed_check_evidence_file" "$failed_check_review_body_file"; then
-                create_pull_review "REQUEST_CHANGES" "$(cat "$failed_check_review_body_file")"
-              else
-                stop_failed_check_fallback_unavailable
-              fi
-              echo "::endgroup::"
-              exit 0
-            fi
-
-            if request_changes_for_merge_conflict_if_present; then
-              :
-            else
-              pending_checks_file="$(mktemp)"
-              set +e
-              wait_for_peer_github_checks "$pending_checks_file"
-              pending_wait_status=$?
-              set -e
-              if [ "$pending_wait_status" -eq 1 ]; then
-                if app_token_limited_check_lookup; then
-                  echo "GitHub Checks statusCheckRollup lookup is unavailable to the OpenCode app token before model-exhaustion review publication; branch protection remains authoritative for target-repository checks."
-                  : >"$pending_checks_file"
-                  pending_wait_status=0
-                else
-                  body="$(printf '%s\n' \
-                    "all configured OpenCode model attempts failed to produce a usable current-head control block, and GitHub Checks statusCheckRollup could not be read." \
-                    "" \
-                    "- Result: CHECKS_LOOKUP_FAILED" \
-                    "- Reason: GitHub Checks statusCheckRollup could not be read before publishing model-exhaustion REQUEST_CHANGES." \
-                    "- Required next evidence: readable current-head statusCheckRollup plus a valid OpenCode control block." \
-                    "- Head SHA: \`${HEAD_SHA}\`" \
-                    "- Workflow run: ${RUN_ID}" \
-                    "- Workflow attempt: ${RUN_ATTEMPT}"
-                  )"
-                  stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
-                fi
-              fi
-              if [ "$pending_wait_status" -ne 0 ]; then
-                build_pending_check_body "$pending_checks_file" "$failed_check_review_body_file"
-                stop_approval_without_review "WAITING_FOR_CHECKS" "$(cat "$failed_check_review_body_file")"
-              fi
-
-              unresolved_reviewer_threads_file="$(mktemp)"
-              reviewer_thread_review_body_file="$(mktemp)"
-              if ! collect_unresolved_reviewer_threads "$unresolved_reviewer_threads_file"; then
-                build_reviewer_thread_lookup_failure_body "$reviewer_thread_review_body_file"
-                create_pull_review "REQUEST_CHANGES" "$(cat "$reviewer_thread_review_body_file")"
-                echo "::endgroup::"
-                exit 0
-              fi
-              if [ -s "$unresolved_reviewer_threads_file" ]; then
-                build_unresolved_reviewer_threads_body "$unresolved_reviewer_threads_file" "$reviewer_thread_review_body_file"
-                create_pull_review "REQUEST_CHANGES" "$(cat "$reviewer_thread_review_body_file")"
-                echo "::endgroup::"
-                exit 0
-              fi
-
-              request_changes_after_model_exhaustion \
-                "$pending_checks_file" \
-                "$failed_checks_file" \
-                "$unresolved_reviewer_threads_file" \
-                "$reviewer_thread_review_body_file"
-            fi
-            echo "::endgroup::"
-            exit 0
+            stop_without_review_after_model_unavailable
           fi
 
           selected_review_output_file=""
@@ -5201,19 +4926,10 @@ jobs:
                 else
                   stop_failed_check_fallback_unavailable
                 fi
+              elif request_changes_for_merge_conflict_if_present; then
+                :
               else
-                if request_changes_for_merge_conflict_if_present; then
-                  :
-                else
-                  pending_checks_file="$(mktemp)"
-                  unresolved_reviewer_threads_file="$(mktemp)"
-                  reviewer_thread_review_body_file="$(mktemp)"
-                  request_changes_after_model_exhaustion \
-                    "$pending_checks_file" \
-                    "$failed_checks_file" \
-                    "$unresolved_reviewer_threads_file" \
-                    "$reviewer_thread_review_body_file"
-                fi
+                stop_without_review_after_model_unavailable
               fi
               ;;
           esac
