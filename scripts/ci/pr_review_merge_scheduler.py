@@ -116,6 +116,8 @@ OPENCODE_WORKFLOW_NAMES = {"OpenCode Review", "Required OpenCode Review"}
 RUNNING_CHECK_STATES = {"PENDING", "EXPECTED", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED"}
 FAILED_CHECK_CONCLUSIONS = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "STARTUP_FAILURE"}
 ACTION_REQUIRED_CONCLUSIONS = {"ACTION_REQUIRED"}
+GIT_REF_RE = re.compile(r"^(?!-)[A-Za-z0-9._/-]+$")
+GIT_SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
 REVIEW_BODY_HEAD_SHA_RE = re.compile(r"Head SHA:\s*`([0-9a-fA-F]{40})`")
 ACTIONS_JOB_DETAILS_URL_RE = re.compile(r"/actions/runs/\d+/job/(\d+)(?:[/?#]|$)")
 DIRECT_MERGE_AUTO_FALLBACK_MARKERS = (
@@ -466,6 +468,28 @@ def split_repo(repo: str) -> tuple[str, str]:
     if not owner or not name:
         raise ValueError(f"repo must be owner/name, got {repo!r}")
     return owner, name
+
+
+def validate_git_ref(ref: str) -> str:
+    """Return a conservative Git ref name for gh workflow dispatch fields."""
+    if (
+        not isinstance(ref, str)
+        or not ref
+        or not GIT_REF_RE.fullmatch(ref)
+        or ref.startswith("/")
+        or ref.endswith(("/", "."))
+        or ".." in ref
+        or "//" in ref
+    ):
+        raise ValueError(f"invalid git ref: {ref!r}")
+    return ref
+
+
+def validate_git_sha(sha: str) -> str:
+    """Return a 40-character hex SHA for head-guarded GitHub operations."""
+    if not isinstance(sha, str) or not GIT_SHA_RE.fullmatch(sha):
+        raise ValueError(f"invalid git sha: {sha!r}")
+    return sha
 
 
 TRANSIENT_GITHUB_API_ERRORS = (
@@ -1055,20 +1079,20 @@ def workflow_action_required_reason(checks: list[str]) -> str:
 def enable_auto_merge(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
     """Enable squash auto-merge for a PR at its current head."""
     number = str(pr["number"])
-    head = pr["headRefOid"]
     if dry_run:
         return
     require_github_actions_mutation_actor("enable-auto-merge")
+    head = validate_git_sha(pr["headRefOid"])
     run(["gh", "pr", "merge", number, "--repo", repo, "--auto", "--squash", "--match-head-commit", head])
 
 
 def merge_pr(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
     """Merge a current-head-approved PR immediately with a head guard."""
     number = str(pr["number"])
-    head = pr["headRefOid"]
     if dry_run:
         return
     require_github_actions_mutation_actor("direct-merge")
+    head = validate_git_sha(pr["headRefOid"])
     run(["gh", "pr", "merge", number, "--repo", repo, "--squash", "--match-head-commit", head])
 
 
@@ -1102,10 +1126,10 @@ def disable_auto_merge_decision(
 def update_branch(repo: str, pr: dict[str, Any], *, dry_run: bool) -> None:
     """Ask GitHub to update a PR branch, guarded by the observed head SHA."""
     number = str(pr["number"])
-    head = pr["headRefOid"]
     if dry_run:
         return
     require_github_actions_mutation_actor("update-branch")
+    head = validate_git_sha(pr["headRefOid"])
     run(
         [
             "gh",
@@ -1354,6 +1378,9 @@ def dispatch_opencode_review(repo: str, workflow: str, pr: dict[str, Any], *, dr
         return
     if dry_run:
         return
+    base_ref = validate_git_ref(pr["baseRefName"])
+    base_sha = validate_git_sha(pr["baseRefOid"])
+    head_sha = validate_git_sha(pr["headRefOid"])
     run_github_actions(
         [
             "gh",
@@ -1363,15 +1390,15 @@ def dispatch_opencode_review(repo: str, workflow: str, pr: dict[str, Any], *, dr
             "--repo",
             repo,
             "--ref",
-            pr["baseRefName"],
+            base_ref,
             "-f",
             f"pr_number={pr['number']}",
             "-f",
-            f"pr_base_ref={pr['baseRefName']}",
+            f"pr_base_ref={base_ref}",
             "-f",
-            f"pr_base_sha={pr['baseRefOid']}",
+            f"pr_base_sha={base_sha}",
             "-f",
-            f"pr_head_sha={pr['headRefOid']}",
+            f"pr_head_sha={head_sha}",
         ]
     )
 
@@ -1384,6 +1411,9 @@ def dispatch_strix_evidence(repo: str, workflow: str, pr: dict[str, Any], *, dry
         return
     if dry_run:
         return
+    base_ref = validate_git_ref(pr["baseRefName"])
+    base_sha = validate_git_sha(pr["baseRefOid"])
+    head_sha = validate_git_sha(pr["headRefOid"])
     run_github_actions(
         [
             "gh",
@@ -1393,13 +1423,13 @@ def dispatch_strix_evidence(repo: str, workflow: str, pr: dict[str, Any], *, dry
             "--repo",
             repo,
             "--ref",
-            pr["baseRefName"],
+            base_ref,
             "-f",
             f"pr_number={pr['number']}",
             "-f",
-            f"pr_base_sha={pr['baseRefOid']}",
+            f"pr_base_sha={base_sha}",
             "-f",
-            f"pr_head_sha={pr['headRefOid']}",
+            f"pr_head_sha={head_sha}",
         ]
     )
 
