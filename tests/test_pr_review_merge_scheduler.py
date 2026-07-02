@@ -135,6 +135,11 @@ def test_run_split_repo_and_graphql(monkeypatch):
         with pytest.raises(ValueError):
             sched.validate_git_sha(bad_sha)
 
+    assert sched.validate_github_repository("owner/repo.name") == "owner/repo.name"
+    for bad_repo in ("", "owner", "owner/repo/extra", "owner/repo;echo pwned"):
+        with pytest.raises(ValueError):
+            sched.validate_github_repository(bad_repo)
+
     calls = []
 
     def fake_run(args, stdin=None):
@@ -1151,6 +1156,63 @@ def test_actions_control_uses_workflow_token_when_mutation_token_is_app(monkeypa
     assert calls[2][0][:5] == ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs"]
     assert calls[3][0][:5] == ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs"]
     assert calls[4][0][:5] == ["gh", "workflow", "run", "OpenCode Review", "--repo"]
+
+
+def test_missing_evidence_dispatch_uses_central_required_workflow_repository(monkeypatch):
+    calls = []
+    head_sha = "a" * 40
+    base_sha = "b" * 40
+
+    def fake_run_with_env(args, *, stdin=None, env=None):
+        calls.append((args, None if env is None else env.get("GH_TOKEN")))
+        if args[:5] == ["gh", "api", "--method", "GET", "repos/owner/repo/actions/runs"]:
+            return '{"workflow_runs": []}'
+        return ""
+
+    monkeypatch.setattr(sched, "run_with_env", fake_run_with_env)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setenv("GH_TOKEN", "opencode-app-token")
+    monkeypatch.setenv("SCHEDULER_ACTIONS_TOKEN", "workflow-actions-token")
+    monkeypatch.setenv("SCHEDULER_REQUIRED_WORKFLOW_REPOSITORY", "ContextualWisdomLab/.github")
+    monkeypatch.setenv("SCHEDULER_REQUIRED_WORKFLOW_REF", "main")
+
+    pr = make_pr(baseRefName="develop", baseRefOid=base_sha, headRefOid=head_sha)
+    sched.dispatch_strix_evidence("owner/repo", "Strix Security Scan", pr, dry_run=False)
+    sched.dispatch_opencode_review("owner/repo", "OpenCode Review", pr, dry_run=False)
+
+    strix_call = calls[0][0]
+    opencode_call = calls[-1][0]
+
+    assert calls and all(call[1] == "workflow-actions-token" for call in calls)
+    assert strix_call[:7] == [
+        "gh",
+        "workflow",
+        "run",
+        "Strix Security Scan",
+        "--repo",
+        "ContextualWisdomLab/.github",
+        "--ref",
+    ]
+    assert strix_call[7] == "main"
+    assert "-f" in strix_call
+    assert "target_repository=owner/repo" in strix_call
+    assert f"pr_base_sha={base_sha}" in strix_call
+    assert f"pr_head_sha={head_sha}" in strix_call
+
+    assert opencode_call[:7] == [
+        "gh",
+        "workflow",
+        "run",
+        "OpenCode Review",
+        "--repo",
+        "ContextualWisdomLab/.github",
+        "--ref",
+    ]
+    assert opencode_call[7] == "main"
+    assert "target_repository=owner/repo" in opencode_call
+    assert "pr_base_ref=develop" in opencode_call
+    assert f"pr_base_sha={base_sha}" in opencode_call
+    assert f"pr_head_sha={head_sha}" in opencode_call
 
 
 def test_dispatch_opencode_review_force_cancels_same_pr_old_head_runs(monkeypatch):

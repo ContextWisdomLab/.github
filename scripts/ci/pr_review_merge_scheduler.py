@@ -118,6 +118,7 @@ FAILED_CHECK_CONCLUSIONS = {"FAILURE", "ERROR", "CANCELLED", "TIMED_OUT", "START
 ACTION_REQUIRED_CONCLUSIONS = {"ACTION_REQUIRED"}
 GIT_REF_RE = re.compile(r"^(?!-)[A-Za-z0-9._/-]+$")
 GIT_SHA_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+GITHUB_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 REVIEW_BODY_HEAD_SHA_RE = re.compile(r"Head SHA:\s*`([0-9a-fA-F]{40})`")
 ACTIONS_JOB_DETAILS_URL_RE = re.compile(r"/actions/runs/\d+/job/(\d+)(?:[/?#]|$)")
 DIRECT_MERGE_AUTO_FALLBACK_MARKERS = (
@@ -496,6 +497,13 @@ def validate_git_sha(sha: str) -> str:
     return sha
 
 
+def validate_github_repository(repo: str) -> str:
+    """Return a GitHub owner/repository name safe to pass to gh."""
+    if not isinstance(repo, str) or not GITHUB_REPOSITORY_RE.fullmatch(repo):
+        raise ValueError(f"invalid GitHub repository: {repo!r}")
+    return repo
+
+
 def validated_pr_dispatch_fields(pr: dict[str, Any]) -> tuple[str, str, str]:
     """Return validated base ref, base SHA, and head SHA for workflow dispatch."""
     return (
@@ -503,6 +511,26 @@ def validated_pr_dispatch_fields(pr: dict[str, Any]) -> tuple[str, str, str]:
         validate_git_sha(pr["baseRefOid"]),
         validate_git_sha(pr["headRefOid"]),
     )
+
+
+def workflow_dispatch_target(repo: str, base_ref: str) -> tuple[str, str, list[str]]:
+    """Return repository, ref, and extra inputs for workflow dispatch.
+
+    Organization required workflows are sourced from ContextualWisdomLab/.github,
+    while most target repositories deliberately do not keep repo-local workflow
+    copies. When configured, dispatch the central workflow and pass the real
+    target repository as data.
+    """
+    target_repo = validate_github_repository(repo)
+    dispatch_repo = (os.environ.get("SCHEDULER_REQUIRED_WORKFLOW_REPOSITORY") or "").strip()
+    if not dispatch_repo:
+        return target_repo, base_ref, []
+    dispatch_repo = validate_github_repository(dispatch_repo)
+    dispatch_ref = validate_git_ref(
+        (os.environ.get("SCHEDULER_REQUIRED_WORKFLOW_REF") or "main").strip() or "main"
+    )
+    extra_inputs = [] if dispatch_repo == target_repo else ["-f", f"target_repository={target_repo}"]
+    return dispatch_repo, dispatch_ref, extra_inputs
 
 
 TRANSIENT_GITHUB_API_ERRORS = (
@@ -1392,6 +1420,7 @@ def dispatch_opencode_review(repo: str, workflow: str, pr: dict[str, Any], *, dr
     if dry_run:
         return
     base_ref, base_sha, head_sha = validated_pr_dispatch_fields(pr)
+    dispatch_repo, dispatch_ref, extra_inputs = workflow_dispatch_target(repo, base_ref)
     run_github_actions(
         [
             "gh",
@@ -1399,9 +1428,10 @@ def dispatch_opencode_review(repo: str, workflow: str, pr: dict[str, Any], *, dr
             "run",
             workflow,
             "--repo",
-            repo,
+            dispatch_repo,
             "--ref",
-            base_ref,
+            dispatch_ref,
+            *extra_inputs,
             "-f",
             f"pr_number={pr['number']}",
             "-f",
@@ -1423,6 +1453,7 @@ def dispatch_strix_evidence(repo: str, workflow: str, pr: dict[str, Any], *, dry
     if dry_run:
         return
     base_ref, base_sha, head_sha = validated_pr_dispatch_fields(pr)
+    dispatch_repo, dispatch_ref, extra_inputs = workflow_dispatch_target(repo, base_ref)
     run_github_actions(
         [
             "gh",
@@ -1430,9 +1461,10 @@ def dispatch_strix_evidence(repo: str, workflow: str, pr: dict[str, Any], *, dry
             "run",
             workflow,
             "--repo",
-            repo,
+            dispatch_repo,
             "--ref",
-            base_ref,
+            dispatch_ref,
+            *extra_inputs,
             "-f",
             f"pr_number={pr['number']}",
             "-f",
