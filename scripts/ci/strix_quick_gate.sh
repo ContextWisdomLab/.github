@@ -1877,7 +1877,6 @@ vulnerability_record_intersects_changed_file() {
 		echo "ERROR: unable to create temporary diff file for changed-line evaluation." >&2
 		return 1
 	}
-	trap 'rm -f -- "$diff_output_file"' RETURN
 	printf '%s' "$diff_output" >"$diff_output_file"
 	python3 - "$diff_output_file" "$start_line" "$end_line" <<'PY'
 import re
@@ -1902,7 +1901,9 @@ with open(diff_output_path, "r", encoding="utf-8") as handle:
             raise SystemExit(0)
 raise SystemExit(1)
 PY
-	return $?
+	local intersects_rc=$?
+	rm -f -- "$diff_output_file"
+	return "$intersects_rc"
 }
 
 extract_first_severity_rank() {
