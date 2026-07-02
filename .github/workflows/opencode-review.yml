@@ -69,12 +69,16 @@ jobs:
           WORKFLOW_REF: ${{ github.workflow_ref }}
         run: |
           set -euo pipefail
-          trusted_ref="${INPUT_CANONICAL_REF:-main}"
-          case "$WORKFLOW_REF" in
-            ContextualWisdomLab/.github/.github/workflows/opencode-review.yml@*)
-              trusted_ref="${WORKFLOW_REF##*@}"
-              ;;
-          esac
+          if [ -n "$INPUT_CANONICAL_REF" ]; then
+            trusted_ref="$INPUT_CANONICAL_REF"
+          else
+            trusted_ref="main"
+            case "$WORKFLOW_REF" in
+              ContextualWisdomLab/.github/.github/workflows/opencode-review.yml@*)
+                trusted_ref="${WORKFLOW_REF##*@}"
+                ;;
+            esac
+          fi
           printf 'ref=%s\n' "$trusted_ref" >>"$GITHUB_OUTPUT"
 
       - name: Checkout trusted OpenCode coverage contract
@@ -844,12 +848,16 @@ jobs:
           WORKFLOW_REF: ${{ github.workflow_ref }}
         run: |
           set -euo pipefail
-          trusted_ref="${INPUT_CANONICAL_REF:-main}"
-          case "$WORKFLOW_REF" in
-            ContextualWisdomLab/.github/.github/workflows/opencode-review.yml@*)
-              trusted_ref="${WORKFLOW_REF##*@}"
-              ;;
-          esac
+          if [ -n "$INPUT_CANONICAL_REF" ]; then
+            trusted_ref="$INPUT_CANONICAL_REF"
+          else
+            trusted_ref="main"
+            case "$WORKFLOW_REF" in
+              ContextualWisdomLab/.github/.github/workflows/opencode-review.yml@*)
+                trusted_ref="${WORKFLOW_REF##*@}"
+                ;;
+            esac
+          fi
           printf 'ref=%s\n' "$trusted_ref" >>"$GITHUB_OUTPUT"
 
       - name: Checkout trusted OpenCode review workflow
@@ -975,8 +983,8 @@ jobs:
 
       - name: Install OpenCode CLI
         env:
-          OPENCODE_VERSION: "1.16.0"
-          OPENCODE_SHA256: a741c43e737b2033f5e7ee151b162341e441034d6a64b172272a3f3a3729e87d
+          OPENCODE_VERSION: "1.17.13"
+          OPENCODE_SHA256: 157afa289d1a8d9372de0ce19ac726119b937a1f6b201808d46f06e4e59bb348
         run: |
           set -euo pipefail
           archive="${RUNNER_TEMP}/opencode-linux-x64.tar.gz"
@@ -991,7 +999,7 @@ jobs:
           "${install_dir}/opencode" --version
           echo "$install_dir" >>"$GITHUB_PATH"
 
-      - name: Detect central review-process fallback scope
+      - name: Detect central review-process scope
         id: central_review_process_fallback_scope
         if: needs.coverage-evidence.result == 'success'
         env:
@@ -1059,12 +1067,11 @@ jobs:
             printf 'changed_count=%s\n' "$changed_count"
             printf 'scope_label=%s\n' "$scope_label"
           } >>"$GITHUB_OUTPUT"
-          printf 'Deterministic review fallback scope=%s eligible=%s changed_count=%s max_changed_count=%s\n' \
+          printf 'Trusted review-process scope=%s eligible=%s changed_count=%s max_changed_count=%s\n' \
             "$scope_label" "$eligible" "$changed_count" "$max_changed_count"
           sed 's/^/- /' "$changed_files_file"
 
       - name: Initialize CodeGraph index for OpenCode
-        if: steps.central_review_process_fallback_scope.outputs.eligible != 'true'
         env:
           CODEGRAPH_PACKAGE: "@colbymchenry/codegraph@0.9.9"
           NPM_CONFIG_IGNORE_SCRIPTS: "true"
@@ -1076,7 +1083,6 @@ jobs:
           npx -y "$CODEGRAPH_PACKAGE" status
 
       - name: Prepare bounded OpenCode review evidence
-        if: steps.central_review_process_fallback_scope.outputs.eligible != 'true'
         timeout-minutes: 40
         env:
           GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || steps.review_read_app_token.outputs.token || github.token }}
@@ -1614,7 +1620,6 @@ jobs:
           wc -c "$OPENCODE_EVIDENCE_FILE"
 
       - name: Prepare isolated OpenCode review workspace
-        if: steps.central_review_process_fallback_scope.outputs.eligible != 'true'
         env:
           OPENCODE_REVIEW_WORKDIR: ${{ runner.temp }}/opencode-review-project
           OPENCODE_EVIDENCE_FILE: ${{ runner.temp }}/opencode-review-evidence.md
@@ -2072,14 +2077,6 @@ jobs:
                   "apiKey": "{env:STRIX_GITHUB_MODELS_TOKEN}"
                 },
                 "models": {
-                  "openai/gpt-4.1-mini": {
-                    "name": "OpenAI GPT-4.1 Mini",
-                    "tool_call": true,
-                    "limit": {
-                      "context": 1047576,
-                      "output": 32768
-                    }
-                  },
                   "openai/gpt-5": {
                     "name": "OpenAI GPT-5",
                     "tool_call": true,
@@ -2274,9 +2271,7 @@ jobs:
 
       - name: Run OpenCode PR Review model pool
         id: opencode_review_model_pool
-        if: >-
-          needs.coverage-evidence.result == 'success'
-          && steps.central_review_process_fallback_scope.outputs.eligible != 'true'
+        if: needs.coverage-evidence.result == 'success'
         timeout-minutes: 285
         env:
           STRIX_GITHUB_MODELS_TOKEN: ${{ secrets.STRIX_GITHUB_MODELS_TOKEN || github.token }}
@@ -2285,7 +2280,7 @@ jobs:
           SHARE: "false"
           NPM_CONFIG_IGNORE_SCRIPTS: "true"
           NO_COLOR: "1"
-          OPENCODE_MODEL_CANDIDATES: "github-models/openai/gpt-4.1-mini github-models/openai/gpt-5-chat github-models/openai/gpt-5-mini github-models/openai/gpt-5-nano github-models/openai/o3 github-models/openai/o3-mini github-models/openai/o4-mini github-models/mistral-ai/mistral-medium-2505 github-models/meta/llama-4-maverick-17b-128e-instruct-fp8 github-models/meta/llama-4-scout-17b-16e-instruct"
+          OPENCODE_MODEL_CANDIDATES: "github-models/openai/o4-mini github-models/openai/o3-mini github-models/openai/gpt-5-mini github-models/openai/gpt-5-chat github-models/openai/o3 github-models/mistral-ai/mistral-medium-2505 github-models/openai/gpt-5-nano github-models/deepseek/deepseek-r1-0528 github-models/deepseek/deepseek-r1 github-models/deepseek/deepseek-v3-0324 github-models/meta/llama-4-maverick-17b-128e-instruct-fp8 github-models/meta/llama-4-scout-17b-16e-instruct"
           OPENCODE_MODEL_ATTEMPTS: "1"
           OPENCODE_RUN_TIMEOUT_SECONDS: "600"
           OPENCODE_EXPORT_TIMEOUT_SECONDS: "120"
@@ -2644,7 +2639,6 @@ jobs:
           && (
             needs.coverage-evidence.result != 'success'
             || steps.opencode_review_model_pool.outcome == 'success'
-            || steps.central_review_process_fallback_scope.outputs.eligible == 'true'
           )
         timeout-minutes: 75
         env:
@@ -4648,143 +4642,6 @@ jobs:
             scripts/ci/collect_failed_check_evidence.sh "$evidence_file"
           }
 
-          approve_central_review_process_fallback() {
-            local pending_checks_file failed_checks_file unresolved_threads_file body wait_status
-            pending_checks_file="$(mktemp)"
-            failed_checks_file="$(mktemp)"
-            unresolved_threads_file="$(mktemp)"
-
-            wait_status=0
-            wait_for_peer_github_checks "$pending_checks_file" || wait_status=$?
-            if [ "$wait_status" -eq 1 ]; then
-              body="$(printf '%s\n' \
-                "Central review-process fallback could not validate current-head peer checks." \
-                "" \
-                "- Result: CHECKS_LOOKUP_FAILED" \
-                "- Required next evidence: readable current-head statusCheckRollup before fallback approval." \
-                "- Head SHA: \`${HEAD_SHA}\`" \
-                "- Workflow run: ${RUN_ID}" \
-                "- Workflow attempt: ${RUN_ATTEMPT}"
-              )"
-              stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
-            elif [ "$wait_status" -ne 0 ]; then
-              body="$(printf '%s\n' \
-                "Central review-process fallback is waiting for current-head peer checks before approval." \
-                "" \
-                "- Result: WAITING_FOR_CHECKS" \
-                "- Head SHA: \`${HEAD_SHA}\`" \
-                "- Workflow run: ${RUN_ID}" \
-                "- Workflow attempt: ${RUN_ATTEMPT}" \
-                "" \
-                "Pending checks:" \
-                "$(cat "$pending_checks_file")"
-              )"
-              hold_approval_without_review "WAITING_FOR_CHECKS" "$body"
-            fi
-
-            if ! collect_github_checks_with_retry collect_failed_github_checks "$failed_checks_file"; then
-              body="$(printf '%s\n' \
-                "Central review-process fallback could not validate current-head failed checks." \
-                "" \
-                "- Result: CHECKS_LOOKUP_FAILED" \
-                "- Required next evidence: readable current-head failed-check state before fallback approval." \
-                "- Head SHA: \`${HEAD_SHA}\`" \
-                "- Workflow run: ${RUN_ID}" \
-                "- Workflow attempt: ${RUN_ATTEMPT}"
-              )"
-              stop_approval_without_review "CHECKS_LOOKUP_FAILED" "$body"
-            fi
-            if [ -s "$failed_checks_file" ]; then
-              body="$(printf '%s\n' \
-                "## Pull request overview" \
-                "" \
-                "Central review-process fallback found failed current-head peer checks and did not approve." \
-                "" \
-                "## Findings" \
-                "" \
-                "### 1. HIGH review checks:1 - Failed peer checks block fallback approval" \
-                "- Problem: current-head peer GitHub Checks failed before central review-process fallback approval." \
-                "- Root cause: fallback approval is only valid when coverage, security, and peer checks are all green." \
-                "- Fix: inspect and fix the failed peer check evidence, then rerun the current-head checks." \
-                "- Regression test: keep central fallback approval gated on an empty failed-check set." \
-                "" \
-                "## Failed Check Evidence" \
-                "" \
-                "$(cat "$failed_checks_file")" \
-                "" \
-                "- Result: REQUEST_CHANGES" \
-                "- Head SHA: \`${HEAD_SHA}\`" \
-                "- Workflow run: ${RUN_ID}" \
-                "- Workflow attempt: ${RUN_ATTEMPT}"
-              )"
-              create_pull_review "REQUEST_CHANGES" "$body"
-              return 0
-            fi
-
-            if request_changes_for_merge_conflict_if_present; then
-              return 0
-            fi
-
-            if ! collect_unresolved_reviewer_threads "$unresolved_threads_file"; then
-              body="$(printf '%s\n' \
-                "Central review-process fallback could not validate unresolved review threads." \
-                "" \
-                "- Result: REVIEW_THREAD_LOOKUP_FAILED" \
-                "- Required next evidence: readable unresolved review-thread state before fallback approval." \
-                "- Head SHA: \`${HEAD_SHA}\`" \
-                "- Workflow run: ${RUN_ID}" \
-                "- Workflow attempt: ${RUN_ATTEMPT}"
-              )"
-              stop_approval_without_review "REVIEW_THREAD_LOOKUP_FAILED" "$body"
-            fi
-            if [ -s "$unresolved_threads_file" ]; then
-              body="$(printf '%s\n' \
-                "## Pull request overview" \
-                "" \
-                "Central review-process fallback found unresolved reviewer threads and did not approve." \
-                "" \
-                "## Findings" \
-                "" \
-                "### 1. HIGH review threads:1 - Unresolved reviewer feedback blocks fallback approval" \
-                "- Problem: unresolved non-outdated review feedback is present on the current pull request." \
-                "- Root cause: fallback approval is only valid after reviewer feedback is addressed, resolved, or outdated." \
-                "- Fix: address or resolve the listed review thread(s), then rerun current-head review." \
-                "- Regression test: keep central fallback approval gated on an empty unresolved-thread set." \
-                "" \
-                "## Thread Evidence" \
-                "" \
-                "$(cat "$unresolved_threads_file")" \
-                "" \
-                "- Result: REQUEST_CHANGES" \
-                "- Head SHA: \`${HEAD_SHA}\`" \
-                "- Workflow run: ${RUN_ID}" \
-                "- Workflow attempt: ${RUN_ATTEMPT}"
-              )"
-              create_pull_review "REQUEST_CHANGES" "$body"
-              return 0
-            fi
-
-            body="$(printf '%s\n' \
-              "## Pull request overview" \
-              "" \
-              "OpenCode approved this restricted trusted-automation update through the deterministic fallback path because the model pool was intentionally skipped for a narrow, allowlisted change scope." \
-              "" \
-              "## Summary" \
-              "" \
-              "- Result: APPROVE" \
-              "- Reason: changed files matched the deterministic fallback allowlist; coverage evidence passed; peer GitHub Checks passed; mergeability and unresolved review-thread gates passed." \
-              "- Fallback scope: ${CENTRAL_REVIEW_PROCESS_FALLBACK_SCOPE_LABEL:-unsupported}" \
-              "- Changed-file count: ${CENTRAL_REVIEW_PROCESS_FALLBACK_CHANGED_COUNT:-unknown}" \
-              "- Model path: skipped for deterministic fallback; provider delay or model-output unavailability is not review feedback." \
-              "- Head SHA: \`${HEAD_SHA}\`" \
-              "- Workflow run: ${RUN_ID}" \
-              "- Workflow attempt: ${RUN_ATTEMPT}" \
-              "" \
-              "This fallback is limited to central OpenCode/Strix review-process files and the appguardrail org-security failure collector file set."
-            )"
-            create_pull_review "APPROVE" "$body"
-          }
-
           live_head_sha="$(gh api -X GET "repos/${GH_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
           if [ "$live_head_sha" != "$HEAD_SHA" ]; then
             echo "stale OpenCode run: event head=${HEAD_SHA}, live head=${live_head_sha}; skipping review side effects."
@@ -4799,11 +4656,6 @@ jobs:
           opencode_review_outcome="${OPENCODE_MODEL_POOL_OUTCOME:-unknown}"
 
           if [ "$opencode_review_outcome" != "success" ]; then
-            if [ "${CENTRAL_REVIEW_PROCESS_FALLBACK_ELIGIBLE:-false}" = "true" ]; then
-              approve_central_review_process_fallback
-              echo "::endgroup::"
-              exit 0
-            fi
             stop_without_review_after_model_unavailable
           fi
 
