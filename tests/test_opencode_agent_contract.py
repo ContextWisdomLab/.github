@@ -78,15 +78,21 @@ def test_opencode_model_pool_sets_high_effort_for_capable_candidates():
 
     assert candidate_models
     assert set(candidate_models).issubset(set(models))
-    assert candidate_models[0] == "openai/gpt-4.1-mini"
+    assert candidate_models[:3] == [
+        "openai/o4-mini",
+        "openai/o3-mini",
+        "openai/gpt-5-mini",
+    ]
     assert {
-        "openai/gpt-4.1-mini",
         "openai/gpt-5-chat",
         "openai/gpt-5-mini",
         "openai/gpt-5-nano",
         "openai/o3",
         "openai/o3-mini",
         "openai/o4-mini",
+        "deepseek/deepseek-r1-0528",
+        "deepseek/deepseek-r1",
+        "deepseek/deepseek-v3-0324",
         "mistral-ai/mistral-medium-2505",
         "meta/llama-4-maverick-17b-128e-instruct-fp8",
         "meta/llama-4-scout-17b-16e-instruct",
@@ -251,14 +257,14 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "skipping remaining attempts for this model" in model_pool_runner
     assert "approve_low_risk_review_fallback_after_model_exhaustion" not in workflow
     assert "changed_file_is_low_risk_review_fallback" not in workflow
-    assert "approve_central_review_process_fallback" in workflow
+    assert "approve_central_review_process_fallback" not in workflow
     assert "opencode.jsonc | \\" in workflow
     assert "scripts/ci/run_opencode_review_model_pool.sh | \\" in workflow
     assert "tests/test_opencode_agent_contract.py | \\" in workflow
     assert "changed_count\" -gt 6" in workflow
-    assert "steps.central_review_process_fallback_scope.outputs.eligible != 'true'" in workflow
+    assert "steps.central_review_process_fallback_scope.outputs.eligible != 'true'" not in workflow
     assert "CENTRAL_REVIEW_PROCESS_FALLBACK_ELIGIBLE" in workflow
-    assert "This fallback is limited to central OpenCode/Strix review-process files and their contract tests." in workflow
+    assert "model pool was intentionally skipped" not in workflow
     assert "production source 또는 package manifest 변경이 없습니다" not in workflow
     assert "request_changes_for_coverage_evidence_failure" in workflow
     assert '"## Review outcome"' in workflow
@@ -270,14 +276,16 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert 'APPROVAL_CHECK_WAIT_ATTEMPTS: "81"' in workflow
     assert 'APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "30"' in workflow
     assert (
-        'OPENCODE_MODEL_CANDIDATES: "github-models/openai/gpt-4.1-mini '
-        'github-models/openai/gpt-5-chat '
-        "github-models/openai/gpt-5-mini "
-        "github-models/openai/gpt-5-nano "
-        "github-models/openai/o3 "
+        'OPENCODE_MODEL_CANDIDATES: "github-models/openai/o4-mini '
         "github-models/openai/o3-mini "
-        "github-models/openai/o4-mini "
+        "github-models/openai/gpt-5-mini "
+        'github-models/openai/gpt-5-chat '
+        "github-models/openai/o3 "
         "github-models/mistral-ai/mistral-medium-2505 "
+        "github-models/openai/gpt-5-nano "
+        "github-models/deepseek/deepseek-r1-0528 "
+        "github-models/deepseek/deepseek-r1 "
+        "github-models/deepseek/deepseek-v3-0324 "
         "github-models/meta/llama-4-maverick-17b-128e-instruct-fp8 "
         'github-models/meta/llama-4-scout-17b-16e-instruct"'
     ) in workflow
