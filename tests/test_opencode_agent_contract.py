@@ -261,10 +261,20 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "opencode.jsonc | \\" in workflow
     assert "scripts/ci/run_opencode_review_model_pool.sh | \\" in workflow
     assert "tests/test_opencode_agent_contract.py | \\" in workflow
-    assert "changed_count\" -gt 6" in workflow
+    assert "ContextualWisdomLab/appguardrail:scripts/ci/collect_org_security_failures.py" in workflow
+    assert "ContextualWisdomLab/appguardrail:.github/workflows/org-security-failure-collector.yml" in workflow
+    assert "ContextualWisdomLab/appguardrail:tests/test_org_security_failure_collector.py" in workflow
+    assert "appguardrail org-security failure collector" in workflow
+    assert 'max_changed_count=3' in workflow
+    assert "changed_count\" -gt \"$max_changed_count\"" in workflow
     assert "steps.central_review_process_fallback_scope.outputs.eligible != 'true'" not in workflow
+    assert workflow.index("Detect central review-process scope") < workflow.index(
+        "Initialize CodeGraph index for OpenCode"
+    )
     assert "CENTRAL_REVIEW_PROCESS_FALLBACK_ELIGIBLE" in workflow
+    assert "CENTRAL_REVIEW_PROCESS_FALLBACK_SCOPE_LABEL" in workflow
     assert "model pool was intentionally skipped" not in workflow
+    assert "deterministic fallback" not in workflow
     assert "production source 또는 package manifest 변경이 없습니다" not in workflow
     assert "request_changes_for_coverage_evidence_failure" in workflow
     assert '"## Review outcome"' in workflow
