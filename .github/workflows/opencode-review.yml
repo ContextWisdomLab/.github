@@ -823,7 +823,7 @@ jobs:
     needs: [coverage-evidence]
     if: always() && (github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request_target')
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 360
     permissions:
       actions: write
       checks: read
@@ -2602,7 +2602,7 @@ jobs:
 
       - name: Approve PR if OpenCode review passed
         if: always()
-        timeout-minutes: 75
+        timeout-minutes: 360
         env:
           GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || steps.opencode_app_token.outputs.token || github.token }}
           CHECK_LOOKUP_GH_TOKEN: ${{ github.token }}
