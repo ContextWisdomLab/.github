@@ -1281,7 +1281,9 @@ def rerun_actions_job(repo: str, job_id: str, *, dry_run: bool, action: str) -> 
 def active_workflow_runs(repo: str) -> list[dict[str, Any]]:
     """Return queued and in-progress workflow runs for a repository."""
     runs: list[dict[str, Any]] = []
-    for status in ("queued", "in_progress"):
+
+    def fetch_runs_by_status(status: str) -> list[dict[str, Any]]:
+        """Fetch workflow runs for a single status."""
         payload = json.loads(
             run_github_actions(
                 [
@@ -1297,7 +1299,14 @@ def active_workflow_runs(repo: str) -> list[dict[str, Any]]:
                 ]
             )
         )
-        runs.extend(payload.get("workflow_runs") or [])
+        return payload.get("workflow_runs") or []
+
+    # ⚡ Bolt: Fetch queued and in_progress runs concurrently to avoid sequential API blocking
+    # Impact: Halves network wait time by performing two independent REST API requests simultaneously
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        for run_list in executor.map(fetch_runs_by_status, ("queued", "in_progress")):
+            runs.extend(run_list)
+
     return runs
 
 
