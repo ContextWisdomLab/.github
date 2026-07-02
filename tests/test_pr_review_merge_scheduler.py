@@ -2797,3 +2797,12 @@ def test_run_masks_secrets_in_args():
     err_msg = str(exc_info.value)
     assert "ghp_abcdef1234567890abcdef1234567890abcdef" not in err_msg
     assert "***" in err_msg
+
+
+def test_parse_external_head_update_reason():
+    """Test extracting the external head repository from update guidance."""
+    assert sched.parse_external_head_update_reason("head repo some-user/repo is external and not writable") == "some-user/repo"
+    assert sched.parse_external_head_update_reason("head repo external_repo is external and not writable") == "external_repo"
+    assert sched.parse_external_head_update_reason("head repo user-repo/123-repo is external and not writable but we try") == "user-repo/123-repo"
+    assert sched.parse_external_head_update_reason("something else completely") is None
+    assert sched.parse_external_head_update_reason("head repo  is external and not writable") is None
