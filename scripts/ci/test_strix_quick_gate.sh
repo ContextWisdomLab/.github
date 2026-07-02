@@ -215,6 +215,9 @@ assert_strix_workflow_pr_trigger_hardened() {
 	assert_file_contains "$GATE_SCRIPT" "Materialized PR-head changed-file scope for Strix scan" "strix gate avoids copying the full PR head tree into privileged scan targets by default"
 	assert_file_contains "$GATE_SCRIPT" "sanitize_known_strix_report_warnings" "strix gate sanitizes only known internal Strix report warnings"
 	assert_file_contains "$GATE_SCRIPT" "vulnerability_file_reports_documented_opencode_env_api_key_reference" "strix gate fact-checks documented OpenCode env apiKey references before accepting secret-templating reports"
+	assert_file_contains "$GATE_SCRIPT" 'python3 - "$diff_output_file" "$start_line" "$end_line"' "strix gate checks changed-line overlap without exporting giant diffs through the environment"
+	assert_file_not_contains "$GATE_SCRIPT" 'DIFF_OUTPUT="$diff_output"' "strix gate does not export full git diffs into a single environment variable"
+	assert_file_contains "$GATE_SCRIPT" "UnsupportedToolUse" "strix gate treats unsupported GitHub Models tool use as a fallbackable model-availability failure"
 	assert_file_contains "$GATE_SCRIPT" "iter_report_logs" "strix gate enumerates report logs through a safe walker"
 	assert_file_contains "$GATE_SCRIPT" "os.walk(root, topdown=True, followlinks=False)" "strix gate does not recurse into symlinked report directories"
 	assert_file_not_contains "$GATE_SCRIPT" 'root.rglob("*.log")' "strix gate avoids recursive pathlib glob traversal for report logs"
@@ -240,8 +243,8 @@ assert_strix_workflow_pr_trigger_hardened() {
 	assert_file_contains "$workflow_file" "https://models.github.ai/inference" "strix workflow routes GitHub Models scans to the inference endpoint"
 	assert_file_contains "$workflow_file" "LLM_API_BASE_FILE" "strix workflow passes the GitHub Models API base through a trusted input file"
 	assert_file_not_contains "$workflow_file" '${{ secrets.STRIX_OPENAI_API_KEY || github.token }}' "strix workflow must not use fallback-secret syntax for LLM API keys"
-	assert_file_contains "$workflow_file" "github_models/openai/gpt-5-chat github_models/openai/o3 github_models/deepseek/deepseek-v3-0324 github_models/deepseek/deepseek-r1-0528 github_models/deepseek/deepseek-r1" "strix workflow configures multiple reachable GitHub Models fallback models without GPT-4.1 downgrade"
-	assert_file_not_contains "$workflow_file" 'github_models/deepseek/deepseek-r1-0528 | github_models/deepseek/deepseek-v3-0324)' "strix workflow keeps DeepSeek GitHub Models restricted to fallback-only routing"
+	assert_file_contains "$workflow_file" "github_models/openai/o3 github_models/openai/gpt-5-chat" "strix workflow keeps GitHub Models fallbacks on tool-capable OpenAI models"
+	assert_file_not_contains "$workflow_file" "github_models/deepseek/" "strix workflow does not force DeepSeek GitHub Models into tool-using fallback scans"
 	assert_file_contains "$workflow_file" '${strix_model#github_models/}' "strix workflow strips manual github_models routing prefix for OpenAI GPT model names before passing model names to LiteLLM"
 	assert_file_contains "$workflow_file" "openai_direct/%s" "strix workflow keeps manual direct OpenAI scans distinct from GitHub Models openai/gpt-* routing"
 	assert_file_not_contains "$workflow_file" "openai/gpt-4.1" "strix workflow must not fall back to GPT-4.1 or weaker review evidence"
@@ -2131,7 +2134,7 @@ EOF
 	assert_file_contains "$output_file" "Strix provider failure blocked current-head security evidence" "fallback treats no-report summary as provider blocker"
 	assert_file_contains "$output_file" "api.deepseek.com" "fallback preserves direct DeepSeek endpoint failure evidence"
 	assert_file_contains "$output_file" "Authentication Fails" "fallback preserves direct DeepSeek authentication failure evidence"
-	assert_file_contains "$output_file" "github_models/deepseek/deepseek-v3-0324 github_models/deepseek/deepseek-r1-0528" "fallback gives exact GitHub Models fallback list"
+	assert_file_contains "$output_file" "github_models/openai/o3 github_models/openai/gpt-5-chat" "fallback gives exact GitHub Models fallback list"
 	assert_file_contains "$output_file" "Suggested edit: \`.github/workflows/strix.yml" "fallback gives a line-specific suggested edit for provider routing"
 	assert_file_not_contains "$output_file" "Strix provider signal left current-head security evidence incomplete" "fallback does not invent vulnerability report windows from a no-report summary"
 	assert_file_not_contains "$output_file" "after vulnerability reports" "fallback does not contradict no-report evidence"
@@ -2534,10 +2537,12 @@ case "${FAKE_STRIX_SCENARIO:?}" in
 			echo "scan ok with fallback"
 			exit 0
 			;;
-		openai/gpt-5|openai/openai/gpt-5.4|openai/meta/test-github-model|openai/mistral-ai/test-github-model)
+		openai/gpt-5|openai/o3|openai/openai/gpt-5.4|openai/meta/test-github-model|openai/mistral-ai/test-github-model)
 			if [ "${FAKE_STRIX_SCENARIO:?}" = "github-models-token-limit-fallback-success" ]; then
 				echo "openai.APIStatusError: Error code: 413 - {'error': {'code': 'tokens_limit_reached', 'message': 'Request body too large for gpt-5 model. Max size: 4000 tokens.'}}"
-				exit 1
+				if [ "${STRIX_LLM:-}" = "openai/gpt-5" ]; then
+					exit 1
+				fi
 			fi
 			echo "scan ok with GitHub Models fallback"
 			exit 0
@@ -2871,7 +2876,7 @@ case "${FAKE_STRIX_SCENARIO:?}" in
 			fi
 			exit 1
 			;;
-		openai/deepseek/deepseek-r1-0528)
+		openai/o3)
 			echo "scan ok after GitHub Models unavailable fallback"
 			exit 0
 			;;
@@ -2889,7 +2894,7 @@ case "${FAKE_STRIX_SCENARIO:?}" in
 			echo "Error: litellm.RateLimitError: RateLimitError: OpenAIException - Too many requests. For more on scraping GitHub and how it may affect your rights, please review our Terms of Service."
 			exit 1
 			;;
-		openai/deepseek/deepseek-r1-0528)
+		openai/o3)
 			echo "scan ok after GitHub Models rate-limit fallback"
 			exit 0
 			;;
@@ -2907,7 +2912,7 @@ case "${FAKE_STRIX_SCENARIO:?}" in
 			echo "Error: litellm.RateLimitError: RateLimitError: OpenAIException - Too many requests."
 			exit 1
 			;;
-		openai/deepseek/deepseek-r1-0528)
+		openai/o3)
 			if [ "${FAKE_STRIX_SCENARIO:?}" = "github-models-fallback-vulnerability-before-next-success-blocks" ]; then
 				mkdir -p "$STRIX_REPORTS_DIR/fake-pr-baseline-provider-signal/vulnerabilities"
 				cat >"$STRIX_REPORTS_DIR/fake-pr-baseline-provider-signal/vulnerabilities/vuln-0001.md" <<'EOS'
@@ -2916,13 +2921,11 @@ Location 1:
 sync-module-system/smart-crawling-biz/src/main/java/org/empasy/sync/modules/system/service/impl/SysUserServiceImpl.java:5
 EOS
 			else
-				echo "LLM CONNECTION FAILED"
-				echo "Could not establish connection to the language model."
-				echo "Error: litellm.BadRequestError: OpenAIException - Unavailable model: deepseek-r1-0528"
+				echo "openai.BadRequestError: Error code: 400 - {'error': {'code': 'UnsupportedToolUse', 'message': 'Request included unsupported tool use. Using tool is not supported by this model', 'details': 'Request included unsupported tool use. Using tool is not supported by this model'}}"
 			fi
 			exit 2
 			;;
-		openai/deepseek/deepseek-v3-0324)
+		openai/gpt-5-chat)
 			echo "scan ok after second GitHub Models fallback"
 			exit 0
 			;;
@@ -4738,9 +4741,9 @@ run_filtered_gate_case_if_requested() {
 			"openai/gpt-5" \
 			"" \
 			"0" \
-			"REGEX:Strix quick scan succeeded with fallback model 'github_models/deepseek/deepseek-v3-0324' in [0-9]+s\\." \
+			"REGEX:Strix quick scan succeeded with fallback model 'github_models/openai/o3' in [0-9]+s\\." \
 			"2" \
-			"openai/gpt-5|openai/deepseek/deepseek-v3-0324" \
+			"openai/gpt-5|openai/o3" \
 			"https://models.github.ai/inference|https://models.github.ai/inference" \
 			"openai" \
 			"https://models.github.ai/inference" \
@@ -4761,7 +4764,7 @@ run_filtered_gate_case_if_requested() {
 			"" \
 			"" \
 			"" \
-			"github_models/deepseek/deepseek-v3-0324 github_models/deepseek/deepseek-r1-0528"
+			"github_models/openai/o3 github_models/openai/gpt-5-chat"
 		;;
 	gemini-timeout-fallback-success)
 		run_gate_case_allow_provider_signal "gemini-timeout-fallback-success" \
@@ -7617,9 +7620,9 @@ run_gate_case "github-models-primary-unavailable-fallback-success" \
 	"openai/gpt-5" \
 	"" \
 	"0" \
-	"REGEX:Strix quick scan succeeded with fallback model 'deepseek/deepseek-r1-0528' in [0-9]+s\\." \
+	"REGEX:Strix quick scan succeeded with fallback model 'openai/o3' in [0-9]+s\\." \
 	"2" \
-	"openai/gpt-5|openai/deepseek/deepseek-r1-0528" \
+	"openai/gpt-5|openai/o3" \
 	"https://models.github.ai/inference|https://models.github.ai/inference" \
 	"openai" \
 	"https://models.github.ai/inference" \
@@ -7640,16 +7643,16 @@ run_gate_case "github-models-primary-unavailable-fallback-success" \
 	"" \
 	"" \
 	"__SAME_AS_FALLBACK_MODELS__" \
-	"deepseek/deepseek-r1-0528 deepseek/deepseek-v3-0324" \
+	"openai/o3 openai/gpt-5-chat" \
 	"1"
 
 run_gate_case_allow_provider_signal "github-models-primary-denied-fallback-success" \
 	"openai/gpt-5" \
 	"" \
 	"0" \
-	"REGEX:Strix quick scan succeeded with fallback model 'deepseek/deepseek-r1-0528' in [0-9]+s\\." \
+	"REGEX:Strix quick scan succeeded with fallback model 'openai/o3' in [0-9]+s\\." \
 	"2" \
-	"openai/gpt-5|openai/deepseek/deepseek-r1-0528" \
+	"openai/gpt-5|openai/o3" \
 	"https://models.github.ai/inference|https://models.github.ai/inference" \
 	"openai" \
 	"https://models.github.ai/inference" \
@@ -7670,16 +7673,16 @@ run_gate_case_allow_provider_signal "github-models-primary-denied-fallback-succe
 	"" \
 	"" \
 	"__SAME_AS_FALLBACK_MODELS__" \
-	"deepseek/deepseek-r1-0528 deepseek/deepseek-v3-0324" \
+	"openai/o3 openai/gpt-5-chat" \
 	"1"
 
 run_gate_case "github-models-primary-ratelimit-fallback-success" \
 	"openai/gpt-5" \
 	"" \
 	"0" \
-	"REGEX:Strix quick scan succeeded with fallback model 'deepseek/deepseek-r1-0528' in [0-9]+s\\." \
+	"REGEX:Strix quick scan succeeded with fallback model 'openai/o3' in [0-9]+s\\." \
 	"4" \
-	"openai/gpt-5|openai/gpt-5|openai/gpt-5|openai/deepseek/deepseek-r1-0528" \
+	"openai/gpt-5|openai/gpt-5|openai/gpt-5|openai/o3" \
 	"https://models.github.ai/inference|https://models.github.ai/inference|https://models.github.ai/inference|https://models.github.ai/inference" \
 	"openai" \
 	"https://models.github.ai/inference" \
@@ -7700,16 +7703,16 @@ run_gate_case "github-models-primary-ratelimit-fallback-success" \
 	"" \
 	"" \
 	"__SAME_AS_FALLBACK_MODELS__" \
-	"deepseek/deepseek-r1-0528 deepseek/deepseek-v3-0324" \
+	"openai/o3 openai/gpt-5-chat" \
 	"1"
 
 run_gate_case "github-models-fallback-provider-signal-tries-next" \
 	"openai/gpt-5" \
 	"" \
 	"0" \
-	"REGEX:Strix quick scan succeeded with fallback model 'deepseek/deepseek-v3-0324' in [0-9]+s\\." \
+	"REGEX:Strix quick scan succeeded with fallback model 'openai/gpt-5-chat' in [0-9]+s\\." \
 	"3" \
-	"openai/gpt-5|openai/deepseek/deepseek-r1-0528|openai/deepseek/deepseek-v3-0324" \
+	"openai/gpt-5|openai/o3|openai/gpt-5-chat" \
 	"https://models.github.ai/inference|https://models.github.ai/inference|https://models.github.ai/inference" \
 	"openai" \
 	"https://models.github.ai/inference" \
@@ -7730,7 +7733,7 @@ run_gate_case "github-models-fallback-provider-signal-tries-next" \
 	"" \
 	"" \
 	"__SAME_AS_FALLBACK_MODELS__" \
-	"deepseek/deepseek-r1-0528 deepseek/deepseek-v3-0324" \
+	"openai/o3 openai/gpt-5-chat" \
 	"1"
 
 run_gate_case "github-models-fallback-vulnerability-before-next-success-blocks" \
@@ -7739,7 +7742,7 @@ run_gate_case "github-models-fallback-vulnerability-before-next-success-blocks" 
 	"1" \
 	"Strix model reported threshold vulnerabilities before fallback success; failing closed so every model-reported vulnerability is reviewed." \
 	"2" \
-	"openai/gpt-5|openai/deepseek/deepseek-r1-0528" \
+	"openai/gpt-5|openai/o3" \
 	"https://models.github.ai/inference|https://models.github.ai/inference" \
 	"openai" \
 	"https://models.github.ai/inference" \
@@ -7760,7 +7763,7 @@ run_gate_case "github-models-fallback-vulnerability-before-next-success-blocks" 
 	"" \
 	"" \
 	"__SAME_AS_FALLBACK_MODELS__" \
-	"deepseek/deepseek-r1-0528 deepseek/deepseek-v3-0324" \
+	"openai/o3 openai/gpt-5-chat" \
 	"1"
 
 run_gate_case_allow_provider_signal "gemini-high-demand-retry-same-model-success" \
