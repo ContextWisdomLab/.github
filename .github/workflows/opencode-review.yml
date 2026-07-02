@@ -991,7 +991,80 @@ jobs:
           "${install_dir}/opencode" --version
           echo "$install_dir" >>"$GITHUB_PATH"
 
+      - name: Detect central review-process fallback scope
+        id: central_review_process_fallback_scope
+        if: needs.coverage-evidence.result == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || github.token }}
+          GH_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          changed_files_file="$(mktemp)"
+          eligible=false
+          changed_count=0
+          max_changed_count=0
+          scope_label="unsupported"
+
+          case "$GH_REPOSITORY" in
+            ContextualWisdomLab/.github)
+              scope_label="central OpenCode/Strix review-process"
+              max_changed_count=6
+              ;;
+            ContextualWisdomLab/appguardrail)
+              scope_label="appguardrail org-security failure collector"
+              max_changed_count=3
+              ;;
+          esac
+
+          fallback_changed_file_allowed() {
+            local changed_file="$1"
+            case "${GH_REPOSITORY}:${changed_file}" in
+              ContextualWisdomLab/.github:.github/workflows/opencode-review.yml | \
+              ContextualWisdomLab/.github:.github/workflows/strix.yml | \
+              ContextualWisdomLab/.github:opencode.jsonc | \
+              ContextualWisdomLab/.github:scripts/ci/run_opencode_review_model_pool.sh | \
+              ContextualWisdomLab/.github:scripts/ci/opencode_review_normalize_output.py | \
+              ContextualWisdomLab/.github:scripts/ci/validate_opencode_failed_check_review.sh | \
+              ContextualWisdomLab/.github:tests/test_opencode_agent_contract.py | \
+              ContextualWisdomLab/.github:scripts/ci/test_strix_quick_gate.sh | \
+              ContextualWisdomLab/appguardrail:.github/workflows/org-security-failure-collector.yml | \
+              ContextualWisdomLab/appguardrail:scripts/ci/collect_org_security_failures.py | \
+              ContextualWisdomLab/appguardrail:tests/test_org_security_failure_collector.py)
+                return 0
+                ;;
+            esac
+            return 1
+          }
+
+          if gh pr diff "$PR_NUMBER" --repo "$GH_REPOSITORY" --name-only >"$changed_files_file" &&
+            [ -s "$changed_files_file" ] &&
+            [ "$max_changed_count" -gt 0 ]; then
+            eligible=true
+            while IFS= read -r changed_file; do
+              [ -n "$changed_file" ] || continue
+              changed_count=$((changed_count + 1))
+              if ! fallback_changed_file_allowed "$changed_file"; then
+                eligible=false
+              fi
+            done <"$changed_files_file"
+          fi
+
+          if [ "$changed_count" -eq 0 ] || [ "$changed_count" -gt "$max_changed_count" ]; then
+            eligible=false
+          fi
+
+          {
+            printf 'eligible=%s\n' "$eligible"
+            printf 'changed_count=%s\n' "$changed_count"
+            printf 'scope_label=%s\n' "$scope_label"
+          } >>"$GITHUB_OUTPUT"
+          printf 'Deterministic review fallback scope=%s eligible=%s changed_count=%s max_changed_count=%s\n' \
+            "$scope_label" "$eligible" "$changed_count" "$max_changed_count"
+          sed 's/^/- /' "$changed_files_file"
+
       - name: Initialize CodeGraph index for OpenCode
+        if: steps.central_review_process_fallback_scope.outputs.eligible != 'true'
         env:
           CODEGRAPH_PACKAGE: "@colbymchenry/codegraph@0.9.9"
           NPM_CONFIG_IGNORE_SCRIPTS: "true"
@@ -1003,6 +1076,7 @@ jobs:
           npx -y "$CODEGRAPH_PACKAGE" status
 
       - name: Prepare bounded OpenCode review evidence
+        if: steps.central_review_process_fallback_scope.outputs.eligible != 'true'
         timeout-minutes: 40
         env:
           GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || steps.review_read_app_token.outputs.token || github.token }}
@@ -1540,6 +1614,7 @@ jobs:
           wc -c "$OPENCODE_EVIDENCE_FILE"
 
       - name: Prepare isolated OpenCode review workspace
+        if: steps.central_review_process_fallback_scope.outputs.eligible != 'true'
         env:
           OPENCODE_REVIEW_WORKDIR: ${{ runner.temp }}/opencode-review-project
           OPENCODE_EVIDENCE_FILE: ${{ runner.temp }}/opencode-review-evidence.md
@@ -2197,55 +2272,6 @@ jobs:
 
           printf 'Prepared isolated OpenCode review workspace: %s\n' "$OPENCODE_REVIEW_WORKDIR"
 
-      - name: Detect central review-process fallback scope
-        id: central_review_process_fallback_scope
-        if: needs.coverage-evidence.result == 'success'
-        env:
-          GH_TOKEN: ${{ secrets.OPENCODE_APPROVE_TOKEN || github.token }}
-          GH_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name || github.event.inputs.target_repository || github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.inputs.pr_number }}
-        run: |
-          set -euo pipefail
-          changed_files_file="$(mktemp)"
-          eligible=false
-          changed_count=0
-
-          if gh pr diff "$PR_NUMBER" --repo "$GH_REPOSITORY" --name-only >"$changed_files_file" &&
-            [ -s "$changed_files_file" ]; then
-            eligible=true
-            while IFS= read -r changed_file; do
-              [ -n "$changed_file" ] || continue
-              changed_count=$((changed_count + 1))
-              case "$changed_file" in
-                .github/workflows/opencode-review.yml | \
-                .github/workflows/strix.yml | \
-                opencode.jsonc | \
-                scripts/ci/run_opencode_review_model_pool.sh | \
-                scripts/ci/opencode_review_normalize_output.py | \
-                scripts/ci/validate_opencode_failed_check_review.sh | \
-                tests/test_opencode_agent_contract.py | \
-                scripts/ci/test_strix_quick_gate.sh)
-                  ;;
-                *)
-                  eligible=false
-                  ;;
-              esac
-            done <"$changed_files_file"
-          fi
-
-          if [ "$changed_count" -eq 0 ]; then
-            eligible=true
-          elif [ "$changed_count" -gt 6 ]; then
-            eligible=false
-          fi
-
-          {
-            printf 'eligible=%s\n' "$eligible"
-            printf 'changed_count=%s\n' "$changed_count"
-          } >>"$GITHUB_OUTPUT"
-          printf 'Central review-process fallback eligible=%s changed_count=%s\n' "$eligible" "$changed_count"
-          sed 's/^/- /' "$changed_files_file"
-
       - name: Run OpenCode PR Review model pool
         id: opencode_review_model_pool
         if: >-
@@ -2647,6 +2673,7 @@ jobs:
           OPENCODE_MODEL_POOL_OUTPUT_FILE: ${{ runner.temp }}/opencode-review-model-pool.md
           CENTRAL_REVIEW_PROCESS_FALLBACK_ELIGIBLE: ${{ steps.central_review_process_fallback_scope.outputs.eligible || 'false' }}
           CENTRAL_REVIEW_PROCESS_FALLBACK_CHANGED_COUNT: ${{ steps.central_review_process_fallback_scope.outputs.changed_count || '0' }}
+          CENTRAL_REVIEW_PROCESS_FALLBACK_SCOPE_LABEL: ${{ steps.central_review_process_fallback_scope.outputs.scope_label || 'unsupported' }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.inputs.pr_base_sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.inputs.pr_head_sha }}
           APPROVAL_CHECK_WAIT_ATTEMPTS: "81"
@@ -4740,19 +4767,20 @@ jobs:
             body="$(printf '%s\n' \
               "## Pull request overview" \
               "" \
-              "OpenCode approved this central review-process self-update through the deterministic fallback path because the model pool was intentionally skipped for a narrow trusted-review infrastructure change." \
+              "OpenCode approved this restricted trusted-automation update through the deterministic fallback path because the model pool was intentionally skipped for a narrow, allowlisted change scope." \
               "" \
               "## Summary" \
               "" \
               "- Result: APPROVE" \
-              "- Reason: changed files matched the central review-process fallback allowlist; coverage evidence passed; peer GitHub Checks passed; mergeability and unresolved review-thread gates passed." \
+              "- Reason: changed files matched the deterministic fallback allowlist; coverage evidence passed; peer GitHub Checks passed; mergeability and unresolved review-thread gates passed." \
+              "- Fallback scope: ${CENTRAL_REVIEW_PROCESS_FALLBACK_SCOPE_LABEL:-unsupported}" \
               "- Changed-file count: ${CENTRAL_REVIEW_PROCESS_FALLBACK_CHANGED_COUNT:-unknown}" \
-              "- Model path: skipped for central review-process fallback; provider delay or model-output unavailability is not review feedback." \
+              "- Model path: skipped for deterministic fallback; provider delay or model-output unavailability is not review feedback." \
               "- Head SHA: \`${HEAD_SHA}\`" \
               "- Workflow run: ${RUN_ID}" \
               "- Workflow attempt: ${RUN_ATTEMPT}" \
               "" \
-              "This fallback is limited to central OpenCode/Strix review-process files and their contract tests."
+              "This fallback is limited to central OpenCode/Strix review-process files and the appguardrail org-security failure collector file set."
             )"
             create_pull_review "APPROVE" "$body"
           }

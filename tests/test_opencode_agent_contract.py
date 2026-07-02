@@ -211,10 +211,34 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "opencode.jsonc | \\" in workflow
     assert "scripts/ci/run_opencode_review_model_pool.sh | \\" in workflow
     assert "tests/test_opencode_agent_contract.py | \\" in workflow
-    assert "changed_count\" -gt 6" in workflow
+    assert "ContextualWisdomLab/appguardrail:scripts/ci/collect_org_security_failures.py" in workflow
+    assert "ContextualWisdomLab/appguardrail:.github/workflows/org-security-failure-collector.yml" in workflow
+    assert "ContextualWisdomLab/appguardrail:tests/test_org_security_failure_collector.py" in workflow
+    assert "appguardrail org-security failure collector" in workflow
+    assert 'max_changed_count=3' in workflow
+    assert "changed_count\" -gt \"$max_changed_count\"" in workflow
     assert "steps.central_review_process_fallback_scope.outputs.eligible != 'true'" in workflow
+    assert workflow.index("Detect central review-process fallback scope") < workflow.index(
+        "Initialize CodeGraph index for OpenCode"
+    )
+    assert re.search(
+        r"Initialize CodeGraph index for OpenCode[\s\S]{0,120}"
+        r"if: steps\.central_review_process_fallback_scope\.outputs\.eligible != 'true'",
+        workflow,
+    )
+    assert re.search(
+        r"Prepare bounded OpenCode review evidence[\s\S]{0,120}"
+        r"if: steps\.central_review_process_fallback_scope\.outputs\.eligible != 'true'",
+        workflow,
+    )
+    assert re.search(
+        r"Prepare isolated OpenCode review workspace[\s\S]{0,120}"
+        r"if: steps\.central_review_process_fallback_scope\.outputs\.eligible != 'true'",
+        workflow,
+    )
     assert "CENTRAL_REVIEW_PROCESS_FALLBACK_ELIGIBLE" in workflow
-    assert "This fallback is limited to central OpenCode/Strix review-process files and their contract tests." in workflow
+    assert "CENTRAL_REVIEW_PROCESS_FALLBACK_SCOPE_LABEL" in workflow
+    assert "This fallback is limited to central OpenCode/Strix review-process files and the appguardrail org-security failure collector file set." in workflow
     assert "production source 또는 package manifest 변경이 없습니다" not in workflow
     assert "request_changes_for_coverage_evidence_failure" in workflow
     assert '"## Review outcome"' in workflow
