@@ -216,7 +216,8 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert 'APPROVAL_CHECK_WAIT_ATTEMPTS: "81"' in workflow
     assert 'APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "30"' in workflow
     assert (
-        'OPENCODE_MODEL_CANDIDATES: "github-models/openai/gpt-5-chat '
+        'OPENCODE_MODEL_CANDIDATES: "github-models/openai/gpt-4.1-mini '
+        'github-models/openai/gpt-5-chat '
         "github-models/openai/gpt-5-mini "
         "github-models/openai/gpt-5-nano "
         "github-models/openai/o3 "

@@ -518,7 +518,7 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" 'OPENCODE_MODEL_ATTEMPTS: "1"' "opencode fallback tries the catalog promptly instead of spending the entire review on one model"
 	assert_file_contains "$workflow_file" "Run OpenCode PR Review model pool" "opencode review includes a broad catalog fallback pool"
 	assert_file_contains "$workflow_file" "steps.opencode_review_model_pool.outcome == 'success'" "opencode model step must succeed before review publication"
-	assert_file_contains "$workflow_file" "github-models/openai/gpt-5-chat github-models/openai/gpt-5-mini github-models/openai/gpt-5-nano github-models/openai/o3 github-models/openai/o3-mini github-models/openai/o4-mini github-models/mistral-ai/mistral-medium-2505 github-models/meta/llama-4-maverick-17b-128e-instruct-fp8 github-models/meta/llama-4-scout-17b-16e-instruct" "opencode review tries catalog-available tool-calling fallbacks after DeepSeek and GPT-5 paths"
+	assert_file_contains "$workflow_file" "github-models/openai/gpt-4.1-mini github-models/openai/gpt-5-chat github-models/openai/gpt-5-mini github-models/openai/gpt-5-nano github-models/openai/o3 github-models/openai/o3-mini github-models/openai/o4-mini github-models/mistral-ai/mistral-medium-2505 github-models/meta/llama-4-maverick-17b-128e-instruct-fp8 github-models/meta/llama-4-scout-17b-16e-instruct" "opencode review tries catalog-available tool-calling fallbacks after DeepSeek and GPT-5 paths"
 	assert_file_contains "$workflow_file" "The publish gate re-runs source-backed validation against PR-head data" "opencode review publish gate validates model output against the PR-head worktree"
 	assert_file_contains "$workflow_file" '"openai/o3"' "opencode config declares OpenAI o3 fallback"
 	assert_file_contains "$workflow_file" '"openai/o4-mini"' "opencode config declares OpenAI o4-mini fallback"
@@ -973,6 +973,7 @@ assert_opencode_review_uses_codegraph_and_gpt5_fallback() {
 	assert_file_contains "$workflow_file" '["FAILURE","ERROR"]' "opencode review workflow treats failed status contexts as request-changes blockers"
 	assert_file_not_contains "$workflow_file" "MODEL: github-models/gpt-4.1" "opencode review must not fall back to GPT-4.1"
 	assert_file_contains "$workflow_file" "github-models/openai/gpt-5-chat" "opencode review includes GitHub Models GPT-5 chat as a catalog fallback"
+	assert_file_contains "$workflow_file" "github-models/openai/gpt-4.1-mini" "opencode review includes a smoke-tested GitHub Models GPT-4.1 mini fallback"
 	assert_file_contains "$workflow_file" "github-models/openai/gpt-5-mini" "opencode review includes GitHub Models GPT-5 mini as a catalog fallback"
 
 	assert_file_contains "$opencode_config" '"mcp"' "opencode config declares MCP servers"
