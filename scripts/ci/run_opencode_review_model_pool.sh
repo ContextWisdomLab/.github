@@ -147,21 +147,28 @@ run_one_model_attempt() {
 main() {
 	local attempts budget_seconds deadline now remaining model_candidate attempt safe_model prompt_file candidate_output_file
 	local opencode_json_file opencode_export_file agent retry_sleep original_run_timeout run_status cycle_sleep cycle
+	local -a model_candidates
 
 	attempts="${OPENCODE_MODEL_ATTEMPTS:-3}"
 	original_run_timeout="${OPENCODE_RUN_TIMEOUT_SECONDS:-900}"
-	budget_seconds="${OPENCODE_TOTAL_RETRY_BUDGET_SECONDS:-0}"
+	budget_seconds="${OPENCODE_TOTAL_RETRY_BUDGET_SECONDS:-18000}"
 	deadline=0
 	if [ "$budget_seconds" -gt 0 ]; then
 		deadline=$((SECONDS + budget_seconds))
 	fi
 	: >"$OPENCODE_OUTPUT_FILE"
 	cd "$OPENCODE_REVIEW_WORKDIR"
+	read -r -a model_candidates <<<"${OPENCODE_MODEL_CANDIDATES:-}"
+	if [ "${#model_candidates[@]}" -eq 0 ]; then
+		printf 'OpenCode model pool has no configured model candidates.\n'
+		record_review_model ""
+		exit 1
+	fi
 
 	cycle=1
 	while :; do
 		printf 'Starting OpenCode model pool cycle %s.\n' "$cycle"
-		for model_candidate in $OPENCODE_MODEL_CANDIDATES; do
+		for model_candidate in "${model_candidates[@]}"; do
 			assert_reasoning_effort_for_candidate "$model_candidate"
 			safe_model="${model_candidate//\//-}"
 			prompt_file="${RUNNER_TEMP}/opencode-review-${safe_model}-prompt.md"

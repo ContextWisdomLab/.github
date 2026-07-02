@@ -212,7 +212,7 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert "publish REQUEST_CHANGES when coverage-evidence blocker states" in workflow
     assert re.search(r"opencode-review-target:[\s\S]{0,240}timeout-minutes: 360", workflow)
     assert 'timeout-minutes: 75' in workflow
-    assert re.search(r"Run OpenCode PR Review model pool[\s\S]{0,240}timeout-minutes: 330", workflow)
+    assert re.search(r"Run OpenCode PR Review model pool[\s\S]{0,240}timeout-minutes: 285", workflow)
     assert 'APPROVAL_CHECK_WAIT_ATTEMPTS: "81"' in workflow
     assert 'APPROVAL_CHECK_WAIT_SLEEP_SECONDS: "30"' in workflow
     assert (
@@ -232,6 +232,8 @@ def test_workflow_provisions_sandbox_tool_and_reviewer_agent():
     assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS: "0"' in workflow
     assert 'OPENCODE_BACKOFF_MAX_SECONDS: "30"' in workflow
     assert "while :" in model_pool_runner
+    assert "OpenCode model pool has no configured model candidates." in model_pool_runner
+    assert 'OPENCODE_TOTAL_RETRY_BUDGET_SECONDS:-18000' in model_pool_runner
     assert "completed a full model-candidate cycle without a valid control conclusion" in model_pool_runner
     assert 'record_review_status "exhausted"' not in model_pool_runner
     assert "retry budget exhausted" not in model_pool_runner
